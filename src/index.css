@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  /* ── Core Brand Palette ── */
+  --stitch-primary: #2563EB;
+  --stitch-on-primary: #ffffff;
+  --stitch-primary-container: #DBEAFE;
+  --stitch-on-primary-container: #1E40AF;
+  
+  --stitch-secondary: #64748B;
+  --stitch-on-secondary: #ffffff;
+  --stitch-secondary-container: #F1F5F9;
+  --stitch-on-secondary-container: #475569;
+
+  /* ── Surface System ── */
+  --stitch-surface: #F0F2F5;
+  --stitch-on-surface: #0F172A;
+  --stitch-surface-container-lowest: #FFFFFF;
+  --stitch-surface-container-low: #F8FAFC;
+  --stitch-surface-container: #F1F5F9;
+  --stitch-surface-container-high: #E2E8F0;
+  --stitch-surface-container-highest: #CBD5E1;
+  
+  /* ── Outline ── */
+  --stitch-outline: #94A3B8;
+  --stitch-outline-variant: #E2E8F0;
+
+  /* ── Status Colors ── */
+  --stitch-success: #059669;
+  --stitch-success-container: #F0FDF4;
+  --stitch-warning: #D97706;
+  --stitch-warning-container: #FFFBEB;
+  --stitch-error: #DC2626;
+  --stitch-error-container: #FEF2F2;
+
+  /* ── Typography ── */
+  --stitch-font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  
+  /* ── Shape & Elevation ── */
+  --stitch-radius-sm: 8px;
+  --stitch-radius-md: 14px;
+  --stitch-shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--stitch-font-family);
+  background-color: var(--stitch-surface);
+  color: var(--stitch-on-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--stitch-font-family);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* ── Global Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* ── Selection ── */
+::selection {
+  background-color: rgba(37, 99, 235, 0.15);
+  color: #1E40AF;
+}

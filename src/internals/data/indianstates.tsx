@@ -1,0 +1,33 @@
+const indianStates = [
+    { label: 'Andhra Pradesh', year: 1956 },
+    { label: 'Arunachal Pradesh', year: 1987 },
+    { label: 'Assam', year: 1947 },
+    { label: 'Bihar', year: 1947 },
+    { label: 'Chhattisgarh', year: 2000 },
+    { label: 'Goa', year: 1987 },
+    { label: 'Gujarat', year: 1960 },
+    { label: 'Haryana', year: 1966 },
+    { label: 'Himachal Pradesh', year: 1971 },
+    { label: 'Jharkhand', year: 2000 },
+    { label: 'Karnataka', year: 1956 },
+    { label: 'Kerala', year: 1956 },
+    { label: 'Madhya Pradesh', year: 1956 },
+    { label: 'Maharashtra', year: 1960 },
+    { label: 'Manipur', year: 1972 },
+    { label: 'Meghalaya', year: 1972 },
+    { label: 'Mizoram', year: 1987 },
+    { label: 'Nagaland', year: 1963 },
+    { label: 'Odisha', year: 1936 },
+    { label: 'Punjab', year: 1947 },
+    { label: 'Rajasthan', year: 1949 },
+    { label: 'Sikkim', year: 1975 },
+    { label: 'Tamil Nadu', year: 1956 },
+    { label: 'Telangana', year: 2014 },
+    { label: 'Tripura', year: 1972 },
+    { label: 'Uttar Pradesh', year: 1950 },
+    { label: 'Uttarakhand', year: 2000 },
+    { label: 'West Bengal', year: 1947 },
+  ];
+
+
+export default indianStates;
