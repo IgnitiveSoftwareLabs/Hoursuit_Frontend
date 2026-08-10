@@ -1,8 +1,9 @@
 import axios from "axios";
+import { BASE_URL } from "../../utils/Base_Url";
 
 const apiInstance = axios.create({
   // baseURL: "https://api-wms.ignitivelabs.in/api",
-  baseURL: "http://localhost:8004/api",
+  baseURL: BASE_URL,
 });
 
 apiInstance.interceptors.request.use(
@@ -34,7 +35,7 @@ apiInstance.interceptors.response.use(
           const refreshToken: string | null =
             localStorage.getItem("refreshToken");
           const refreshResponse: any = await axios.post(
-            `http://localhost:8004/api/user/refresh-token`,
+            `${BASE_URL}/api/user/refresh-token`,
             { refreshTokens: refreshToken } // Send refreshToken in the body
             // Ensure cookies are sent with the refresh request
           );

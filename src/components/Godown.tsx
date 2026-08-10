@@ -29,6 +29,7 @@ import NavbarBreadcrumbs from "./NavbarBreadcrumbs";
 import ConfirmationDialog from "./Dialog/ConfirmationDialog";
 import ReusableFormDialog from "./Dialog/ReusableFormDialog";
 import { usePermissions } from "../Hooks/usePermissions";
+import { BASE_URL } from "../utils/Base_Url";
 
 const fields = [
   // Basic Information
@@ -495,7 +496,7 @@ const Godowns: React.FC = () => {
                         </Typography>
                         <a
                           key={index}
-                          href={`http://localhost:8004/${attachment.filePath}`}
+                          href={`${BASE_URL}/${attachment.filePath}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{
