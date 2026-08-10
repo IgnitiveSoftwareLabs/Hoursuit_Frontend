@@ -28,6 +28,7 @@ import {
 import { Create } from "@mui/icons-material";
 import CustomFileUpload from "../Common/CustomFileUpload";
 import Spinner from "../Common/Spinner";
+import { BASE_URL } from "../utils/Base_Url";
 
 // Define interface for form values
 interface CompanyFormValues {
@@ -341,7 +342,7 @@ const CompanyProfile: React.FC = () => {
                         {new Date(attachment.validTill).toLocaleDateString()}
                       </Typography>
                       <a
-                        href={`http://localhost:8004/${attachment.filePath}`}
+                        href={`${BASE_URL}/${attachment.filePath}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{ color: "#1976d2", textDecoration: "none" }}

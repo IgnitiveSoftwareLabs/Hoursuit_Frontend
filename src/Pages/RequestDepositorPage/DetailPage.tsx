@@ -7,6 +7,7 @@ import CompanyInfo from "../../Common/ProfileComponent";
 import { useParams } from "react-router-dom";
 import Spinner from "../../Common/Spinner";
 import { useFetchSingleRequestDepositorQuery } from "../../RTK/services/requestDepositorApi";
+import { BASE_URL } from "../../utils/Base_Url";
 
 export default function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -62,7 +63,7 @@ export default function RequestDetailPage() {
       label: attachment.type
         .replace(/_/g, " ")
         .replace(/\b\w/g, (char: string) => char.toUpperCase()),
-      value: `<a href="http://localhost:8004/${attachment.filePath}" target="_blank" rel="noopener noreferrer">${attachment.fileName}</a>`,
+      value: `<a href="${BASE_URL}/${attachment.filePath}" target="_blank" rel="noopener noreferrer">${attachment.fileName}</a>`,
     })
   );
   const gatePasses = (requestsResult?.gatePasses || []).map(

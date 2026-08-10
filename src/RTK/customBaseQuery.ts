@@ -5,13 +5,14 @@ import {
   type FetchBaseQueryError,
 } from "@reduxjs/toolkit/query";
 import { Mutex } from "async-mutex";
+import { BASE_URL } from "../utils/Base_Url";
 
 // Mutex to avoid multiple refresh token requests
 const mutex = new Mutex();
 
 const baseQuery = fetchBaseQuery({
   // baseUrl: "https://api-wms.ignitivelabs.in/api",
-  baseUrl: "http://localhost:8004/api",
+  baseUrl: BASE_URL,
   prepareHeaders: (headers) => {
     const token = localStorage.getItem("token");
     if (token) {
@@ -46,7 +47,8 @@ const customBaseQuery: BaseQueryFn<
           return result; // Return the original error
         }
         const refreshResponse = await fetch(
-          "http://localhost:8004/api/user/refresh-token",
+          // "http://localhost:8004/api/user/refresh-token",
+          `${BASE_URL}/api/user/refresh-token`,
           {
             method: "POST",
             headers: {

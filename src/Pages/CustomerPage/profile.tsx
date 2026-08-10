@@ -7,6 +7,7 @@ import CompanyInfo from "../../Common/ProfileComponent";
 import { useGetSingleCustomerQuery } from "../../RTK/services/customerApi";
 import { useParams } from "react-router-dom";
 import Spinner from "../../Common/Spinner";
+import { BASE_URL } from "../../utils/Base_Url";
 
 export default function CustomerProfilePage() {
   const { id } = useParams<{ id: string }>();
@@ -43,7 +44,7 @@ export default function CustomerProfilePage() {
       label: attachment.type
         .replace(/_/g, " ")
         .replace(/\b\w/g, (char: string) => char.toUpperCase()), // e.g., "farmer_photo" -> "Farmer Photo"
-      value: `<a href="http://localhost:8004/${attachment.filePath}" target="_blank" rel="noopener noreferrer">${attachment.fileName}</a>`,
+      value: `<a href="${BASE_URL}/${attachment.filePath}" target="_blank" rel="noopener noreferrer">${attachment.fileName}</a>`,
     })
   );
 
