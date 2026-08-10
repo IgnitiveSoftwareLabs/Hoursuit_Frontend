@@ -12,7 +12,7 @@ const mutex = new Mutex();
 
 const baseQuery = fetchBaseQuery({
   // baseUrl: "https://api-wms.ignitivelabs.in/api",
-  baseUrl: BASE_URL,
+  baseUrl: `${BASE_URL}/api`,
   prepareHeaders: (headers) => {
     const token = localStorage.getItem("token");
     if (token) {
