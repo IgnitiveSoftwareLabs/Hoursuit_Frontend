@@ -594,15 +594,15 @@ const GRNComp: React.FC = () => {
         <DialogContent>
           <Box sx={{ mb: 2 }}>
             <Grid container spacing={2}>
-              <Grid xs={12} md={4}>
+              <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="subtitle2">GRN Number</Typography>
                 <Typography>{selectedGrnForGl?.grnNo || selectedGrnForGl?.grn_number || `#${selectedGrnForGl?.id}`}</Typography>
               </Grid>
-              <Grid xs={12} md={4}>
+              <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="subtitle2">Purchase Order</Typography>
                 <Typography>{selectedGrnForGl?.purchaseOrder?.purchaseNo || selectedGrnForGl?.purchase_order?.purchaseNo || selectedGrnForGl?.purchaseOrderId}</Typography>
               </Grid>
-              <Grid xs={12} md={4}>
+              <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="subtitle2">GRN Date</Typography>
                 <Typography>{selectedGrnForGl?.grnDate ? new Date(selectedGrnForGl.grnDate).toLocaleDateString() : ""}</Typography>
               </Grid>

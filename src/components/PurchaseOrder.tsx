@@ -33,7 +33,6 @@ import { useGetTransportationModesQuery } from "../RTK/services/transportationMo
 import { useGetWorkCategoriesQuery } from "../RTK/services/workCategoryApi";
 import { useFetchWarehousesQuery } from "../RTK/services/warehouseApi";
 import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
-// import { useGetCustomersQuery } from "../RTK/services/customerApi";
 import { useFetchGodownsQuery } from "../RTK/services/godownApi";
 import { useGetVendorsQuery } from "../RTK/services/vendorApi";
 import { useFetchStacksQuery } from "../RTK/services/stackApi";
@@ -68,13 +67,12 @@ const PurchaseOrderComp: React.FC = () => {
 
   // Queries
   const { data: purchaseOrdersData,
-    error,
-    isLoading,
+    // error,
+    // isLoading,
     refetch,
   } = useGetPurchaseOrdersQuery({ page: 1, limit: 10 });
   const { data: warehousesData } = useFetchWarehousesQuery({ page: 1, limit: 100 });
   const { data: transportationModeData } = useGetTransportationModesQuery();
-  // const { data: customersData } = useGetCustomersQuery({ option: true });
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
   const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 100 });
   const { data: workCategoriesData } = useGetWorkCategoriesQuery();
@@ -83,21 +81,16 @@ const PurchaseOrderComp: React.FC = () => {
   const { data: citiesData } = useGetCitiesQuery();
   const { data: uomsData } = useGetUOMsQuery();
 
-  // console.log(customersData, uomsData, subsidiariesData, citiesData, warehousesData, itemsData);
-
   const transportationModes = Array.isArray(transportationModeData) ? transportationModeData : transportationModeData?.result ?? [];
   const workCategories = Array.isArray(workCategoriesData) ? workCategoriesData : workCategoriesData?.result ?? [];
+  const purchaseOrders = Array.isArray(purchaseOrdersData) ? purchaseOrdersData : purchaseOrdersData?.result ?? [];
   const subsidiaries = Array.isArray(subsidiariesData) ? subsidiariesData : subsidiariesData?.result ?? [];
   const warehouses = Array.isArray(warehousesData) ? warehousesData : warehousesData?.result ?? [];
-  // const customers = Array.isArray(customersData) ? customersData : customersData?.result ?? [];
   const vendors = Array.isArray(vendorsData) ? vendorsData : vendorsData?.result ?? [];
   const hsnsacs = Array.isArray(hsnsacData) ? hsnsacData : hsnsacData?.result ?? [];
   const cities = Array.isArray(citiesData) ? citiesData : citiesData?.result ?? [];
   const items = Array.isArray(itemsData) ? itemsData : itemsData?.result ?? [];
   const uoms = Array.isArray(uomsData) ? uomsData : uomsData?.result ?? [];
-  const purchaseOrders = Array.isArray(purchaseOrdersData) ? purchaseOrdersData : purchaseOrdersData?.result ?? [];
-
-  // console.log("Transportation Modes:", transportationModes);
 
   // Mutations
   const [createPurchaseOrder] = useCreatePurchaseOrderMutation();
@@ -123,7 +116,6 @@ const PurchaseOrderComp: React.FC = () => {
         godown_id: "",
         stack_id: "",
         subsidiary_id: "",
-        user_id: "",
         remarks: "",
       },
       lineItems: [
@@ -141,9 +133,8 @@ const PurchaseOrderComp: React.FC = () => {
           tax_rate: 0,
           tax_amount: 0,
           line_total: 0,
-          india_tax_nature: "Good",
+          ndian_tax_nature: "Good",
           remarks: "",
-          user_id: "",
           isActive: true,
         }
       ],
@@ -278,7 +269,6 @@ const PurchaseOrderComp: React.FC = () => {
 
     lineItem.tax_amount = Number(taxAmount.toFixed(2));
     lineItem.line_total = Number(lineTotal.toFixed(2));
-    lineItem.user_id = formik.values.header.user_id;
 
     lineItems[index] = lineItem;
     formik.setFieldValue("lineItems", lineItems);
@@ -297,7 +287,6 @@ const PurchaseOrderComp: React.FC = () => {
 
     lineItem.tax_amount = Number(taxAmount.toFixed(2));
     lineItem.line_total = Number(lineTotal.toFixed(2));
-    lineItem.user_id = formik.values.header.user_id;
 
     lineItems[index] = lineItem;
     formik.setFieldValue("lineItems", lineItems);
@@ -320,9 +309,8 @@ const PurchaseOrderComp: React.FC = () => {
         tax_rate: 0,
         tax_amount: 0,
         line_total: 0,
-        india_tax_nature: "Good",
+        ndian_tax_nature: "Good",
         remarks: "",
-        user_id: formik.values.header.user_id,
         isActive: true,
       }
     ]);
@@ -363,7 +351,6 @@ const PurchaseOrderComp: React.FC = () => {
           godown_id: header.godown_id ?? header.godownId ?? "",
           stack_id: header.stack_id ?? header.stackId ?? "",
           subsidiary_id: header.subsidiary_id ?? header.subsidiaryId ?? "",
-          user_id: header.user_id ?? header.userId ?? "",
           remarks: header.remarks ?? "",
         },
         lineItems: Array.isArray(lineSource)
@@ -381,9 +368,8 @@ const PurchaseOrderComp: React.FC = () => {
               tax_rate: Number(line.tax_rate ?? line.taxRate ?? 0),
               tax_amount: Number(line.tax_amount ?? line.taxAmount ?? 0),
               line_total: Number(line.line_total ?? line.lineTotal ?? 0),
-              india_tax_nature: line.india_tax_nature ?? line.indiaTaxNature ?? "Good",
+              ndian_tax_nature: line.ndian_tax_nature ?? line.ndianTaxNature ?? "Good",
               remarks: line.remarks ?? "",
-              user_id: line.user_id ?? line.userId ?? "",
               isActive: line.isActive ?? true,
             }))
           : [
@@ -401,9 +387,8 @@ const PurchaseOrderComp: React.FC = () => {
                 tax_rate: 0,
                 tax_amount: 0,
                 line_total: 0,
-                india_tax_nature: "Good",
+                ndian_tax_nature: "Good",
                 remarks: "",
-                user_id: "",
                 isActive: true,
               },
             ],
@@ -416,21 +401,21 @@ const PurchaseOrderComp: React.FC = () => {
     }
   };
 
-  // Handle view
-  const handleView = (challan: any) => {
-    navigate(`/purchase-order/view/${challan.id}`);
-    // handleMenuClose();
-  };
+  // // Handle view
+  // const handleView = (challan: any) => {
+  //   navigate(`/purchase-order/view/${challan.id}`);
+  //   // handleMenuClose();
+  // };
 
-  // Handle delete
-  const handleDelete = (purchaseOrder: any) => {
-    if (!canDelete("purchase_order")) {
-      toast.error("You do not have permission to delete this purchase order");
-      return;
-    }
-    setSelectedChallan(purchaseOrder);
-    setDeleteDialogOpen(true);
-  };
+  // // Handle delete
+  // const handleDelete = (purchaseOrder: any) => {
+  //   if (!canDelete("purchase_order")) {
+  //     toast.error("You do not have permission to delete this purchase order");
+  //     return;
+  //   }
+  //   setSelectedChallan(purchaseOrder);
+  //   setDeleteDialogOpen(true);
+  // };
 
   // Confirm delete
   const confirmDelete = async () => {
@@ -1006,9 +991,9 @@ const PurchaseOrderComp: React.FC = () => {
                               <Select
                                 fullWidth
                                 size="small"
-                                name={`lineItems.${index}.india_tax_nature`}
-                                value={item.india_tax_nature}
-                                onChange={(e) => updateLineItemField(index, 'india_tax_nature', e.target.value)}
+                                name={`lineItems.${index}.ndian_tax_nature`}
+                                value={item.ndian_tax_nature}
+                                onChange={(e) => updateLineItemField(index, 'ndian_tax_nature', e.target.value)}
                                 displayEmpty
                               >
                                 <MenuItem value="Good">Good</MenuItem>

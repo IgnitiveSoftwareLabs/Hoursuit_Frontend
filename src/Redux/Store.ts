@@ -50,6 +50,7 @@ import { accountTypeApi } from "../RTK/services/accountTypeApi";
 import { itemTypeApi } from "../RTK/services/itemTypeApi";
 import { chartOfAccountApi } from "../RTK/services/chartOfAccountApi";
 import { journalEntryApi } from "../RTK/services/journalEntryApi";
+import { debitNoteApi } from "../RTK/services/debitNoteApi";
 
 import { systemLogApi } from "../RTK/services/systemLogApi";
 
@@ -102,6 +103,7 @@ const rootReducer = combineReducers({
   [itemTypeApi.reducerPath]: itemTypeApi.reducer,
   [chartOfAccountApi.reducerPath]: chartOfAccountApi.reducer,
   [journalEntryApi.reducerPath]: journalEntryApi.reducer,
+  [debitNoteApi.reducerPath]: debitNoteApi.reducer,
   [systemLogApi.reducerPath]: systemLogApi.reducer,
   currentUser: currentUserSlice,
   ledger: ledgerSlice,
@@ -156,6 +158,7 @@ export const store = configureStore({
       itemTypeApi.middleware,
       chartOfAccountApi.middleware,
       journalEntryApi.middleware,
+      debitNoteApi.middleware,
       registrationTypeApi.middleware,
       systemLogApi.middleware
     ),

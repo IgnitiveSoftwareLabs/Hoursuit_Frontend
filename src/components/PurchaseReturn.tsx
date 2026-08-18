@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 
 import {
   Add,
+  Assessment,
   Cancel,
   CheckCircleOutline,
   Delete,
@@ -40,7 +41,6 @@ import {
 } from "@mui/material";
 
 import { useGetVendorsQuery } from "../RTK/services/vendorApi";
-import { useGetItemsQuery } from "../RTK/services/itemApi";
 import { useAppSelector } from "../Hooks/Reduxhook/hooks";
 import { usePermissions } from "../Hooks/usePermissions";
 import NavbarBreadcrumbs from "./NavbarBreadcrumbs";
@@ -54,6 +54,7 @@ import {
   useUpdatePurchaseReturnMutation,
   useUpdatePurchaseReturnStatusMutation,
 } from "../RTK/services/purchaseApi";
+import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 
 const STATUS_OPTIONS = ["DRAFT", "APPROVED", "RETURNED", "CANCELLED"] as const;
 type ReturnStatus = (typeof STATUS_OPTIONS)[number];
@@ -111,7 +112,6 @@ const PurchaseReturnComp: React.FC = () => {
   const { data: purchaseReturnsData } = useGetPurchaseReturnsQuery({ page: 1, limit: 20 });
   const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 50 });
   const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 50 });
-  const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 100 });
   const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 50 });
   const { data: vendorsData } = useGetVendorsQuery({ option: true });
 
@@ -122,6 +122,18 @@ const PurchaseReturnComp: React.FC = () => {
 
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<any>(null);
+  const [glModalOpen, setGlModalOpen] = useState(false);
+  const [selectedReturnForGl, setSelectedReturnForGl] = useState<any>(null);
+
+  const { data: journalData, isLoading: isJournalLoading } = useGetJournalEntryByIdQuery(
+    {
+      id: Number(selectedReturnForGl?.id ?? 0),
+      source: "PURCHASE_RETURN",
+    },
+    {
+      skip: !selectedReturnForGl?.id,
+    }
+  );
 
   const purchaseReturns = Array.isArray(purchaseReturnsData)
     ? purchaseReturnsData
@@ -134,7 +146,46 @@ const PurchaseReturnComp: React.FC = () => {
     : purchaseInvoicesData?.result ?? [];
   const grns = Array.isArray(grnsData) ? grnsData : grnsData?.result ?? [];
   const vendors = Array.isArray(vendorsData) ? vendorsData : vendorsData?.result ?? [];
-  const items = Array.isArray(itemsData) ? itemsData : itemsData?.result ?? [];
+
+  // Derive items dynamically from associated P2P document lines instead of making API calls
+  const items = useMemo(() => {
+    const itemMap = new Map<string | number, any>();
+
+    // 1. From Purchase Invoices
+    purchaseInvoices.forEach((inv: any) => {
+      const lines = inv.purchaseInvoiceLines ?? inv.invoice_lines ?? [];
+      lines.forEach((line: any) => {
+        if (line.item && (line.item.id || line.item._id)) {
+          const id = String(line.item.id || line.item._id);
+          if (!itemMap.has(id)) itemMap.set(id, line.item);
+        }
+      });
+    });
+
+    // 2. From GRNs
+    grns.forEach((grn: any) => {
+      const lines = grn.lineItems ?? grn.grnLines ?? [];
+      lines.forEach((line: any) => {
+        if (line.item && (line.item.id || line.item._id)) {
+          const id = String(line.item.id || line.item._id);
+          if (!itemMap.has(id)) itemMap.set(id, line.item);
+        }
+      });
+    });
+
+    // 3. From Purchase Orders
+    purchaseOrders.forEach((po: any) => {
+      const lines = po.purchaseOrderLines ?? po.lineItems ?? [];
+      lines.forEach((line: any) => {
+        if (line.item && (line.item.id || line.item._id)) {
+          const id = String(line.item.id || line.item._id);
+          if (!itemMap.has(id)) itemMap.set(id, line.item);
+        }
+      });
+    });
+
+    return Array.from(itemMap.values());
+  }, [purchaseInvoices, grns, purchaseOrders]);
 
   const formik = useFormik<{
     header: PurchaseReturnHeaderForm;
@@ -231,6 +282,122 @@ const PurchaseReturnComp: React.FC = () => {
     const error = field.split(".").reduce((obj: any, key: string) => obj?.[key], formik.errors);
     const touched = field.split(".").reduce((obj: any, key: string) => obj?.[key], formik.touched);
     return touched && error ? String(error) : "";
+  };
+
+  const handleInvoiceChange = (e: any) => {
+    const invId = e.target.value;
+    formik.handleChange(e);
+
+    if (!invId) return;
+
+    const inv = purchaseInvoices.find((i: any) => String(i.id ?? i._id) === String(invId));
+    if (!inv) return;
+
+    // 1. Auto-select Vendor
+    const vId = inv.vendorId ?? inv.vendor_id ?? inv.vendor?.id;
+    if (vId) {
+      formik.setFieldValue("header.vendorId", String(vId));
+    }
+
+    // 2. Auto-select Purchase Order
+    const poId = inv.poHeaderId ?? inv.po_header_id ?? inv.purchaseOrderHeaderId ?? inv.purchase_order_header_id;
+    if (poId) {
+      formik.setFieldValue("header.purchaseOrderHeaderId", String(poId));
+    }
+
+    // 3. Auto-select GRN
+    const gId = inv.grnHeaderId ?? inv.grn_header_id;
+    if (gId) {
+      formik.setFieldValue("header.grnHeaderId", String(gId));
+    }
+
+    // 4. Auto-populate Line Items from Invoice
+    const rawLines = inv.purchaseInvoiceLines ?? inv.invoice_lines ?? inv.lines ?? [];
+    if (Array.isArray(rawLines) && rawLines.length > 0) {
+      const populatedLines = rawLines.map((line: any) => ({
+        returnHeaderId: "",
+        grnLineId: line.grnLineId ? String(line.grnLineId) : line.grn_line_id ? String(line.grn_line_id) : "",
+        itemId: String(line.itemId ?? line.item_id ?? line.item?.id ?? ""),
+        batchNo: line.batchNo ?? line.batch_no ?? "",
+        returnQty: Number(line.quantity ?? line.qty ?? 0),
+        rejectedQty: 0,
+        damagedQty: 0,
+        unitPrice: Number(line.unitPrice ?? line.unit_price ?? line.rate ?? 0),
+        reason: "",
+        remarks: "",
+      }));
+      formik.setFieldValue("lineItems", populatedLines);
+      toast.success(`Auto-filled ${rawLines.length} item(s) from Invoice #${inv.invoiceNumber || inv.id}`);
+    }
+  };
+
+  const handleGrnChange = (e: any) => {
+    const grnId = e.target.value;
+    formik.handleChange(e);
+
+    if (!grnId) return;
+
+    const grn = grns.find((g: any) => String(g.id ?? g._id) === String(grnId));
+    if (!grn) return;
+
+    const poId = grn.purchaseOrderId ?? grn.purchase_order_id ?? grn.poHeaderId;
+    if (poId) {
+      formik.setFieldValue("header.purchaseOrderHeaderId", String(poId));
+      const associatedPo = purchaseOrders.find((p: any) => String(p.id ?? p._id) === String(poId));
+      if (associatedPo?.vendor_id || associatedPo?.vendorId) {
+        formik.setFieldValue("header.vendorId", String(associatedPo.vendor_id || associatedPo.vendorId));
+      }
+    }
+
+    const rawLines = grn.grnLines ?? grn.lineItems ?? grn.lines ?? [];
+    if (Array.isArray(rawLines) && rawLines.length > 0) {
+      const populatedLines = rawLines.map((line: any) => ({
+        returnHeaderId: "",
+        grnLineId: String(line.id ?? line.grnLineId ?? ""),
+        itemId: String(line.itemId ?? line.item_id ?? line.item?.id ?? ""),
+        batchNo: line.batchNo ?? line.batch_no ?? "",
+        returnQty: Number(line.acceptedQty ?? line.receivedQty ?? line.orderedQty ?? 0),
+        rejectedQty: Number(line.rejectedQty ?? 0),
+        damagedQty: Number(line.damagedQty ?? 0),
+        unitPrice: Number(line.unitPrice ?? line.unit_price ?? line.rate ?? 0),
+        reason: "",
+        remarks: "",
+      }));
+      formik.setFieldValue("lineItems", populatedLines);
+      toast.success(`Auto-filled ${rawLines.length} item(s) from GRN #${grn.grnNo || grn.id}`);
+    }
+  };
+
+  const handlePoChange = (e: any) => {
+    const poId = e.target.value;
+    formik.handleChange(e);
+
+    if (!poId) return;
+
+    const po = purchaseOrders.find((p: any) => String(p.id ?? p._id) === String(poId));
+    if (!po) return;
+
+    if (po.vendor_id || po.vendorId) {
+      formik.setFieldValue("header.vendorId", String(po.vendor_id || po.vendorId));
+    }
+
+    const rawLines = po.purchaseOrderLines ?? po.lineItems ?? po.lines ?? [];
+    if (Array.isArray(rawLines) && rawLines.length > 0) {
+      const populatedLines = rawLines.map((line: any) => ({
+        returnHeaderId: "",
+        grnLineId: "",
+        itemId: String(line.item_id ?? line.itemId ?? line.item?.id ?? ""),
+        batchNo: line.lot_number ?? line.batchNo ?? "",
+        returnQty: Number(line.quantity ?? line.qty ?? 0),
+        rejectedQty: 0,
+        damagedQty: 0,
+        unitPrice: Number(line.rate ?? line.unitPrice ?? 0),
+        reason: "",
+        remarks: "",
+      }));
+      formik.setFieldValue("lineItems", populatedLines);
+      toast.success(`Auto-filled ${rawLines.length} item(s) from PO #${po.purchaseNo || po.id}`);
+    }
   };
 
   const updateLineItemField = (index: number, field: keyof PurchaseReturnLineForm, value: any) => {
@@ -414,6 +581,18 @@ const PurchaseReturnComp: React.FC = () => {
                         }}
                       >
                         <Visibility fontSize="small" />
+                      </IconButton>
+
+                      <IconButton
+                        size="small"
+                        color="secondary"
+                        title="GL Impact"
+                        onClick={() => {
+                          setSelectedReturnForGl(ret);
+                          setGlModalOpen(true);
+                        }}
+                      >
+                        <Assessment fontSize="small" />
                       </IconButton>
 
                       {/* DRAFT -> Edit / Approve / Delete */}
@@ -623,7 +802,7 @@ const PurchaseReturnComp: React.FC = () => {
                   <Select
                     name="header.grnHeaderId"
                     value={formik.values.header.grnHeaderId}
-                    onChange={formik.handleChange}
+                    onChange={handleGrnChange}
                     onBlur={formik.handleBlur}
                     displayEmpty
                     size="small"
@@ -646,7 +825,7 @@ const PurchaseReturnComp: React.FC = () => {
                   <Select
                     name="header.purchaseOrderHeaderId"
                     value={formik.values.header.purchaseOrderHeaderId}
-                    onChange={formik.handleChange}
+                    onChange={handlePoChange}
                     onBlur={formik.handleBlur}
                     displayEmpty
                     size="small"
@@ -669,7 +848,7 @@ const PurchaseReturnComp: React.FC = () => {
                   <Select
                     name="header.purchaseInvoiceHeaderId"
                     value={formik.values.header.purchaseInvoiceHeaderId}
-                    onChange={formik.handleChange}
+                    onChange={handleInvoiceChange}
                     onBlur={formik.handleBlur}
                     displayEmpty
                     size="small"
@@ -888,6 +1067,65 @@ const PurchaseReturnComp: React.FC = () => {
             </Box>
           </Box>
         </DialogContent>
+      </Dialog>
+
+      {/* GL Impact Modal */}
+      <Dialog open={glModalOpen} onClose={() => setGlModalOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>GL Impact - Purchase Return Vouchers</DialogTitle>
+        <DialogContent dividers>
+          {isJournalLoading ? (
+            <Typography>Loading accounting entries...</Typography>
+          ) : journalData?.result?.lines?.length ? (
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead sx={{ bgcolor: "grey.100" }}>
+                  <TableRow>
+                    <TableCell>Account</TableCell>
+                    <TableCell>Description / Memo</TableCell>
+                    <TableCell align="right">Debit (DR)</TableCell>
+                    <TableCell align="right">Credit (CR)</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {journalData.result.lines.map((line: any, idx: number) => (
+                    <TableRow key={line.id || idx}>
+                      <TableCell>
+                        <strong>
+                          {line.account ? `${line.account.account_number} - ${line.account.account_name}` : line.account_name || `Account #${line.account_id}`}
+                        </strong>
+                      </TableCell>
+                      <TableCell>{line.narration || line.memo || "-"}</TableCell>
+                      <TableCell align="right" sx={{ color: Number(line.debit_amount || line.debit) > 0 ? "success.main" : "text.secondary", fontWeight: Number(line.debit_amount || line.debit) > 0 ? "bold" : "normal" }}>
+                        {Number(line.debit_amount || line.debit || 0) > 0 ? `₹${Number(line.debit_amount || line.debit).toLocaleString()}` : "-"}
+                      </TableCell>
+                      <TableCell align="right" sx={{ color: Number(line.credit_amount || line.credit) > 0 ? "error.main" : "text.secondary", fontWeight: Number(line.credit_amount || line.credit) > 0 ? "bold" : "normal" }}>
+                        {Number(line.credit_amount || line.credit || 0) > 0 ? `₹${Number(line.credit_amount || line.credit).toLocaleString()}` : "-"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow sx={{ bgcolor: "grey.100" }}>
+                    <TableCell colSpan={2} align="right">
+                      <strong>Total</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>₹{Number(journalData.result.total_debit || 0).toLocaleString()}</strong>
+                    </TableCell>
+                    <TableCell align="right">
+                      <strong>₹{Number(journalData.result.total_credit || 0).toLocaleString()}</strong>
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Typography color="text.secondary">
+              No GL postings recorded for this return document yet. Approving or Returning will post accounting impact to the ledger.
+            </Typography>
+          )}
+        </DialogContent>
+        <Box sx={{ p: 2, display: "flex", justifyContent: "flex-end" }}>
+          <Button onClick={() => setGlModalOpen(false)}>Close</Button>
+        </Box>
       </Dialog>
     </Box>
   );
