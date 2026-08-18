@@ -42,7 +42,7 @@ import { useGetCurrenciesQuery } from "../RTK/services/currencyApi";
 import { useGetVendorsQuery } from "../RTK/services/vendorApi";
 import { useGetItemsQuery } from "../RTK/services/itemApi";
 import { useGetChartOfAccountsQuery } from "../RTK/services/chartOfAccountApi";
-import { usePostJournalEntryMutation } from "../RTK/services/journalEntryApi";
+import { usePostJournalEntryMutation, useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import { useAppSelector } from "../Hooks/Reduxhook/hooks";
 import { usePermissions } from "../Hooks/usePermissions";
 import NavbarBreadcrumbs from "./NavbarBreadcrumbs";
@@ -56,6 +56,7 @@ import {
   useUpdatePurchaseInvoiceStatusMutation,
 } from "../RTK/services/purchaseApi";
 import DynamicTable from "./Tables";
+import { useNavigate } from "react-router-dom";
 
 const STATUS_OPTIONS = [
   "DRAFT",
@@ -186,6 +187,7 @@ const calculateHeaderSummary = (
 };
 
 const PurchaseInvoiceComp: React.FC = () => {
+  const navigate = useNavigate();
   const { canRead, canCreate, canUpdate, canDelete } = usePermissions();
   const currentUser = useAppSelector((state) => state.currentUser.user);
   const userId = currentUser?.id ?? "";
@@ -197,11 +199,11 @@ const PurchaseInvoiceComp: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [invoiceToDelete, setInvoiceToDelete] = useState<any>(null);
 
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
-  const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<any>(null);
-  const [paymentAmount, setPaymentAmount] = useState<number>(0);
-  const [paymentAccountId, setPaymentAccountId] = useState<string | number>("");
-  const [paymentMode, setPaymentMode] = useState<string>("Bank Transfer");
+  // const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  // const [selectedInvoiceForPayment, setSelectedInvoiceForPayment] = useState<any>(null);
+  // const [paymentAmount, setPaymentAmount] = useState<number>(0);
+  // const [paymentAccountId, setPaymentAccountId] = useState<string | number>("");
+  // const [paymentMode, setPaymentMode] = useState<string>("Bank Transfer");
   const [cancelInvoiceOpen, setCancelInvoiceOpen] = useState(false);
   const [invoiceToCancel, setInvoiceToCancel] = useState<any>(null);
 
@@ -215,12 +217,16 @@ const PurchaseInvoiceComp: React.FC = () => {
   const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 100 });
   const { data: currenciesData } = useGetCurrenciesQuery();
   const { data: chartOfAccountsData } = useGetChartOfAccountsQuery();
+  const { data: invoiceGlData } = useGetJournalEntryByIdQuery(
+    { id: selectedInvoiceForGl?.id, source: "PurchaseInvoice" },
+    { skip: !glImpactModalOpen || !selectedInvoiceForGl?.id }
+  );
 
   const [createPurchaseInvoice] = useCreatePurchaseInvoiceMutation();
   const [updatePurchaseInvoice] = useUpdatePurchaseInvoiceMutation();
   const [updatePurchaseInvoiceStatus] = useUpdatePurchaseInvoiceStatusMutation();
   const [deletePurchaseInvoice] = useDeletePurchaseInvoiceMutation();
-  const [postJournalEntry] = usePostJournalEntryMutation();
+  // const [postJournalEntry] = usePostJournalEntryMutation();
 
   const purchaseInvoices = Array.isArray(purchaseInvoicesData)
     ? purchaseInvoicesData
@@ -235,7 +241,14 @@ const PurchaseInvoiceComp: React.FC = () => {
     ? currenciesData
     : currenciesData?.result ?? [];
   const chartOfAccounts = useMemo(
-    () => Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : [],
+    () =>
+      Array.isArray(chartOfAccountsData?.result)
+        ? chartOfAccountsData.result
+        : Array.isArray(chartOfAccountsData?.data)
+        ? chartOfAccountsData.data
+        : Array.isArray(chartOfAccountsData)
+        ? chartOfAccountsData
+        : [],
     [chartOfAccountsData]
   );
 
@@ -260,51 +273,51 @@ const PurchaseInvoiceComp: React.FC = () => {
     setInvoiceToCancel(null);
   };
 
-  const handleRecordPaymentSubmit = async () => {
-    if (!selectedInvoiceForPayment || !paymentAmount || paymentAmount <= 0) {
-      toast.error("Please enter a valid payment amount");
-      return;
-    }
+  // const handleRecordPaymentSubmit = async () => {
+  //   if (!selectedInvoiceForPayment || !paymentAmount || paymentAmount <= 0) {
+  //     toast.error("Please enter a valid payment amount");
+  //     return;
+  //   }
 
-    const maxAmount = Number(selectedInvoiceForPayment.balanceAmount ?? selectedInvoiceForPayment.totalAmount ?? 0);
-    if (paymentAmount > maxAmount) {
-      toast.error("Payment amount cannot exceed remaining balance");
-      return;
-    }
+  //   const maxAmount = Number(selectedInvoiceForPayment.balanceAmount ?? selectedInvoiceForPayment.totalAmount ?? 0);
+  //   if (paymentAmount > maxAmount) {
+  //     toast.error("Payment amount cannot exceed remaining balance");
+  //     return;
+  //   }
 
-    try {
-      await postJournalEntry({
-        entry_date: new Date().toISOString().split("T")[0],
-        reference_no: `PI-${selectedInvoiceForPayment.invoiceNumber || selectedInvoiceForPayment.id}`,
-        narration: `Vendor payment for Invoice #${selectedInvoiceForPayment.invoiceNumber || selectedInvoiceForPayment.id}`,
-        invoiceHeaderId: selectedInvoiceForPayment.id,
-        lines: [
-          {
-            account_id: selectedInvoiceForPayment.vendor?.account_id || 2000,
-            debit: paymentAmount,
-            credit: 0,
-            memo: `Payment for Invoice #${selectedInvoiceForPayment.invoiceNumber || selectedInvoiceForPayment.id}`,
-            reference_no: String(selectedInvoiceForPayment.id),
-          },
-          {
-            account_id: paymentAccountId || 1000,
-            debit: 0,
-            credit: paymentAmount,
-            memo: `Payment out via ${paymentMode}`,
-          },
-        ],
-      }).unwrap();
+  //   try {
+  //     await postJournalEntry({
+  //       entry_date: new Date().toISOString().split("T")[0],
+  //       reference_no: `PI-${selectedInvoiceForPayment.invoiceNumber || selectedInvoiceForPayment.id}`,
+  //       narration: `Vendor payment for Invoice #${selectedInvoiceForPayment.invoiceNumber || selectedInvoiceForPayment.id}`,
+  //       invoiceHeaderId: selectedInvoiceForPayment.id,
+  //       lines: [
+  //         {
+  //           account_id: selectedInvoiceForPayment.vendor?.account_id || 2000,
+  //           debit: paymentAmount,
+  //           credit: 0,
+  //           memo: `Payment for Invoice #${selectedInvoiceForPayment.invoiceNumber || selectedInvoiceForPayment.id}`,
+  //           reference_no: String(selectedInvoiceForPayment.id),
+  //         },
+  //         {
+  //           account_id: paymentAccountId || 1000,
+  //           debit: 0,
+  //           credit: paymentAmount,
+  //           memo: `Payment out via ${paymentMode}`,
+  //         },
+  //       ],
+  //     }).unwrap();
 
-      toast.success("Vendor payment posted successfully!");
-      setPaymentModalOpen(false);
-      setSelectedInvoiceForPayment(null);
-      setPaymentAmount(0);
-      setPaymentAccountId("");
-      setPaymentMode("Bank Transfer");
-    } catch (error: any) {
-      toast.error(error?.data?.message || "Failed to post vendor payment");
-    }
-  };
+  //     toast.success("Vendor payment posted successfully!");
+  //     setPaymentModalOpen(false);
+  //     setSelectedInvoiceForPayment(null);
+  //     setPaymentAmount(0);
+  //     setPaymentAccountId("");
+  //     setPaymentMode("Bank Transfer");
+  //   } catch (error: any) {
+  //     toast.error(error?.data?.message || "Failed to post vendor payment");
+  //   }
+  // };
 
   const formik = useFormik<{
     header: PurchaseInvoiceHeaderForm;
@@ -381,7 +394,7 @@ const PurchaseInvoiceComp: React.FC = () => {
             totalAmount: summary.totalAmount,
             paidAmount: Number(values.header.paidAmount) || 0,
             balanceAmount: summary.balanceAmount,
-            status: values.header.status,
+            status: "DRAFT",
             remarks: values.header.remarks || null,
             user_id: Number(userId || values.header.user_id) || null,
           },
@@ -447,6 +460,112 @@ const PurchaseInvoiceComp: React.FC = () => {
     formik.setFieldValue("lineItems", lineItems);
   };
 
+  const handlePOChange = (poId: string) => {
+    const selectedPO = purchaseOrders.find(
+      (po: any) => String(po.id ?? po._id) === String(poId)
+    );
+
+    if (!selectedPO) {
+      formik.setFieldValue("header.poHeaderId", "");
+      formik.setFieldValue("header.grnHeaderId", "");
+      formik.setFieldValue("header.vendorId", "");
+      formik.setFieldValue("header.currency", "INR");
+      formik.setFieldValue("lineItems", [makeLineItem(userId)]);
+      return;
+    }
+
+    // Find GRN belonging to selected PO
+    const selectedGRN = grns.find(
+      (grn: any) =>
+        String(grn.id ?? grn.id) === String(poId)
+    );
+
+    // console.log(selectedGRN, "selectedGRN");
+
+    // Find PO lines
+    const poLines =
+      selectedPO.lines ??
+      selectedPO.lineItems ??
+      selectedPO.purchaseOrderLines ??
+      selectedPO.purchase_order_lines ??
+      [];
+
+    formik.setFieldValue("header.poHeaderId", poId);
+
+    // Automatically select GRN
+    formik.setFieldValue(
+      "header.grnHeaderId",
+      selectedGRN
+        ? String(selectedGRN.id ?? selectedGRN._id)
+        : ""
+    );
+
+    // Automatically select Vendor
+    formik.setFieldValue(
+      "header.vendorId",
+      selectedPO.vendorId ?? selectedPO.vendor_id
+        ? String(selectedPO.vendorId ?? selectedPO.vendor_id)
+        : ""
+    );
+
+    // Automatically select Currency
+    formik.setFieldValue(
+      "header.currency",
+      selectedPO.currency ?? selectedPO.currency_code ?? "INR"
+    );
+
+    // Automatically create invoice lines from PO lines
+    const invoiceLines = poLines.map((line: any) => ({
+      ...makeLineItem(userId),
+
+      poLineId: line.id ?? line.poLineId ?? line.po_line_id ?? "",
+
+      itemId:
+        line.itemId ??
+        line.item_id ??
+        "",
+
+      description:
+        line.description ??
+        line.item?.description ??
+        "",
+
+      quantity: Number(
+        line.quantity ??
+        line.qty ??
+        0
+      ),
+
+      unitPrice: Number(
+        line.unitPrice ??
+        line.unit_price ??
+        line.rate ??
+        0
+      ),
+
+      discountPercent: Number(
+        line.discountPercent ??
+        line.discount_percent ??
+        0
+      ),
+
+      taxPercent: Number(
+        line.taxPercent ??
+        line.tax_percent ??
+        0
+      ),
+
+      grnLineId: "",
+    }));
+
+    formik.setFieldValue(
+      "lineItems",
+      invoiceLines.length
+        ? invoiceLines
+        : [makeLineItem(userId)]
+    );
+  };
+
   const handleAddLineItem = () => {
     formik.setFieldValue("lineItems", [...formik.values.lineItems, makeLineItem(userId)]);
   };
@@ -498,22 +617,22 @@ const PurchaseInvoiceComp: React.FC = () => {
       },
       lineItems: Array.isArray(lineSource) && lineSource.length
         ? lineSource.map((line: any) => ({
-            invoiceHeaderId: line?.invoiceHeaderId ?? line?.invoice_header_id ?? "",
-            poLineId: line?.poLineId ?? line?.po_line_id ?? "",
-            grnLineId: line?.grnLineId ?? line?.grn_line_id ?? "",
-            itemId: line?.itemId ?? line?.item_id ?? "",
-            description: line?.description ?? "",
-            batchNo: line?.batchNo ?? line?.batch_no ?? "",
-            quantity: Number(line?.quantity ?? line?.qty ?? 1),
-            unitPrice: Number(line?.unitPrice ?? line?.unit_price ?? 0),
-            discountPercent: Number(line?.discountPercent ?? line?.discount_percent ?? 0),
-            discountAmount: Number(line?.discountAmount ?? line?.discount_amount ?? 0),
-            taxPercent: Number(line?.taxPercent ?? line?.tax_percent ?? 0),
-            taxAmount: Number(line?.taxAmount ?? line?.tax_amount ?? 0),
-            lineTotal: Number(line?.lineTotal ?? line?.line_total ?? 0),
-            user_id: line?.user_id ?? userId,
-            remarks: line?.remarks ?? "",
-          }))
+          invoiceHeaderId: line?.invoiceHeaderId ?? line?.invoice_header_id ?? "",
+          poLineId: line?.poLineId ?? line?.po_line_id ?? "",
+          grnLineId: line?.grnLineId ?? line?.grn_line_id ?? "",
+          itemId: line?.itemId ?? line?.item_id ?? "",
+          description: line?.description ?? "",
+          batchNo: line?.batchNo ?? line?.batch_no ?? "",
+          quantity: Number(line?.quantity ?? line?.qty ?? 1),
+          unitPrice: Number(line?.unitPrice ?? line?.unit_price ?? 0),
+          discountPercent: Number(line?.discountPercent ?? line?.discount_percent ?? 0),
+          discountAmount: Number(line?.discountAmount ?? line?.discount_amount ?? 0),
+          taxPercent: Number(line?.taxPercent ?? line?.tax_percent ?? 0),
+          taxAmount: Number(line?.taxAmount ?? line?.tax_amount ?? 0),
+          lineTotal: Number(line?.lineTotal ?? line?.line_total ?? 0),
+          user_id: line?.user_id ?? userId,
+          remarks: line?.remarks ?? "",
+        }))
         : [makeLineItem(userId)],
     });
 
@@ -618,13 +737,10 @@ const PurchaseInvoiceComp: React.FC = () => {
                 size="small"
                 color="success"
                 onClick={() => {
-                  setSelectedInvoiceForPayment(row);
-                  setPaymentAmount(Number(row.balanceAmount ?? row.totalAmount ?? 0));
-                  setPaymentAccountId("");
-                  setPaymentMode("Bank Transfer");
-                  setPaymentModalOpen(true);
+                  navigate(`/purchase-payment`);
                 }}
-                aria-label="Record payment"
+                aria-label="Purchase payments"
+                title="Purchase Payments"
               >
                 <Payments />
               </IconButton>
@@ -714,7 +830,7 @@ const PurchaseInvoiceComp: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} maxWidth="sm" fullWidth>
+      {/* <Dialog open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Record Payment</DialogTitle>
         <DialogContent>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
@@ -755,7 +871,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                 <MenuItem value="">
                   <em>Select payment account</em>
                 </MenuItem>
-                {chartOfAccounts.map((account: any) => (
+                {chartOfAccounts?.map((account: any) => (
                   <MenuItem key={account.id ?? account.account_id} value={account.id ?? account.account_id}>
                     {account.name || account.account_name || `Account ${account.id ?? account.account_id}`}
                   </MenuItem>
@@ -772,7 +888,7 @@ const PurchaseInvoiceComp: React.FC = () => {
             </Box>
           </Box>
         </DialogContent>
-      </Dialog>
+      </Dialog> */}
 
       <Dialog open={glImpactModalOpen} onClose={() => setGlImpactModalOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>GL Impact - Invoice #{selectedInvoiceForGl?.invoiceNumber || selectedInvoiceForGl?.id}</DialogTitle>
@@ -792,18 +908,94 @@ const PurchaseInvoiceComp: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  <TableRow>
-                    <TableCell><strong>GRNI Clearing Account</strong></TableCell>
-                    <TableCell>Clearing accrued GRN liability</TableCell>
-                    <TableCell align="right" sx={{ color: "success.main", fontWeight: "bold" }}>Debited</TableCell>
-                    <TableCell align="right">-</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell><strong>Accounts Payable Vendor</strong></TableCell>
-                    <TableCell>Vendor liability for posted invoice</TableCell>
-                    <TableCell align="right">-</TableCell>
-                    <TableCell align="right" sx={{ color: "error.main", fontWeight: "bold" }}>Credited</TableCell>
-                  </TableRow>
+                  {invoiceGlData?.result?.lines?.length > 0 ? (
+                    <>
+                      {invoiceGlData.result.lines.map((line: any, idx: number) => (
+                        <TableRow key={line.id || idx}>
+                          <TableCell>
+                            <strong>
+                              {line.account ? `${line.account.account_number} - ${line.account.account_name}` : line.account_name || `Account #${line.account_id}`}
+                            </strong>
+                          </TableCell>
+                          <TableCell>{line.narration || line.memo || selectedInvoiceForGl?.remarks || 'GL Impact Journal Line'}</TableCell>
+                          <TableCell align="right" sx={{ color: Number(line.debit_amount || line.debit) > 0 ? "success.main" : "text.secondary", fontWeight: Number(line.debit_amount || line.debit) > 0 ? "bold" : "normal" }}>
+                            {Number(line.debit_amount || line.debit) > 0 ? `₹${Number(line.debit_amount || line.debit).toLocaleString()}` : "-"}
+                          </TableCell>
+                          <TableCell align="right" sx={{ color: Number(line.credit_amount || line.credit) > 0 ? "error.main" : "text.secondary", fontWeight: Number(line.credit_amount || line.credit) > 0 ? "bold" : "normal" }}>
+                            {Number(line.credit_amount || line.credit) > 0 ? `₹${Number(line.credit_amount || line.credit).toLocaleString()}` : "-"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      <TableRow sx={{ bgcolor: "grey.50" }}>
+                        <TableCell colSpan={2} align="right"><strong>Total</strong></TableCell>
+                        <TableCell align="right"><strong>₹{Number(invoiceGlData.result.total_debit || selectedInvoiceForGl?.totalAmount || 0).toLocaleString()}</strong></TableCell>
+                        <TableCell align="right"><strong>₹{Number(invoiceGlData.result.total_credit || selectedInvoiceForGl?.totalAmount || 0).toLocaleString()}</strong></TableCell>
+                      </TableRow>
+                    </>
+                  ) : (
+                    <>
+                      <TableRow>
+                        <TableCell>
+                          <strong>
+                            {(() => {
+                              const lineItem = selectedInvoiceForGl?.purchaseInvoiceLines?.[0];
+                              const itemAccount = lineItem?.item?.expense_account || lineItem?.item?.asset_account;
+                              const itemAccId = lineItem?.item?.expense_account_id || lineItem?.item?.asset_account_id;
+                              if (itemAccount?.account_name && itemAccount?.account_number) {
+                                return `${itemAccount.account_name} (${itemAccount.account_number})`;
+                              }
+                              const foundAcc = chartOfAccounts?.find(
+                                (a: any) => String(a.id || a.account_id) === String(itemAccId || itemAccount?.id)
+                              );
+                              if (foundAcc?.account_name && foundAcc?.account_number) {
+                                return `${foundAcc.account_name} (${foundAcc.account_number})`;
+                              }
+                              const expAcc = chartOfAccounts?.find(
+                                (a: any) =>
+                                  a.accountType?.account_type_name?.toLowerCase().includes("expense") ||
+                                  a.account_name?.toLowerCase().includes("expense") ||
+                                  a.account_name?.toLowerCase().includes("clearing")
+                              );
+                              return expAcc ? `${expAcc.account_name} (${expAcc.account_number})` : `Account #${itemAccId || 1}`;
+                            })()}
+                          </strong>
+                        </TableCell>
+                        <TableCell>
+                          {selectedInvoiceForGl?.vendor?.vendor_name ? `${selectedInvoiceForGl.vendor.vendor_name} Invoice Charges` : 'Invoice Charges'}
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: "success.main", fontWeight: "bold" }}>
+                          ₹{Number(selectedInvoiceForGl?.totalAmount || 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell align="right">-</TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>
+                          <strong>
+                            {(() => {
+                              const apAcc = chartOfAccounts?.find(
+                                (a: any) =>
+                                  a.accountType?.account_type_name?.toLowerCase().includes("payable") ||
+                                  a.account_name?.toLowerCase().includes("payable") ||
+                                  a.account_name?.toLowerCase().includes("vendor")
+                              );
+                              return apAcc
+                                ? `${apAcc.account_name} (${apAcc.account_number})`
+                                : selectedInvoiceForGl?.vendor?.vendor_name
+                                ? selectedInvoiceForGl.vendor.vendor_name
+                                : "Accounts Payable";
+                            })()}
+                          </strong>
+                        </TableCell>
+                        <TableCell>
+                          {selectedInvoiceForGl?.vendor?.vendor_name ? `${selectedInvoiceForGl.vendor.vendor_name} Liability` : 'Vendor Liability'}
+                        </TableCell>
+                        <TableCell align="right">-</TableCell>
+                        <TableCell align="right" sx={{ color: "error.main", fontWeight: "bold" }}>
+                          ₹{Number(selectedInvoiceForGl?.totalAmount || 0).toLocaleString()}
+                        </TableCell>
+                      </TableRow>
+                    </>
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -923,8 +1115,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                   <Select
                     name="header.vendorId"
                     value={formik.values.header.vendorId}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
+                    disabled={!formik.values.header.poHeaderId}
                     displayEmpty
                     size="small"
                   >
@@ -946,7 +1137,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                   <Select
                     name="header.poHeaderId"
                     value={formik.values.header.poHeaderId}
-                    onChange={formik.handleChange}
+                    onChange={(e) => handlePOChange(e.target.value)}
                     onBlur={formik.handleBlur}
                     displayEmpty
                     size="small"
@@ -965,22 +1156,38 @@ const PurchaseInvoiceComp: React.FC = () => {
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth>
                   <FormLabel>GRN</FormLabel>
+
                   <Select
                     name="header.grnHeaderId"
                     value={formik.values.header.grnHeaderId}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
+                    disabled={!formik.values.header.poHeaderId}
                     displayEmpty
                     size="small"
                   >
                     <MenuItem value="">
-                      <em>Select GRN</em>
+                      <em>
+                        {formik.values.header.poHeaderId
+                          ? "No GRN found"
+                          : "Select PO first"}
+                      </em>
                     </MenuItem>
-                    {grns.map((grn: any) => (
-                      <MenuItem key={grn.id ?? grn._id} value={String(grn.id ?? grn._id)}>
-                        {grn.grnNumber ?? grn.grn_number ?? `GRN-${grn.id ?? grn._id}`}
-                      </MenuItem>
-                    ))}
+
+                    {grns
+                      ?.filter(
+                        (grn: any) =>
+                          String(grn.id ?? grn._id) ===
+                          String(formik.values.header.poHeaderId)
+                      )
+                      ?.map((grn: any) => (
+                        <MenuItem
+                          key={grn.id ?? grn._id}
+                          value={String(grn.id ?? grn.id)}
+                        >
+                          {grn.grnNo ??
+                            grn.grnNo ??
+                            `GRN-${grn.id ?? grn.id}`}
+                        </MenuItem>
+                      ))}
                   </Select>
                 </FormControl>
               </Grid>
@@ -1018,8 +1225,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                   <Select
                     name="header.currency"
                     value={formik.values.header.currency}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
+                    disabled={!formik.values.header.poHeaderId}
                     size="small"
                   >
                     <MenuItem value="INR">INR</MenuItem>
@@ -1071,7 +1277,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                   />
                 </FormControl>
               </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
+              {/* <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth>
                   <FormLabel>Paid Amount</FormLabel>
                   <TextField
@@ -1082,9 +1288,9 @@ const PurchaseInvoiceComp: React.FC = () => {
                     size="small"
                   />
                 </FormControl>
-              </Grid>
+              </Grid> */}
 
-              <Grid size={{ xs: 12, md: 4 }}>
+              {/* <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth error={Boolean(getFieldError("header.status"))}>
                   <FormLabel>Status</FormLabel>
                   <Select
@@ -1102,7 +1308,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                   </Select>
                   <FormHelperText>{getFieldError("header.status")}</FormHelperText>
                 </FormControl>
-              </Grid>
+              </Grid> */}
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
@@ -1124,7 +1330,12 @@ const PurchaseInvoiceComp: React.FC = () => {
               <Typography variant="h6" color="primary">
                 Line Items
               </Typography>
-              <Button size="small" variant="outlined" startIcon={<Add />} onClick={handleAddLineItem}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<Add />}
+                onClick={handleAddLineItem}
+              >
                 Add Line Item
               </Button>
             </Box>
@@ -1157,15 +1368,14 @@ const PurchaseInvoiceComp: React.FC = () => {
                           size="small"
                           type="number"
                           value={line.poLineId}
-                          onChange={(e) => updateLineItemField(index, "poLineId", e.target.value)}
+                          InputProps={{ readOnly: true }}
                         />
                       </TableCell>
                       <TableCell>
                         <TextField
                           size="small"
-                          type="number"
-                          value={line.grnLineId}
-                          onChange={(e) => updateLineItemField(index, "grnLineId", e.target.value)}
+                          value={line.itemId}
+                          disabled={!formik.values.header.poHeaderId}
                         />
                       </TableCell>
                       <TableCell sx={{ minWidth: 180 }}>
@@ -1173,7 +1383,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                           <Select
                             size="small"
                             value={line.itemId}
-                            onChange={(e) => updateLineItemField(index, "itemId", e.target.value)}
+                            disabled={!formik.values.header.poHeaderId}
                           >
                             <MenuItem value="">
                               <em>Select item</em>
@@ -1208,7 +1418,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                           size="small"
                           type="number"
                           value={line.quantity}
-                          onChange={(e) => updateLineItemField(index, "quantity", Number(e.target.value))}
+                          InputProps={{ readOnly: true }}
                         />
                       </TableCell>
                       <TableCell>
@@ -1216,7 +1426,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                           size="small"
                           type="number"
                           value={line.unitPrice}
-                          onChange={(e) => updateLineItemField(index, "unitPrice", Number(e.target.value))}
+                          InputProps={{ readOnly: true }}
                         />
                       </TableCell>
                       <TableCell>

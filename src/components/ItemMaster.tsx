@@ -312,36 +312,40 @@ const ItemMasterComp: React.FC = () => {
     //   label: "ID",
     // },
     {
-      key: "item_name",
-      label: "Sizes",
+      key: "item_code",
+      label: "Item Code",
     },
-    // {
-    //   key: "hsnSacCode.code",
-    //   label: "HSN/SAC Code",
-    //   render: (row: any) => (
-    //     <Box sx={{ display: "flex", flexDirection: "column" }}>
-    //       <Typography variant="body2" fontWeight="medium">
-    //         {row.hsnSacCode?.code || "N/A"}
-    //       </Typography>
-    //       <Box
-    //         sx={{
-    //           display: "inline-block",
-    //           px: 1,
-    //           py: 0.25,
-    //           borderRadius: 0.5,
-    //           backgroundColor:
-    //             row.hsnSacCode?.type === "HSN" ? "#e3f2fd" : "#f3e5f5",
-    //           color: row.hsnSacCode?.type === "HSN" ? "#1976d2" : "#7b1fa2",
-    //           fontSize: "0.75rem",
-    //           fontWeight: 500,
-    //           width: "fit-content",
-    //         }}
-    //       >
-    //         {row.hsnSacCode?.type || "N/A"}
-    //       </Box>
-    //     </Box>
-    //   ),
-    // },
+    {
+      key: "item_name",
+      label: "Item Name",
+    },
+    {
+      key: "hsnSacCode.code",
+      label: "HSN/SAC Code",
+      render: (row: any) => (
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
+          <Typography variant="body2" fontWeight="medium">
+            {row.hsnSacCode?.code || "N/A"}
+          </Typography>
+          <Box
+            sx={{
+              display: "inline-block",
+              px: 1,
+              py: 0.25,
+              borderRadius: 0.5,
+              backgroundColor:
+                row.hsnSacCode?.type === "HSN" ? "#e3f2fd" : "#f3e5f5",
+              color: row.hsnSacCode?.type === "HSN" ? "#1976d2" : "#7b1fa2",
+              fontSize: "0.75rem",
+              fontWeight: 500,
+              width: "fit-content",
+            }}
+          >
+            {row.hsnSacCode?.type || "N/A"}
+          </Box>
+        </Box>
+      ),
+    },
     {
       key: "uom.uom_name",
       label: "UOM",
@@ -358,25 +362,25 @@ const ItemMasterComp: React.FC = () => {
     //   render: (row: any) => row.serviceType?.service_name || "N/A",
     // },
     // {
-    //   key: "default_rate",
-    //   label: "Default Rate",
-    //   render: (row: any) => (
-    //     <Typography variant="body2" fontWeight="medium">
-    //       ₹
-    //       {Number(row.default_rate).toLocaleString("en-IN", {
-    //         minimumFractionDigits: 2,
-    //       })}
-    //     </Typography>
-    //   ),
-    // },
-    // {
     //   key: "subsidiary.subsidiary_name",
     //   label: "Subsidiary",
     //   render: (row: any) => row.subsidiary?.subsidiary_name || "N/A",
     // },
     {
       key: "item_desc",
-      label: "Size Description",
+      label: "Description",
+    },
+    {
+      key: "default_rate",
+      label: "Default Rate",
+      render: (row: any) => (
+        <Typography variant="body2" fontWeight="medium">
+          ₹
+          {Number(row.default_rate).toLocaleString("en-IN", {
+            minimumFractionDigits: 2,
+          })}
+        </Typography>
+      ),
     },
     {
       key: "isActive",
@@ -792,7 +796,7 @@ const ItemMasterComp: React.FC = () => {
                       </MenuItem>
                       {chartAccounts.map((account: any) => (
                         <MenuItem key={account.id} value={account.id}>
-                          {account.account_name}
+                          {account.account_name} {account.account_number && account.account_number !== account.account_name ? `(${account.account_number})` : ""} {account.accountType?.account_type_name ? `- [${account.accountType.account_type_name}]` : ""}
                         </MenuItem>
                       ))}
                     </Select>
@@ -816,7 +820,7 @@ const ItemMasterComp: React.FC = () => {
                       </MenuItem>
                       {chartAccounts.map((account: any) => (
                         <MenuItem key={account.id} value={account.id}>
-                          {account.account_name}
+                          {account.account_name} {account.account_number && account.account_number !== account.account_name ? `(${account.account_number})` : ""} {account.accountType?.account_type_name ? `- [${account.accountType.account_type_name}]` : ""}
                         </MenuItem>
                       ))}
                     </Select>
@@ -840,7 +844,7 @@ const ItemMasterComp: React.FC = () => {
                       </MenuItem>
                       {chartAccounts.map((account: any) => (
                         <MenuItem key={account.id} value={account.id}>
-                          {account.account_name}
+                          {account.account_name} {account.account_number && account.account_number !== account.account_name ? `(${account.account_number})` : ""} {account.accountType?.account_type_name ? `- [${account.accountType.account_type_name}]` : ""}
                         </MenuItem>
                       ))}
                     </Select>
@@ -864,7 +868,7 @@ const ItemMasterComp: React.FC = () => {
                       </MenuItem>
                       {chartAccounts.map((account: any) => (
                         <MenuItem key={account.id} value={account.id}>
-                          {account.account_name}
+                          {account.account_name} {account.account_number && account.account_number !== account.account_name ? `(${account.account_number})` : ""} {account.accountType?.account_type_name ? `- [${account.accountType.account_type_name}]` : ""}
                         </MenuItem>
                       ))}
                     </Select>

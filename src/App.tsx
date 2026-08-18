@@ -45,6 +45,7 @@ import DeliveryChallanPage from "./Pages/DeliveryChallanPage";
 import PurchaseInvoicePage from "./Pages/PurchaseInvoicePage";
 import PurchasePaymentPage from "./Pages/PurchasePaymentPage";
 import PurchaseReturnPage from "./Pages/PurchaseReturnPage";
+import DebitNotePage from "./Pages/DebitNotePage";
 import PanAvailibilityPage from "./Pages/PanAvailibityPage";
 import ChartOfAccountPage from "./Pages/ChartOfAccountPage";
 import PurchaseOrderPage from "./Pages/PurchaseOrderPage";
@@ -622,6 +623,18 @@ function App() {
             <PrivateRoute>
               <ProtectedRoute module="purchase_return" action="read">
                 <PurchaseReturnPage />
+              </ProtectedRoute>
+            </PrivateRoute>
+          }
+        />
+
+        {/* Finance Debit Note Management */}
+        <Route
+          path="/finance/debit-notes"
+          element={
+            <PrivateRoute>
+              <ProtectedRoute module="purchase_return" action="read">
+                <DebitNotePage />
               </ProtectedRoute>
             </PrivateRoute>
           }

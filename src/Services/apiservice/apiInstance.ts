@@ -3,7 +3,7 @@ import { BASE_URL } from "../../utils/Base_Url";
 
 const apiInstance = axios.create({
   // baseURL: "https://api-wms.ignitivelabs.in/api",
-  baseURL: BASE_URL,
+  baseURL: `${BASE_URL}/api`,
 });
 
 apiInstance.interceptors.request.use(

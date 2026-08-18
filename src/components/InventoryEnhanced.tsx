@@ -27,6 +27,7 @@ import {
   Tooltip,
   IconButton,
   Alert,
+  Avatar,
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -34,6 +35,10 @@ import {
   Clear as ClearIcon,
   Sort as SortIcon,
   Refresh as RefreshIcon,
+  InventoryTwoTone as InventoryIcon,
+  AccountBalanceWalletTwoTone as WalletIcon,
+  CategoryTwoTone as CategoryIcon,
+  WarehouseTwoTone as WarehouseIcon,
 } from '@mui/icons-material';
 import { toast } from 'react-hot-toast';
 import { usePermissions } from '../Hooks/usePermissions';
@@ -41,7 +46,6 @@ import {
   useGetInventoryQuery,
   useGetWarehousesQuery,
   useGetClientsQuery,
-  useGetCommoditiesQuery,
   useLazyGetGodownsQuery,
   useLazyGetStacksQuery,
   type InventoryQueryParams,
@@ -57,7 +61,6 @@ const EnhancedInventory: React.FC = () => {
     search: '',
     warehouseId: '',
     clientId: '',
-    commodityId: '',
     godownId: '',
     stackId: '',
     sortBy: 'id',
@@ -82,10 +85,6 @@ const EnhancedInventory: React.FC = () => {
   });
   
   const { data: clients = [] } = useGetClientsQuery(undefined, {
-    skip: !canRead('inventory'),
-  });
-  
-  const { data: commodities = [] } = useGetCommoditiesQuery(undefined, {
     skip: !canRead('inventory'),
   });
 
@@ -142,7 +141,6 @@ const EnhancedInventory: React.FC = () => {
       search: '',
       warehouseId: '',
       clientId: '',
-      commodityId: '',
       godownId: '',
       stackId: '',
       sortBy: 'id',
@@ -206,71 +204,91 @@ const EnhancedInventory: React.FC = () => {
       {/* Stats Cards */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid size={{xs:12,sm:6,md:3}}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" color="primary">Total Weight</Typography>
-              <Typography variant="h4">
-                {isLoading ? <CircularProgress size={24} /> : `${stats.totalWeight?.toFixed(2)} Q`}
-              </Typography>
+          <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.04)', border: '1px solid', borderColor: 'divider' }}>
+            <CardContent sx={{ display: 'flex', alignItems: 'center' }}>
+              <Avatar sx={{ bgcolor: 'primary.50', color: 'primary.main', width: 50, height: 50, mr: 2 }}>
+                <InventoryIcon fontSize="medium" />
+              </Avatar>
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>Total Quantity</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                  {isLoading ? <CircularProgress size={24} /> : Number(stats.totalQty || 0).toLocaleString()}
+                </Typography>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
         
         <Grid size={{xs:12,sm:6,md:3}}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" color="primary">Total Value</Typography>
-              <Typography variant="h4">
-                {isLoading ? <CircularProgress size={24} /> : `₹${Number(stats.totalValue).toLocaleString()}`}
-              </Typography>
+          <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.04)', border: '1px solid', borderColor: 'divider' }}>
+            <CardContent sx={{ display: 'flex', alignItems: 'center' }}>
+              <Avatar sx={{ bgcolor: 'success.50', color: 'success.main', width: 50, height: 50, mr: 2 }}>
+                <WalletIcon fontSize="medium" />
+              </Avatar>
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>Total Value</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'success.main' }}>
+                  {isLoading ? <CircularProgress size={24} /> : `₹${Number(stats.totalValue || 0).toLocaleString()}`}
+                </Typography>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
 
         <Grid size={{xs:12,sm:6,md:3}}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" color="primary">Total Bags</Typography>
-              <Typography variant="h4">
-                {isLoading ? <CircularProgress size={24} /> : stats.totalBags?.toLocaleString()}
-              </Typography>
+          <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.04)', border: '1px solid', borderColor: 'divider' }}>
+            <CardContent sx={{ display: 'flex', alignItems: 'center' }}>
+              <Avatar sx={{ bgcolor: 'info.50', color: 'info.main', width: 50, height: 50, mr: 2 }}>
+                <CategoryIcon fontSize="medium" />
+              </Avatar>
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>Total Items</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                  {isLoading ? <CircularProgress size={24} /> : (stats.totalItems ?? pagination.totalItems ?? 0).toLocaleString()}
+                </Typography>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
 
         <Grid size={{xs:12,sm:6,md:3}}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" color="primary">Locations</Typography>
-              <Typography variant="h4">
-                {isLoading ? <CircularProgress size={24} /> : stats.locationBreakdown.length}
-              </Typography>
-             
+          <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.04)', border: '1px solid', borderColor: 'divider' }}>
+            <CardContent sx={{ display: 'flex', alignItems: 'center' }}>
+              <Avatar sx={{ bgcolor: 'secondary.50', color: 'secondary.main', width: 50, height: 50, mr: 2 }}>
+                <WarehouseIcon fontSize="medium" />
+              </Avatar>
+              <Box>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>Warehouses</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                  {isLoading ? <CircularProgress size={24} /> : (stats.uniqueWarehouses ?? stats.locationBreakdown?.length ?? 0)}
+                </Typography>
+              </Box>
             </CardContent>
           </Card>
         </Grid>
       </Grid>
 
       {/* Search and Filter Controls */}
-      <Card sx={{ mb: 3 }}>
+      <Card sx={{ mb: 3, borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.04)', border: '1px solid', borderColor: 'divider' }}>
         <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'between', alignItems: 'center', mb: 2 }}>
-            <Typography variant="h6">Search & Filter Inventory</Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6" sx={{ fontWeight: 600 }}>Search & Filter Inventory</Typography>
             <Box>
               <Button
                 startIcon={<FilterIcon />}
                 onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                 variant={showAdvancedFilters ? 'contained' : 'outlined'}
                 size="small"
+                sx={{ borderRadius: 1.5 }}
               >
-                Advanced Filters
+                {showAdvancedFilters ? 'Hide Filters' : 'Advanced Filters'}
               </Button>
               <Button
                 startIcon={<ClearIcon />}
                 onClick={handleClearFilters}
                 variant="outlined"
                 size="small"
-                sx={{ ml: 1 }}
+                sx={{ ml: 1, borderRadius: 1.5 }}
               >
                 Clear All
               </Button>
@@ -282,22 +300,23 @@ const EnhancedInventory: React.FC = () => {
             <Grid size={{xs:12,sm:6,md:6}}>
               <TextField
                 fullWidth
-                label="Search"
+                label="Search Inventory"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search by client, commodity, location..."
+                placeholder="Search by item name, code, warehouse, godown, stack..."
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <SearchIcon />
+                      <SearchIcon color="action" />
                     </InputAdornment>
                   ),
                 }}
+                size="small"
               />
             </Grid>
             
             <Grid size={{xs:12,sm:6,md:3}}>
-              <FormControl fullWidth>
+              <FormControl fullWidth size="small">
                 <InputLabel>Page Size</InputLabel>
                 <Select
                   value={filters.limit}
@@ -313,7 +332,7 @@ const EnhancedInventory: React.FC = () => {
             </Grid>
 
             <Grid size={{xs:12,sm:6,md:3}}>
-              <FormControl fullWidth>
+              <FormControl fullWidth size="small">
                 <InputLabel>Sort By</InputLabel>
                 <Select
                   value={filters.sortBy}
@@ -321,8 +340,9 @@ const EnhancedInventory: React.FC = () => {
                   label="Sort By"
                 >
                   <MenuItem value="id">ID</MenuItem>
-                  <MenuItem value="weight">Weight</MenuItem>
-                  <MenuItem value="quantity">Quantity</MenuItem>
+                  <MenuItem value="qty">Quantity</MenuItem>
+                  <MenuItem value="rate">Rate</MenuItem>
+                  <MenuItem value="amount">Total Amount</MenuItem>
                   <MenuItem value="createdAt">Date Created</MenuItem>
                   <MenuItem value="updatedAt">Last Updated</MenuItem>
                 </Select>
@@ -332,9 +352,9 @@ const EnhancedInventory: React.FC = () => {
 
           {/* Advanced Filters */}
           {showAdvancedFilters && (
-            <Grid container spacing={2}>
+            <Grid container spacing={2} sx={{ pt: 1 }}>
               <Grid size={{xs:12,sm:6,md:3}}>
-                <FormControl fullWidth>
+                <FormControl fullWidth size="small">
                   <InputLabel>Warehouse</InputLabel>
                   <Select
                     value={filters.warehouseId}
@@ -352,7 +372,7 @@ const EnhancedInventory: React.FC = () => {
               </Grid>
 
               <Grid size={{xs:12,sm:6,md:3}}>
-                <FormControl fullWidth>
+                <FormControl fullWidth size="small">
                   <InputLabel>Client</InputLabel>
                   <Select
                     value={filters.clientId}
@@ -369,26 +389,8 @@ const EnhancedInventory: React.FC = () => {
                 </FormControl>
               </Grid>
 
-              <Grid size={{xs:12,sm:6,md:3}}>
-                <FormControl fullWidth>
-                  <InputLabel>Commodity</InputLabel>
-                  <Select
-                    value={filters.commodityId}
-                    onChange={(e) => handleFilterChange('commodityId', e.target.value)}
-                    label="Commodity"
-                  >
-                    <MenuItem value="">All Commodities</MenuItem>
-                    {commodities.map((commodity: any) => (
-                      <MenuItem key={commodity.id} value={commodity.id}>
-                        {commodity.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              <Grid size={{xs:12,sm:6,md:3}}>
-                <FormControl fullWidth>
+              <Grid size={{xs:12,sm:6,md:2}}>
+                <FormControl fullWidth size="small">
                   <InputLabel>Godown</InputLabel>
                   <Select
                     value={filters.godownId}
@@ -406,8 +408,8 @@ const EnhancedInventory: React.FC = () => {
                 </FormControl>
               </Grid>
 
-              <Grid size={{xs:12,sm:6,md:3}}>
-                <FormControl fullWidth>
+              <Grid size={{xs:12,sm:6,md:2}}>
+                <FormControl fullWidth size="small">
                   <InputLabel>Stack</InputLabel>
                   <Select
                     value={filters.stackId}
@@ -425,19 +427,19 @@ const EnhancedInventory: React.FC = () => {
                 </FormControl>
               </Grid>
 
-              <Grid size={{xs:12,sm:6,md:3}}>
-                <ButtonGroup variant="outlined" fullWidth>
+              <Grid size={{xs:12,sm:6,md:2}}>
+                <ButtonGroup variant="outlined" fullWidth size="small">
                   <Button
                     onClick={() => handleFilterChange('sortOrder', 'ASC')}
                     variant={filters.sortOrder === 'ASC' ? 'contained' : 'outlined'}
                   >
-                    Ascending
+                    ASC
                   </Button>
                   <Button
                     onClick={() => handleFilterChange('sortOrder', 'DESC')}
                     variant={filters.sortOrder === 'DESC' ? 'contained' : 'outlined'}
                   >
-                    Descending
+                    DESC
                   </Button>
                 </ButtonGroup>
               </Grid>
@@ -474,7 +476,7 @@ const EnhancedInventory: React.FC = () => {
                         {location.warehouseName}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {location.itemCount} items • {parseFloat(location.totalWeight || '0').toFixed(2)} quintals • {location.totalBags} bags
+                        {location.itemCount} Item(s) • Qty: {Number(location.totalQty || 0).toLocaleString()} • Value: ₹{Number(location.totalValue || 0).toLocaleString()}
                       </Typography>
                     </Box>
                   </Grid>
@@ -495,43 +497,27 @@ const EnhancedInventory: React.FC = () => {
                 <TableCell>
                   <Button
                     startIcon={<SortIcon />}
-                    onClick={() => handleSort('client')}
+                    onClick={() => handleSort('item')}
                     size="small"
                   >
-                    Client Name
+                    Item Details
                   </Button>
                 </TableCell>
-                <TableCell>
+                <TableCell>Warehouse / Location</TableCell>
+                <TableCell>Lot Number</TableCell>
+                <TableCell align="right">
                   <Button
                     startIcon={<SortIcon />}
-                    onClick={() => handleSort('commodity')}
+                    onClick={() => handleSort('qty')}
                     size="small"
                   >
-                    Commodity
+                    Quantity
                   </Button>
                 </TableCell>
-                <TableCell>Location</TableCell>
-                <TableCell>
-                  <Button
-                    startIcon={<SortIcon />}
-                    onClick={() => handleSort('weight')}
-                    size="small"
-                  >
-                    Weight
-                  </Button>
-                </TableCell>
-                <TableCell>Total Cost</TableCell>
-                <TableCell>
-                  <Button
-                    startIcon={<SortIcon />}
-                    onClick={() => handleSort('quantity')}
-                    size="small"
-                  >
-                    Bags
-                  </Button>
-                </TableCell>
-                <TableCell>Available Bags</TableCell>
-                <TableCell>
+                <TableCell align="right">Rate (₹)</TableCell>
+                <TableCell align="right">Total Amount (₹)</TableCell>
+                <TableCell align="center">Age (Days)</TableCell>
+                <TableCell align="center">
                   <Button
                     startIcon={<SortIcon />}
                     onClick={() => handleSort('updatedAt')}
@@ -540,7 +526,6 @@ const EnhancedInventory: React.FC = () => {
                     Last Updated
                   </Button>
                 </TableCell>
-               
               </TableRow>
             </TableHead>
             <TableBody>
@@ -549,38 +534,57 @@ const EnhancedInventory: React.FC = () => {
                   <TableRow key={`skeleton-${index}`}>
                     <TableCell><Skeleton width={30} /></TableCell>
                     <TableCell><Skeleton width={120} /></TableCell>
-                    <TableCell><Skeleton width={100} /></TableCell>
                     <TableCell><Skeleton width={150} /></TableCell>
                     <TableCell><Skeleton width={80} /></TableCell>
-                    <TableCell><Skeleton width={100} /></TableCell>
-                    <TableCell><Skeleton width={60} /></TableCell>
-                    <TableCell><Skeleton width={60} /></TableCell>
-                    <TableCell><Skeleton width={100} /></TableCell>
-                   
+                    <TableCell align="right"><Skeleton width={80} /></TableCell>
+                    <TableCell align="right"><Skeleton width={80} /></TableCell>
+                    <TableCell align="right"><Skeleton width={100} /></TableCell>
+                    <TableCell align="center"><Skeleton width={60} /></TableCell>
+                    <TableCell align="center"><Skeleton width={100} /></TableCell>
                   </TableRow>
                 ))
               ) : inventory.length > 0 ? (
                 inventory.map((item: any, index: number) => (
                   <TableRow key={item.id}>
                     <TableCell>{((filters.page || 1) - 1) * (filters.limit || 10) + index + 1}</TableCell>
-                    <TableCell>{item.client?.name || 'N/A'}</TableCell>
-                    <TableCell>{item.commodity?.name || 'N/A'}</TableCell>
                     <TableCell>
                       <Box>
                         <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                          {item.warehouse?.name || 'N/A'}
+                          {item.item?.item_name || 'N/A'}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {item.godown?.name || 'N/A'} → {item.stack?.name || 'N/A'}
+                          Code: {item.item?.item_code || 'N/A'}
                         </Typography>
                       </Box>
                     </TableCell>
-                    <TableCell>{item.measurment_or_weight} Q</TableCell>
-                    <TableCell>₹{Number(item.total_cost_of_goods).toLocaleString()}</TableCell>
-                    <TableCell>{item.details_of_number_of_bags_sacks}</TableCell>
-                    <TableCell>{item.available_bags_count || item.details_of_number_of_bags_sacks}</TableCell>
-                    <TableCell>{new Date(item.updatedAt).toLocaleDateString()}</TableCell>
-                   
+                    <TableCell>
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
+                          {item.warehouse?.name || item.warehouse?.warehouse_name || 'N/A'}
+                        </Typography>
+                        {(item.godown?.name || item.godown?.godown_name || item.stackDetails?.name || item.stackDetails?.stack_name) && (
+                          <Typography variant="caption" color="text.secondary">
+                            {item.godown?.name || item.godown?.godown_name || '—'} → {item.stackDetails?.name || item.stackDetails?.stack_name || '—'}
+                          </Typography>
+                        )}
+                      </Box>
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={item.lot_number || 'GENERAL'} size="small" variant="outlined" color="default" />
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                      {Number(item.qty || 0).toLocaleString()}
+                    </TableCell>
+                    <TableCell align="right">
+                      ₹{Number(item.rate || 0).toLocaleString()}
+                    </TableCell>
+                    <TableCell align="right" sx={{ color: 'success.main', fontWeight: 'bold' }}>
+                      ₹{Number(item.amount || 0).toLocaleString()}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Chip label={`${item.inventory_age ?? 0} d`} size="small" color={Number(item.inventory_age || 0) > 90 ? 'warning' : 'info'} variant="outlined" />
+                    </TableCell>
+                    <TableCell align="center">{new Date(item.updatedAt).toLocaleDateString()}</TableCell>
                   </TableRow>
                 ))
               ) : (
