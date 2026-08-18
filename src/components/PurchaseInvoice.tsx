@@ -477,10 +477,8 @@ const PurchaseInvoiceComp: React.FC = () => {
     // Find GRN belonging to selected PO
     const selectedGRN = grns.find(
       (grn: any) =>
-        String(grn.id ?? grn.id) === String(poId)
+        String(grn.purchaseOrderId ?? grn.purchase_order_id) === String(poId)
     );
-
-    // console.log(selectedGRN, "selectedGRN");
 
     // Find PO lines
     const poLines =
@@ -517,53 +515,79 @@ const PurchaseInvoiceComp: React.FC = () => {
     // Automatically create invoice lines from PO lines
     const invoiceLines = poLines.map((line: any) => ({
       ...makeLineItem(userId),
-
-      poLineId: line.id ?? line.poLineId ?? line.po_line_id ?? "",
-
-      itemId:
-        line.itemId ??
-        line.item_id ??
-        "",
-
-      description:
-        line.description ??
-        line.item?.description ??
-        "",
-
-      quantity: Number(
-        line.quantity ??
-        line.qty ??
-        0
-      ),
-
-      unitPrice: Number(
-        line.unitPrice ??
-        line.unit_price ??
-        line.rate ??
-        0
-      ),
-
-      discountPercent: Number(
-        line.discountPercent ??
-        line.discount_percent ??
-        0
-      ),
-
-      taxPercent: Number(
-        line.taxPercent ??
-        line.tax_percent ??
-        0
-      ),
-
+      poLineId: String(line.id ?? line.poLineId ?? line.po_line_id ?? ""),
+      itemId: String(line.itemId ?? line.item_id ?? line.item?.id ?? ""),
+      description: line.description ?? line.item?.item_name ?? line.item?.item_desc ?? "",
+      quantity: Number(line.quantity ?? line.qty ?? 1),
+      unitPrice: Number(line.unitPrice ?? line.unit_price ?? line.rate ?? 0),
+      discountPercent: Number(line.discountPercent ?? line.discount_percent ?? 0),
+      taxPercent: Number(line.taxPercent ?? line.tax_percent ?? line.tax_rate ?? 0),
       grnLineId: "",
     }));
 
     formik.setFieldValue(
       "lineItems",
-      invoiceLines.length
-        ? invoiceLines
-        : [makeLineItem(userId)]
+      invoiceLines.length ? invoiceLines : [makeLineItem(userId)]
     );
+  };
+
+  const handleGRNChange = (grnId: string) => {
+    if (!grnId) {
+      formik.setFieldValue("header.grnHeaderId", "");
+      formik.setFieldValue("header.poHeaderId", "");
+      formik.setFieldValue("header.vendorId", "");
+      formik.setFieldValue("lineItems", [makeLineItem(userId)]);
+      return;
+    }
+
+    const selectedGRN = grns.find(
+      (grn: any) => String(grn.id ?? grn._id) === String(grnId)
+    );
+
+    if (!selectedGRN) return;
+
+    formik.setFieldValue("header.grnHeaderId", String(grnId));
+
+    const linkedPoId = selectedGRN.purchaseOrderId ?? selectedGRN.purchase_order_id ?? selectedGRN.purchaseOrder?.id;
+    if (linkedPoId) {
+      formik.setFieldValue("header.poHeaderId", String(linkedPoId));
+    }
+
+    const selectedPO = linkedPoId ? purchaseOrders.find((po: any) => String(po.id ?? po._id) === String(linkedPoId)) : null;
+    const vendorId = selectedGRN.vendor_id ?? selectedGRN.vendorId ?? selectedGRN.purchaseOrder?.vendor_id ?? selectedPO?.vendorId ?? selectedPO?.vendor_id;
+
+    if (vendorId) {
+      formik.setFieldValue("header.vendorId", String(vendorId));
+    }
+
+    formik.setFieldValue("header.currency", selectedPO?.currency ?? selectedGRN.purchaseOrder?.currency ?? "INR");
+
+    const grnLines = selectedGRN.lineItems ?? selectedGRN.grnLines ?? selectedGRN.line_items ?? [];
+    if (Array.isArray(grnLines) && grnLines.length > 0) {
+      const invoiceLines = grnLines.map((line: any) => {
+        const qty = Number(line.acceptedQty > 0 ? line.acceptedQty : (line.receivedQty || line.orderedQty || 1));
+        const rate = Number(line.purchaseOrderLine?.rate || line.item?.cost_price || line.item?.default_rate || 0);
+        const lineItem = {
+          ...makeLineItem(userId),
+          grnLineId: String(line.id ?? line.grnLineId ?? ""),
+          poLineId: String(line.purchaseOrderLineId ?? line.purchase_order_line_id ?? ""),
+          itemId: String(line.itemId ?? line.item_id ?? line.item?.id ?? ""),
+          description: line.item?.item_name || line.item?.item_desc || "",
+          quantity: qty,
+          unitPrice: rate,
+          discountPercent: 0,
+          taxPercent: 0,
+        };
+        const computed = calculateLine(lineItem);
+        return {
+          ...lineItem,
+          discountAmount: computed.discountAmount,
+          taxAmount: computed.taxAmount,
+          lineTotal: computed.lineTotal,
+        };
+      });
+      formik.setFieldValue("lineItems", invoiceLines);
+    }
   };
 
   const handleAddLineItem = () => {
@@ -1133,12 +1157,40 @@ const PurchaseInvoiceComp: React.FC = () => {
 
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth>
+                  <FormLabel>GRN (Goods Receipt Note)</FormLabel>
+                  <Select
+                    name="header.grnHeaderId"
+                    value={formik.values.header.grnHeaderId}
+                    onChange={(e) => handleGRNChange(e.target.value)}
+                    onBlur={formik.handleBlur}
+                    displayEmpty
+                    size="small"
+                  >
+                    <MenuItem value="">
+                      <em>Select GRN</em>
+                    </MenuItem>
+                    {grns?.map((grn: any) => {
+                      const poNo = grn.purchaseOrder?.purchaseNo || (grn.purchaseOrderId ? `PO-${grn.purchaseOrderId}` : "");
+                      const label = `${grn.grnNo || `GRN-${grn.id}`} ${poNo ? `(${poNo})` : ""}`;
+                      return (
+                        <MenuItem key={grn.id ?? grn._id} value={String(grn.id ?? grn._id)}>
+                          {label}
+                        </MenuItem>
+                      );
+                    })}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid size={{ xs: 12, md: 4 }}>
+                <FormControl fullWidth>
                   <FormLabel>Purchase Order</FormLabel>
                   <Select
                     name="header.poHeaderId"
                     value={formik.values.header.poHeaderId}
                     onChange={(e) => handlePOChange(e.target.value)}
                     onBlur={formik.handleBlur}
+                    disabled={Boolean(formik.values.header.grnHeaderId)}
                     displayEmpty
                     size="small"
                   >
@@ -1150,44 +1202,6 @@ const PurchaseInvoiceComp: React.FC = () => {
                         {po.purchaseNo ?? po.purchase_no ?? `PO-${po.id ?? po._id}`}
                       </MenuItem>
                     ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>GRN</FormLabel>
-
-                  <Select
-                    name="header.grnHeaderId"
-                    value={formik.values.header.grnHeaderId}
-                    disabled={!formik.values.header.poHeaderId}
-                    displayEmpty
-                    size="small"
-                  >
-                    <MenuItem value="">
-                      <em>
-                        {formik.values.header.poHeaderId
-                          ? "No GRN found"
-                          : "Select PO first"}
-                      </em>
-                    </MenuItem>
-
-                    {grns
-                      ?.filter(
-                        (grn: any) =>
-                          String(grn.id ?? grn._id) ===
-                          String(formik.values.header.poHeaderId)
-                      )
-                      ?.map((grn: any) => (
-                        <MenuItem
-                          key={grn.id ?? grn._id}
-                          value={String(grn.id ?? grn.id)}
-                        >
-                          {grn.grnNo ??
-                            grn.grnNo ??
-                            `GRN-${grn.id ?? grn.id}`}
-                        </MenuItem>
-                      ))}
                   </Select>
                 </FormControl>
               </Grid>
