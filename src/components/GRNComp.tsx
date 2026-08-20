@@ -554,6 +554,18 @@ const GRNComp: React.FC = () => {
               </>
             )}
 
+            {isDraft && canUpdate("grn") && (
+              <IconButton
+                size="small"
+                color="success"
+                onClick={() => handleStatusChange(row.id, "RECEIVED")}
+                aria-label="Mark as Received"
+                title="Mark as Received"
+              >
+                <CheckCircleOutline />
+              </IconButton>
+            )}
+
             {canUpdate("grn") && (
               <IconButton
                 size="small"
@@ -567,6 +579,7 @@ const GRNComp: React.FC = () => {
                   handleEdit(row);
                 }}
                 aria-label="Edit GRN"
+                title="Edit GRN"
               >
                 <Edit />
               </IconButton>
@@ -585,6 +598,7 @@ const GRNComp: React.FC = () => {
                   handleDeleteRequest(row);
                 }}
                 aria-label="Delete GRN"
+                title="Delete GRN"
               >
                 <Delete />
               </IconButton>
@@ -602,6 +616,7 @@ const GRNComp: React.FC = () => {
                 handleGrnCancelRequest(row);
               }}
               aria-label="Cancel GRN"
+              title="Cancel GRN"
             >
               <Cancel />
             </IconButton>
@@ -766,7 +781,24 @@ const GRNComp: React.FC = () => {
 
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 2 }}>
             <Button variant="outlined" onClick={() => setViewOpen(false)}>Close</Button>
-            <Button variant="contained" onClick={() => { setViewOpen(false); setOpen(true); formik.setValues({ ...formik.values, header: { ...formik.values.header } }); }}>Open Editor</Button>
+            {String(selectedGrnForGl?.status || "DRAFT").toUpperCase() === "DRAFT" && canUpdate("grn") && (
+              <Button
+                variant="contained"
+                color="success"
+                startIcon={<CheckCircleOutline />}
+                onClick={async () => {
+                  if (selectedGrnForGl?.id) {
+                    await handleStatusChange(selectedGrnForGl.id, "RECEIVED");
+                    setViewOpen(false);
+                  }
+                }}
+              >
+                Mark as Received
+              </Button>
+            )}
+            {String(selectedGrnForGl?.status || "DRAFT").toUpperCase() === "DRAFT" && canUpdate("grn") && (
+              <Button variant="contained" onClick={() => { setViewOpen(false); handleEdit(selectedGrnForGl); }}>Open Editor</Button>
+            )}
           </Box>
         </DialogContent>
       </Dialog>
