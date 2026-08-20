@@ -4,7 +4,7 @@ import customBaseQuery from '../customBaseQuery';
 export const purchaseApi = createApi({
   reducerPath: 'purchaseApi',
   baseQuery: customBaseQuery,
-  tagTypes: ['PurchaseOrder', 'PurchaseInvoice', 'GRN', 'PurchaseReturn', 'QualityInspection', 'Inventory', 'GLBalance', 'Vendor', 'JournalEntry', 'PurchasePayment'],
+  tagTypes: ['PurchaseOrder', 'PurchaseInvoice', 'GRN', 'PurchaseReturn', 'QualityInspection', 'Inventory', 'GLBalance', 'Vendor', 'JournalEntry', 'PurchasePayment', 'ReturnFulfillment', 'VendorCredit'],
   endpoints: (builder) => ({
     // Purchase Order
     getPurchaseOrders: builder.query<any, any>({
@@ -258,19 +258,19 @@ export const purchaseApi = createApi({
       }),
       invalidatesTags: ['PurchaseReturn'],
     }),
-    updatePurchaseReturn: builder.mutation<any, { id: number | string; body: any }>({
-      query: ({ id, body }) => ({
+    updatePurchaseReturn: builder.mutation<any, { id: number | string; body?: any; payload?: any }>({
+      query: ({ id, body, payload }) => ({
         url: `/purchase-return/${id}`,
         method: 'PUT',
-        body,
+        body: body || payload,
       }),
       invalidatesTags: ['PurchaseReturn'],
     }),
-    updatePurchaseReturnStatus: builder.mutation<any, { id: number | string; body: any }>({
-      query: ({ id, body }) => ({
+    updatePurchaseReturnStatus: builder.mutation<any, { id: number | string; body?: any; payload?: any }>({
+      query: ({ id, body, payload }) => ({
         url: `/purchase-return/${id}/status`,
         method: 'PATCH',
-        body,
+        body: body || payload,
       }),
       invalidatesTags: ['PurchaseReturn', 'Inventory', 'GLBalance'],
     }),
@@ -280,6 +280,36 @@ export const purchaseApi = createApi({
         method: 'DELETE',
       }),
       invalidatesTags: ['PurchaseReturn'],
+    }),
+    getReturnFulfillments: builder.query<any, any>({
+      query: (params) => ({
+        url: '/purchase-return-fulfillment/get',
+        params,
+      }),
+      providesTags: ['ReturnFulfillment', 'PurchaseReturn'],
+    }),
+    createReturnFulfillment: builder.mutation<any, any>({
+      query: (body) => ({
+        url: '/purchase-return-fulfillment/create',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['ReturnFulfillment', 'PurchaseReturn', 'Inventory', 'GLBalance', 'JournalEntry'],
+    }),
+    getVendorCredits: builder.query<any, any>({
+      query: (params) => ({
+        url: '/vendor-credit/get',
+        params,
+      }),
+      providesTags: ['VendorCredit', 'PurchaseReturn'],
+    }),
+    createVendorCredit: builder.mutation<any, any>({
+      query: (body) => ({
+        url: '/vendor-credit/create',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['VendorCredit', 'PurchaseReturn', 'GLBalance', 'JournalEntry'],
     }),
   }),
 });
@@ -321,4 +351,8 @@ export const {
   useUpdatePurchaseReturnMutation,
   useUpdatePurchaseReturnStatusMutation,
   useDeletePurchaseReturnMutation,
+  useGetReturnFulfillmentsQuery,
+  useCreateReturnFulfillmentMutation,
+  useGetVendorCreditsQuery,
+  useCreateVendorCreditMutation,
 } = purchaseApi;

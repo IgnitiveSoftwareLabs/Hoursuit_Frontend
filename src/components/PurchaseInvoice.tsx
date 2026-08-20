@@ -211,12 +211,12 @@ const PurchaseInvoiceComp: React.FC = () => {
   const [selectedInvoiceForGl, setSelectedInvoiceForGl] = useState<any>(null);
 
   const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 20 });
-  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 50 });
-  const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 50 });
-  const { data: vendorsData } = useGetVendorsQuery({ option: true });
-  const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 100 });
-  const { data: currenciesData } = useGetCurrenciesQuery();
-  const { data: chartOfAccountsData } = useGetChartOfAccountsQuery();
+  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 50 }, { skip: !isOpen });
+  const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 50 }, { skip: !isOpen });
+  const { data: vendorsData } = useGetVendorsQuery({ option: true }, { skip: !isOpen });
+  const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 100 }, { skip: !isOpen });
+  const { data: currenciesData } = useGetCurrenciesQuery(undefined, { skip: !isOpen });
+  const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined, { skip: !isOpen });
   const { data: invoiceGlData } = useGetJournalEntryByIdQuery(
     { id: selectedInvoiceForGl?.id, source: "PurchaseInvoice" },
     { skip: !glImpactModalOpen || !selectedInvoiceForGl?.id }
@@ -244,11 +244,11 @@ const PurchaseInvoiceComp: React.FC = () => {
     () =>
       Array.isArray(chartOfAccountsData?.result)
         ? chartOfAccountsData.result
-        : Array.isArray(chartOfAccountsData?.data)
-        ? chartOfAccountsData.data
-        : Array.isArray(chartOfAccountsData)
-        ? chartOfAccountsData
-        : [],
+        : Array.isArray(chartOfAccountsData?.result)
+          ? chartOfAccountsData.result
+          : Array.isArray(chartOfAccountsData)
+            ? chartOfAccountsData
+            : [],
     [chartOfAccountsData]
   );
 
@@ -346,12 +346,12 @@ const PurchaseInvoiceComp: React.FC = () => {
     },
     validationSchema: Yup.object({
       header: Yup.object({
-        invoiceNumber: Yup.string().required("Invoice Number is required"),
+        invoiceNumber: Yup.string().nullable(),
         invoiceType: Yup.string().required("Invoice Type is required"),
         invoiceDate: Yup.date().required("Invoice Date is required"),
-        currency: Yup.string().required("Currency is required"),
-        exchangeRate: Yup.number().min(0, "Exchange rate cannot be negative").required("Exchange rate is required"),
-        status: Yup.string().oneOf([...STATUS_OPTIONS], "Invalid status").required("Status is required"),
+        currency: Yup.string().nullable(),
+        exchangeRate: Yup.number().min(0, "Exchange rate cannot be negative").nullable(),
+        status: Yup.string().nullable(),
       }),
       lineItems: Yup.array()
         .of(
@@ -369,28 +369,28 @@ const PurchaseInvoiceComp: React.FC = () => {
       try {
         const summary = calculateHeaderSummary(
           values.lineItems,
-          values.header.freightAmount,
-          values.header.otherCharges,
+          0,
+          0,
           values.header.paidAmount
         );
 
         const payload = {
           header: {
-            invoiceNumber: values.header.invoiceNumber,
-            invoiceType: values.header.invoiceType,
-            vendorInvoiceNumber: values.header.vendorInvoiceNumber || null,
+            invoiceNumber: values.header.invoiceNumber || undefined,
+            invoiceType: values.header.invoiceType || "Standard Bill",
+            vendorInvoiceNumber: values.header.vendorInvoiceNumber || undefined,
             poHeaderId: values.header.poHeaderId ? Number(values.header.poHeaderId) : null,
             grnHeaderId: values.header.grnHeaderId ? Number(values.header.grnHeaderId) : null,
             vendorId: values.header.vendorId ? Number(values.header.vendorId) : null,
             invoiceDate: values.header.invoiceDate,
             dueDate: values.header.dueDate || null,
-            currency: values.header.currency,
+            currency: values.header.currency || "INR",
             exchangeRate: Number(values.header.exchangeRate) || 1,
             subtotal: summary.subtotal,
             taxAmount: summary.taxAmount,
             discountAmount: summary.discountAmount,
-            freightAmount: Number(values.header.freightAmount) || 0,
-            otherCharges: Number(values.header.otherCharges) || 0,
+            freightAmount: 0,
+            otherCharges: 0,
             totalAmount: summary.totalAmount,
             paidAmount: Number(values.header.paidAmount) || 0,
             balanceAmount: summary.balanceAmount,
@@ -617,19 +617,34 @@ const PurchaseInvoiceComp: React.FC = () => {
       return;
     }
 
+    const formatDateForInput = (dateVal: any) => {
+      if (!dateVal) return "";
+      try {
+        const d = new Date(dateVal);
+        if (isNaN(d.getTime())) return "";
+        return d.toISOString().split("T")[0];
+      } catch {
+        return "";
+      }
+    };
+
     const header = invoice?.header ?? invoice;
-    const lineSource = invoice?.lineItems ?? invoice?.line_items ?? invoice?.invoiceLines ?? [];
+    if (String(header?.status || "").toUpperCase() !== "DRAFT") {
+      toast.error("Only purchase invoices in DRAFT status can be edited");
+      return;
+    }
+    const lineSource = invoice?.purchaseInvoiceLines ?? invoice?.lineItems ?? invoice?.line_items ?? invoice?.invoiceLines ?? [];
 
     formik.setValues({
       header: {
         invoiceNumber: header?.invoiceNumber ?? header?.invoice_number ?? "",
         invoiceType: header?.invoiceType ?? header?.invoice_type ?? "",
         vendorInvoiceNumber: header?.vendorInvoiceNumber ?? header?.vendor_invoice_number ?? "",
-        poHeaderId: header?.poHeaderId ?? header?.po_header_id ?? "",
-        grnHeaderId: header?.grnHeaderId ?? header?.grn_header_id ?? "",
-        vendorId: header?.vendorId ?? header?.vendor_id ?? "",
-        invoiceDate: header?.invoiceDate ?? header?.invoice_date ?? new Date().toISOString().split("T")[0],
-        dueDate: header?.dueDate ?? header?.due_date ?? "",
+        poHeaderId: String(header?.poHeaderId ?? header?.po_header_id ?? header?.purchaseOrder?.id ?? ""),
+        grnHeaderId: String(header?.grnHeaderId ?? header?.grn_header_id ?? header?.grn?.id ?? ""),
+        vendorId: String(header?.vendorId ?? header?.vendor_id ?? header?.vendor?.id ?? ""),
+        invoiceDate: formatDateForInput(header?.invoiceDate ?? header?.invoice_date) || new Date().toISOString().split("T")[0],
+        dueDate: formatDateForInput(header?.dueDate ?? header?.due_date),
         currency: header?.currency ?? "INR",
         exchangeRate: Number(header?.exchangeRate ?? header?.exchange_rate ?? 1),
         freightAmount: Number(header?.freightAmount ?? header?.freight_amount ?? 0),
@@ -644,8 +659,8 @@ const PurchaseInvoiceComp: React.FC = () => {
           invoiceHeaderId: line?.invoiceHeaderId ?? line?.invoice_header_id ?? "",
           poLineId: line?.poLineId ?? line?.po_line_id ?? "",
           grnLineId: line?.grnLineId ?? line?.grn_line_id ?? "",
-          itemId: line?.itemId ?? line?.item_id ?? "",
-          description: line?.description ?? "",
+          itemId: String(line?.itemId ?? line?.item_id ?? line?.item?.id ?? ""),
+          description: line?.description || line?.item?.item_name || line?.item?.item_desc || "",
           batchNo: line?.batchNo ?? line?.batch_no ?? "",
           quantity: Number(line?.quantity ?? line?.qty ?? 1),
           unitPrice: Number(line?.unitPrice ?? line?.unit_price ?? 0),
@@ -668,6 +683,11 @@ const PurchaseInvoiceComp: React.FC = () => {
   const handleDeleteRequest = (invoice: any) => {
     if (!canDelete("purchase_invoice") && !canDelete("purchase")) {
       toast.error("No permission to delete purchase invoice");
+      return;
+    }
+    const header = invoice?.header ?? invoice;
+    if (String(header?.status || "").toUpperCase() !== "DRAFT") {
+      toast.error("Only purchase invoices in DRAFT status can be deleted");
       return;
     }
     setInvoiceToDelete(invoice);
@@ -701,8 +721,8 @@ const PurchaseInvoiceComp: React.FC = () => {
     { key: "invoiceType", label: "Invoice Type" },
     { key: "vendor.vendor_name", label: "Vendor", render: (row: any) => row.vendor?.vendor_name || "N/A" },
     { key: "invoiceDate", label: "Invoice Date", render: (row: any) => new Date(row.invoiceDate).toLocaleDateString() },
-    { key: "grnHeaderId", label: "GRN Number", render: (row: any) => row.grn?.grnNumber ?? row.grn?.grn_number ?? "N/A" },
-    { key: "purchaseNo", label: "Purchase No" },
+    { key: "grnHeaderId", label: "GRN Number", render: (row: any) => row.grn?.grnNo ?? row.grn?.grnNo ?? "N/A" },
+    { key: "purchaseNo", label: "Purchase No", render: (row: any) => row.purchaseOrder?.purchaseNo ?? row.purchaseOrder?.purchaseNo ?? "N/A" },
     { key: "balanceAmount", label: "Balance Amount", render: (row: any) => `₹${Number(row.balanceAmount).toLocaleString()}` },
     {
       key: "status", label: "Status", render: (row: any) => (
@@ -734,19 +754,19 @@ const PurchaseInvoiceComp: React.FC = () => {
       key: "actions",
       label: "Actions",
       render: (row: any) => {
-        const isDraft = row.status === "DRAFT";
+        const isDraft = String(row.status || "").toUpperCase() === "DRAFT";
         const isPosted = row.status === "POSTED";
         const isPartial = row.status === "PARTIAL_PAID";
         const isPaid = row.status === "PAID";
         const isCancelled = row.status === "CANCELLED";
         return (
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-            {(canUpdate("purchase_invoice") || canUpdate("purchase")) && (
+            {(canUpdate("purchase_invoice") || canUpdate("purchase")) && isDraft && (
               <IconButton size="small" color="primary" onClick={() => handleEdit(row)} aria-label="Edit invoice">
                 <Edit />
               </IconButton>
             )}
-            {(canDelete("purchase_invoice") || canDelete("purchase")) && (
+            {(canDelete("purchase_invoice") || canDelete("purchase")) && isDraft && (
               <IconButton size="small" color="error" onClick={() => handleDeleteRequest(row)} aria-label="Delete invoice">
                 <Delete />
               </IconButton>
@@ -769,7 +789,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                 <Payments />
               </IconButton>
             )}
-            {!isPaid && !isCancelled && (
+            {!isDraft && !isCancelled && (
               <IconButton
                 size="small"
                 color="info"
@@ -778,6 +798,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                   setGlImpactModalOpen(true);
                 }}
                 aria-label="GL impact"
+                title="GL Impact"
               >
                 <Assessment />
               </IconButton>
@@ -803,7 +824,7 @@ const PurchaseInvoiceComp: React.FC = () => {
       <Box sx={{ width: "100%", maxWidth: { sm: "100%", md: "1810px" } }}>
         <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "50vh" }}>
           <Typography variant="h6" color="error">
-            Access Denied: You do not have permission to view Purchase Invoices.
+            Access Denied: You do not have permission to view Purchase Bills.
           </Typography>
         </Box>
       </Box>
@@ -814,7 +835,7 @@ const PurchaseInvoiceComp: React.FC = () => {
     <Box sx={{ width: "100%", maxWidth: { sm: "100%", md: "1810px" } }}>
       <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
         <Box>
-          <Typography variant="h3">Purchase Invoices</Typography>
+          <Typography variant="h3">Purchase Bill</Typography>
           <NavbarBreadcrumbs />
         </Box>
         {canCreatePurchaseInvoice && (
@@ -828,7 +849,7 @@ const PurchaseInvoiceComp: React.FC = () => {
               formik.resetForm();
             }}
           >
-            New Purchase Invoice
+            New Purchase Bill
           </Button>
         )}
       </Box>
@@ -842,7 +863,7 @@ const PurchaseInvoiceComp: React.FC = () => {
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Confirm Delete</DialogTitle>
         <DialogContent>
-          <Typography>Are you sure you want to delete this purchase invoice?</Typography>
+          <Typography>Are you sure you want to delete this purchase bill?</Typography>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 2 }}>
             <Button variant="outlined" onClick={() => setDeleteDialogOpen(false)}>
               Cancel
@@ -952,8 +973,20 @@ const PurchaseInvoiceComp: React.FC = () => {
                       ))}
                       <TableRow sx={{ bgcolor: "grey.50" }}>
                         <TableCell colSpan={2} align="right"><strong>Total</strong></TableCell>
-                        <TableCell align="right"><strong>₹{Number(invoiceGlData.result.total_debit || selectedInvoiceForGl?.totalAmount || 0).toLocaleString()}</strong></TableCell>
-                        <TableCell align="right"><strong>₹{Number(invoiceGlData.result.total_credit || selectedInvoiceForGl?.totalAmount || 0).toLocaleString()}</strong></TableCell>
+                        <TableCell align="right">
+                          <strong>
+                            ₹{invoiceGlData.result.lines
+                              .reduce((sum: number, l: any) => sum + Number(l.debit_amount || l.debit || 0), 0)
+                              .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </strong>
+                        </TableCell>
+                        <TableCell align="right">
+                          <strong>
+                            ₹{invoiceGlData.result.lines
+                              .reduce((sum: number, l: any) => sum + Number(l.credit_amount || l.credit || 0), 0)
+                              .toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </strong>
+                        </TableCell>
                       </TableRow>
                     </>
                   ) : (
@@ -1005,8 +1038,8 @@ const PurchaseInvoiceComp: React.FC = () => {
                               return apAcc
                                 ? `${apAcc.account_name} (${apAcc.account_number})`
                                 : selectedInvoiceForGl?.vendor?.vendor_name
-                                ? selectedInvoiceForGl.vendor.vendor_name
-                                : "Accounts Payable";
+                                  ? selectedInvoiceForGl.vendor.vendor_name
+                                  : "Accounts Payable";
                             })()}
                           </strong>
                         </TableCell>
@@ -1087,84 +1120,31 @@ const PurchaseInvoiceComp: React.FC = () => {
       </Paper> */}
 
       <Dialog open={isOpen} onClose={() => setOpen(false)} fullWidth maxWidth="xl">
-        <DialogTitle>{isEdit ? "Edit Purchase Invoice" : "Create Purchase Invoice"}</DialogTitle>
+        <DialogTitle>{isEdit ? "Edit Purchase Bill" : "Create Purchase Bill"}</DialogTitle>
         <DialogContent>
           <Box component="form" onSubmit={formik.handleSubmit} sx={{ mt: 1 }}>
             <Grid container spacing={2}>
+              {/* 1. GRN (Goods Receipt Note) */}
               <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.invoiceNumber"))}>
-                  <FormLabel>Invoice Number</FormLabel>
-                  <TextField
-                    name="header.invoiceNumber"
-                    placeholder="Enter invoice number"
-                    value={formik.values.header.invoiceNumber}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  />
-                  <FormHelperText>{getFieldError("header.invoiceNumber")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.invoiceType"))}>
-                  <FormLabel>Invoice Type</FormLabel>
-                  <TextField
-                    name="header.invoiceType"
-                    placeholder="Invoice type"
-                    value={formik.values.header.invoiceType}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  />
-                  <FormHelperText>{getFieldError("header.invoiceType")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Vendor Invoice Number</FormLabel>
-                  <TextField
-                    name="header.vendorInvoiceNumber"
-                    placeholder="Vendor invoice number"
-                    value={formik.values.header.vendorInvoiceNumber}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  />
-                </FormControl>
-              </Grid>
-
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Vendor</FormLabel>
-                  <Select
-                    name="header.vendorId"
-                    value={formik.values.header.vendorId}
-                    disabled={!formik.values.header.poHeaderId}
-                    displayEmpty
-                    size="small"
-                  >
-                    <MenuItem value="">
-                      <em>Select vendor</em>
-                    </MenuItem>
-                    {vendors.map((vendor: any) => (
-                      <MenuItem key={vendor.id ?? vendor._id} value={String(vendor.id ?? vendor._id)}>
-                        {vendor.vendor_name ?? vendor.name ?? `Vendor-${vendor.id ?? vendor._id}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
+                <FormControl fullWidth error={Boolean(getFieldError("header.grnHeaderId"))}>
                   <FormLabel>GRN (Goods Receipt Note)</FormLabel>
                   <Select
                     name="header.grnHeaderId"
                     value={formik.values.header.grnHeaderId}
                     onChange={(e) => handleGRNChange(e.target.value)}
                     onBlur={formik.handleBlur}
+                    disabled={isEdit}
                     displayEmpty
                     size="small"
+                    renderValue={(selected) => {
+                      if (!selected) {
+                        return <span style={{ color: "#888" }}>Select GRN</span>;
+                      }
+                      const grn = grns?.find((g: any) => String(g.id ?? g._id) === String(selected));
+                      if (!grn) return String(selected);
+                      const poNo = grn.purchaseOrder?.purchaseNo || (grn.purchaseOrderId ? `PO-${grn.purchaseOrderId}` : "");
+                      return `${grn.grnNo || `GRN-${grn.id}`} ${poNo ? `(${poNo})` : ""}`;
+                    }}
                   >
                     <MenuItem value="">
                       <em>Select GRN</em>
@@ -1179,32 +1159,90 @@ const PurchaseInvoiceComp: React.FC = () => {
                       );
                     })}
                   </Select>
+                  <FormHelperText>{getFieldError("header.grnHeaderId")}</FormHelperText>
                 </FormControl>
               </Grid>
 
+              {/* 2. Purchase Order & 3. Vendor (Only shown when GRN is selected) */}
+              {Boolean(formik.values.header.grnHeaderId) && (
+                <>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Purchase Order</FormLabel>
+                      <Select
+                        name="header.poHeaderId"
+                        value={formik.values.header.poHeaderId}
+                        disabled={true}
+                        displayEmpty
+                        size="small"
+                        renderValue={(selected) => {
+                          if (!selected) {
+                            return <span style={{ color: "#888" }}>Auto-selected from GRN</span>;
+                          }
+                          const po = purchaseOrders.find((p: any) => String(p.id ?? p._id) === String(selected));
+                          return po ? (po.purchaseNo ?? po.purchase_no ?? `PO-${po.id ?? po._id}`) : String(selected);
+                        }}
+                      >
+                        <MenuItem value="">
+                          <em>Auto-selected from GRN</em>
+                        </MenuItem>
+                        {purchaseOrders.map((po: any) => (
+                          <MenuItem key={po.id ?? po._id} value={String(po.id ?? po._id)}>
+                            {po.purchaseNo ?? po.purchase_no ?? `PO-${po.id ?? po._id}`}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Vendor</FormLabel>
+                      <Select
+                        name="header.vendorId"
+                        value={formik.values.header.vendorId}
+                        disabled={true}
+                        displayEmpty
+                        size="small"
+                        renderValue={(selected) => {
+                          if (!selected) {
+                            return <span style={{ color: "#888" }}>Auto-selected from GRN</span>;
+                          }
+                          const v = vendors.find((vend: any) => String(vend.id ?? vend._id) === String(selected));
+                          return v ? (v.vendor_name ?? v.name ?? `Vendor-${v.id ?? v._id}`) : String(selected);
+                        }}
+                      >
+                        <MenuItem value="">
+                          <em>Auto-selected from GRN</em>
+                        </MenuItem>
+                        {vendors.map((vendor: any) => (
+                          <MenuItem key={vendor.id ?? vendor._id} value={String(vendor.id ?? vendor._id)}>
+                            {vendor.vendor_name ?? vendor.name ?? `Vendor-${vendor.id ?? vendor._id}`}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                </>
+              )}
+
+              {/* 4. Invoice Type */}
               <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Purchase Order</FormLabel>
-                  <Select
-                    name="header.poHeaderId"
-                    value={formik.values.header.poHeaderId}
-                    onChange={(e) => handlePOChange(e.target.value)}
+                <FormControl fullWidth error={Boolean(getFieldError("header.invoiceType"))}>
+                  <FormLabel>Invoice Type</FormLabel>
+                  <TextField
+                    name="header.invoiceType"
+                    placeholder="Enter Invoice Type (e.g. Standard Bill)"
+                    value={formik.values.header.invoiceType}
+                    onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
-                    disabled={Boolean(formik.values.header.grnHeaderId)}
-                    displayEmpty
                     size="small"
-                  >
-                    <MenuItem value="">
-                      <em>Select PO</em>
-                    </MenuItem>
-                    {purchaseOrders.map((po: any) => (
-                      <MenuItem key={po.id ?? po._id} value={String(po.id ?? po._id)}>
-                        {po.purchaseNo ?? po.purchase_no ?? `PO-${po.id ?? po._id}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
+                  />
+                  <FormHelperText>{getFieldError("header.invoiceType")}</FormHelperText>
                 </FormControl>
               </Grid>
+
+              {/* 5. Invoice Date */}
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth error={Boolean(getFieldError("header.invoiceDate"))}>
                   <FormLabel>Invoice Date</FormLabel>
@@ -1220,6 +1258,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                 </FormControl>
               </Grid>
 
+              {/* 6. Due Date */}
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth>
                   <FormLabel>Due Date</FormLabel>
@@ -1233,282 +1272,193 @@ const PurchaseInvoiceComp: React.FC = () => {
                   />
                 </FormControl>
               </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.currency"))}>
-                  <FormLabel>Currency</FormLabel>
-                  <Select
-                    name="header.currency"
-                    value={formik.values.header.currency}
-                    disabled={!formik.values.header.poHeaderId}
-                    size="small"
-                  >
-                    <MenuItem value="INR">INR</MenuItem>
-                    {currencies.map((currency: any) => (
-                      <MenuItem key={currency.id ?? currency.currency_code} value={currency.currency_code}>
-                        {currency.currency_code}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>{getFieldError("header.currency")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.exchangeRate"))}>
-                  <FormLabel>Exchange Rate</FormLabel>
-                  <TextField
-                    name="header.exchangeRate"
-                    type="number"
-                    value={formik.values.header.exchangeRate}
-                    onChange={(e) => formik.setFieldValue("header.exchangeRate", Number(e.target.value))}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  />
-                  <FormHelperText>{getFieldError("header.exchangeRate")}</FormHelperText>
-                </FormControl>
-              </Grid>
 
-              <Grid size={{ xs: 12, md: 4 }}>
+              {/* 7. Remarks */}
+              <Grid size={{ xs: 12, md: 12 }}>
                 <FormControl fullWidth>
-                  <FormLabel>Freight Amount</FormLabel>
+                  <FormLabel>Remarks</FormLabel>
                   <TextField
-                    name="header.freightAmount"
-                    type="number"
-                    value={formik.values.header.freightAmount}
-                    onChange={(e) => formik.setFieldValue("header.freightAmount", Number(e.target.value))}
-                    size="small"
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Other Charges</FormLabel>
-                  <TextField
-                    name="header.otherCharges"
-                    type="number"
-                    value={formik.values.header.otherCharges}
-                    onChange={(e) => formik.setFieldValue("header.otherCharges", Number(e.target.value))}
-                    size="small"
-                  />
-                </FormControl>
-              </Grid>
-              {/* <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Paid Amount</FormLabel>
-                  <TextField
-                    name="header.paidAmount"
-                    type="number"
-                    value={formik.values.header.paidAmount}
-                    onChange={(e) => formik.setFieldValue("header.paidAmount", Number(e.target.value))}
-                    size="small"
-                  />
-                </FormControl>
-              </Grid> */}
-
-              {/* <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.status"))}>
-                  <FormLabel>Status</FormLabel>
-                  <Select
-                    name="header.status"
-                    value={formik.values.header.status}
+                    name="header.remarks"
+                    placeholder="Enter bill remarks..."
+                    value={formik.values.header.remarks}
                     onChange={formik.handleChange}
                     onBlur={formik.handleBlur}
                     size="small"
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <MenuItem key={status} value={status}>
-                        {status}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>{getFieldError("header.status")}</FormHelperText>
+                  />
                 </FormControl>
-              </Grid> */}
-            </Grid>
-            <Grid size={{ xs: 12, md: 4 }}>
-              <FormControl fullWidth>
-                <FormLabel>Remarks</FormLabel>
-                <TextField
-                  name="header.remarks"
-                  placeholder="Enter Remark"
-                  value={formik.values.header.remarks}
-                  onChange={formik.handleChange}
-                  onBlur={formik.handleBlur}
-                  size="small"
-                />
-              </FormControl>
-            </Grid>
-
-            <Divider sx={{ my: 1 }} />
-
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6" color="primary">
-                Line Items
-              </Typography>
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<Add />}
-                onClick={handleAddLineItem}
-              >
-                Add Line Item
-              </Button>
-            </Box>
-
-            <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', width: '100%' }}>
-              <Table size="small" sx={{ minWidth: 2000 }}>
-                <TableHead sx={{ bgcolor: 'grey.100' }}>
-                  <TableRow>
-                    <TableCell width="8%">PO Line Id</TableCell>
-                    <TableCell width="8%">GRN Line Id</TableCell>
-                    <TableCell width="8%">Item</TableCell>
-                    <TableCell width="8%">Description</TableCell>
-                    <TableCell width="8%">Batch No</TableCell>
-                    <TableCell width="6%">Quantity</TableCell>
-                    <TableCell width="8%">Unit Price</TableCell>
-                    <TableCell width="6%">Discount %</TableCell>
-                    <TableCell width="8%">Discount Amount</TableCell>
-                    <TableCell width="6%">Tax %</TableCell>
-                    <TableCell width="7%">Tax Amount</TableCell>
-                    <TableCell width="7%">Line Total</TableCell>
-                    <TableCell width="12%">Remarks</TableCell>
-                    <TableCell width="14%">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {formik.values.lineItems.map((line, index) => (
-                    <TableRow key={index}>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={line.poLineId}
-                          InputProps={{ readOnly: true }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          value={line.itemId}
-                          disabled={!formik.values.header.poHeaderId}
-                        />
-                      </TableCell>
-                      <TableCell sx={{ minWidth: 180 }}>
-                        <FormControl fullWidth error={Boolean(getFieldError(`lineItems.${index}.itemId`))}>
-                          <Select
-                            size="small"
-                            value={line.itemId}
-                            disabled={!formik.values.header.poHeaderId}
-                          >
-                            <MenuItem value="">
-                              <em>Select item</em>
-                            </MenuItem>
-                            {items.map((item: any) => (
-                              <MenuItem key={item.id ?? item._id} value={String(item.id ?? item._id)}>
-                                {item.item_name ?? item.name ?? item.itemName ?? `Item-${item.id ?? item._id}`}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                          <FormHelperText>{getFieldError(`lineItems.${index}.itemId`)}</FormHelperText>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          placeholder="Description"
-                          value={line.description}
-                          onChange={(e) => updateLineItemField(index, "description", e.target.value)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          placeholder="Batch No"
-                          value={line.batchNo}
-                          onChange={(e) => updateLineItemField(index, "batchNo", e.target.value)}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={line.quantity}
-                          InputProps={{ readOnly: true }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={line.unitPrice}
-                          InputProps={{ readOnly: true }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={line.discountPercent}
-                          onChange={(e) => updateLineItemField(index, "discountPercent", Number(e.target.value))}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField size="small" type="number" value={line.discountAmount} InputProps={{ readOnly: true }} />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          type="number"
-                          value={line.taxPercent}
-                          onChange={(e) => updateLineItemField(index, "taxPercent", Number(e.target.value))}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField size="small" type="number" value={line.taxAmount} InputProps={{ readOnly: true }} />
-                      </TableCell>
-                      <TableCell>
-                        <TextField size="small" type="number" value={line.lineTotal} InputProps={{ readOnly: true }} />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small"
-                          placeholder="Remarks"
-                          value={line.remarks}
-                          onChange={(e) => updateLineItemField(index, "remarks", e.target.value)}
-                        />
-                      </TableCell>
-                      <TableCell align="center">
-                        <IconButton onClick={() => handleRemoveLineItem(index)}>
-                          <RemoveCircleOutline />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-
-            <Box mt={3}>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Subtotal" value={summary.subtotal.toFixed(2)} fullWidth size="small" InputProps={{ readOnly: true }} />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Tax Amount" value={summary.taxAmount.toFixed(2)} fullWidth size="small" InputProps={{ readOnly: true }} />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Discount Amount" value={summary.discountAmount.toFixed(2)} fullWidth size="small" InputProps={{ readOnly: true }} />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Freight Amount" value={Number(formik.values.header.freightAmount || 0).toFixed(2)} fullWidth size="small" InputProps={{ readOnly: true }} />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Total Amount" value={summary.totalAmount.toFixed(2)} fullWidth size="small" InputProps={{ readOnly: true }} />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Balance Amount" value={summary.balanceAmount.toFixed(2)} fullWidth size="small" InputProps={{ readOnly: true }} />
-                </Grid>
               </Grid>
-            </Box>
+            </Grid>
+
+            {Boolean(formik.values.header.grnHeaderId) ? (
+              <>
+                <Divider sx={{ my: 2 }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                  <Typography variant="h6" color="primary">
+                    Line Items
+                  </Typography>
+                </Box>
+
+                <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', width: '100%' }}>
+                  <Table size="small" sx={{ minWidth: 1400 }}>
+                    <TableHead sx={{ bgcolor: 'grey.100' }}>
+                      <TableRow>
+                        <TableCell width="12%">Item</TableCell>
+                        <TableCell width="12%">Description</TableCell>
+                        <TableCell width="12%" sx={{ minWidth: 140 }}>Batch No</TableCell>
+                        <TableCell width="6%">Quantity</TableCell>
+                        <TableCell width="8%">Unit Price</TableCell>
+                        <TableCell width="6%">Discount %</TableCell>
+                        <TableCell width="8%">Discount Amount</TableCell>
+                        <TableCell width="10%" sx={{ minWidth: 110 }}>Tax %</TableCell>
+                        <TableCell width="7%">Tax Amount</TableCell>
+                        <TableCell width="10%" sx={{ minWidth: 120 }}>Line Total</TableCell>
+                        <TableCell width="10%">Remarks</TableCell>
+                        <TableCell width="4%">Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {formik.values.lineItems.map((line, index) => (
+                        <TableRow key={index}>
+                          <TableCell sx={{ minWidth: 180 }}>
+                            <FormControl fullWidth error={Boolean(getFieldError(`lineItems.${index}.itemId`))}>
+                              <Select
+                                size="small"
+                                value={line.itemId}
+                                disabled={true}
+                                displayEmpty
+                                renderValue={(selected) => {
+                                  if (!selected) {
+                                    return <span style={{ color: "#888" }}>Select Item</span>;
+                                  }
+                                  const item = items.find((i: any) => String(i.id ?? i._id) === String(selected));
+                                  return item ? (item.item_name ?? item.name ?? item.itemName) : String(selected);
+                                }}
+                              >
+                                <MenuItem value="">
+                                  <em>Select Item</em>
+                                </MenuItem>
+                                {items.map((item: any) => (
+                                  <MenuItem key={item.id ?? item._id} value={String(item.id ?? item._id)}>
+                                    {item.item_name ?? item.name ?? item.itemName ?? `Item-${item.id ?? item._id}`}
+                                  </MenuItem>
+                                ))}
+                              </Select>
+                              <FormHelperText>{getFieldError(`lineItems.${index}.itemId`)}</FormHelperText>
+                            </FormControl>
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              placeholder="Item Description"
+                              value={line.description}
+                              disabled={true}
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell sx={{ minWidth: 140 }}>
+                            <TextField
+                              size="small"
+                              placeholder="Enter Batch No"
+                              value={line.batchNo}
+                              onChange={(e) => updateLineItemField(index, "batchNo", e.target.value)}
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              type="number"
+                              placeholder="0"
+                              value={line.quantity}
+                              disabled={true}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              type="number"
+                              placeholder="0.00"
+                              value={line.unitPrice}
+                              disabled={true}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              type="number"
+                              placeholder="0"
+                              value={line.discountPercent}
+                              onChange={(e) => updateLineItemField(index, "discountPercent", Number(e.target.value))}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField size="small" type="number" placeholder="0.00" value={line.discountAmount} disabled={true} />
+                          </TableCell>
+                          <TableCell sx={{ minWidth: 110 }}>
+                            <TextField
+                              size="small"
+                              type="number"
+                              placeholder="0"
+                              value={line.taxPercent}
+                              onChange={(e) => updateLineItemField(index, "taxPercent", Number(e.target.value))}
+                              fullWidth
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <TextField size="small" type="number" placeholder="0.00" value={line.taxAmount} disabled={true} />
+                          </TableCell>
+                          <TableCell sx={{ minWidth: 120 }}>
+                            <TextField size="small" type="number" placeholder="0.00" value={line.lineTotal} disabled={true} fullWidth />
+                          </TableCell>
+                          <TableCell>
+                            <TextField
+                              size="small"
+                              placeholder="Enter line remarks..."
+                              value={line.remarks}
+                              onChange={(e) => updateLineItemField(index, "remarks", e.target.value)}
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <IconButton onClick={() => handleRemoveLineItem(index)}>
+                              <RemoveCircleOutline />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                <Divider sx={{ my: 3 }} />
+
+                <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                  <Typography variant="subtitle2" color="text.secondary" mb={1.5} fontWeight="bold">
+                    Summary Totals
+                  </Typography>
+                  <Grid container spacing={2}>
+                    <Grid size={{ xs: 12, md: 3 }}>
+                      <TextField label="Subtotal" value={`₹${summary.subtotal.toFixed(2)}`} fullWidth size="small" InputProps={{ readOnly: true }} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 3 }}>
+                      <TextField label="Tax Amount" value={`₹${summary.taxAmount.toFixed(2)}`} fullWidth size="small" InputProps={{ readOnly: true }} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 3 }}>
+                      <TextField label="Discount Amount" value={`₹${summary.discountAmount.toFixed(2)}`} fullWidth size="small" InputProps={{ readOnly: true }} />
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 3 }}>
+                      <TextField label="Total Amount" value={`₹${summary.totalAmount.toFixed(2)}`} fullWidth size="small" InputProps={{ readOnly: true }} sx={{ '& .MuiInputBase-input': { fontWeight: 'bold', color: 'primary.main' } }} />
+                    </Grid>
+                  </Grid>
+                </Paper>
+              </>
+            ) : (
+              <Box sx={{ mt: 3, p: 3, bgcolor: 'grey.50', border: '1px dashed', borderColor: 'grey.300', borderRadius: 1, textAlign: 'center' }}>
+                <Typography variant="body2" color="text.secondary">
+                  Please select a GRN (Goods Receipt Note) to populate PO details, Vendor, and line items.
+                </Typography>
+              </Box>
+            )}
 
             <Box display="flex" justifyContent="flex-end" gap={2} mt={3}>
               <Button onClick={() => setOpen(false)} color="inherit">

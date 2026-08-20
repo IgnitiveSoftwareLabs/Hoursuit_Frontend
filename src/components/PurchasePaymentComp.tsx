@@ -17,6 +17,7 @@ import {
   Button,
   Chip,
   Dialog,
+  DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
@@ -69,23 +70,6 @@ interface PurchasePaymentLine {
   remarks?: string;
 }
 
-interface PurchaseOrderLine {
-  id?: string | number;
-  lineNumber?: number;
-  itemId?: string | number;
-  itemName?: string;
-  itemCode?: string;
-  sku?: string;
-  description?: string;
-  quantity?: number;
-  unitPrice?: number;
-  discountPercent?: number;
-  discountAmount?: number;
-  taxPercent?: number;
-  taxAmount?: number;
-  lineTotal?: number;
-}
-
 interface PurchasePaymentForm {
   paymentNumber: string;
   paymentDate: string;
@@ -109,7 +93,6 @@ interface PurchasePaymentForm {
   remarks: string;
   status: PaymentStatus;
   lines: PurchasePaymentLine[];
-  purchaseOrderLines: PurchaseOrderLine[];
 }
 
 export default function PurchasePaymentComp() {
@@ -127,12 +110,12 @@ export default function PurchasePaymentComp() {
   const [selectedPaymentForGl, setSelectedPaymentForGl] = useState<any>(null);
   const [glImpactOpen, setGlImpactOpen] = useState(false);
 
-  const { data: paymentMethodsData } = useGetPaymentMethodsQuery({ page: 1, limit: 100 });
+  const { data: paymentMethodsData } = useGetPaymentMethodsQuery({ page: 1, limit: 100 }, { skip: !isOpen });
   const { data: paymentsData } = useGetPurchasePaymentsQuery({ page: 1, limit: 50 });
-  const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 });
-  const { data: vendorsData } = useGetVendorsQuery({ option: true });
-  const { data: chartOfAccountsData } = useGetChartOfAccountsQuery();
-  const { data: currenciesData } = useGetCurrenciesQuery();
+  const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 }, { skip: !isOpen });
+  const { data: vendorsData } = useGetVendorsQuery({ option: true }, { skip: !isOpen });
+  const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined, { skip: !isOpen });
+  const { data: currenciesData } = useGetCurrenciesQuery(undefined, { skip: !isOpen });
 
   const { data: journalEntriesData, isLoading: isJournalLoading } = useGetJournalEntryByIdQuery(
     {
@@ -140,7 +123,7 @@ export default function PurchasePaymentComp() {
       source: "PURCHASE_PAYMENT",
     },
     {
-      skip: !selectedPaymentForGl?.id,
+      skip: !glImpactOpen || !selectedPaymentForGl?.id,
     }
   );
 
@@ -227,7 +210,6 @@ export default function PurchasePaymentComp() {
     remarks: "",
     status: "DRAFT",
     lines: [],
-    purchaseOrderLines: [],
   };
 
   const validationSchema = Yup.object().shape({
@@ -264,6 +246,7 @@ export default function PurchasePaymentComp() {
 
         const paymentLines = [
           {
+            purchaseInvoiceHeaderId: values.purchaseInvoiceHeaderId,
             purchaseInvoiceLineId: values.purchaseInvoiceHeaderId,
             amountPaid: paymentAmount,
             remarks: values.remarks || "",
@@ -273,6 +256,7 @@ export default function PurchasePaymentComp() {
         const payload = {
           paymentNumber: values.paymentNumber || undefined,
           paymentDate: values.paymentDate,
+          purchaseInvoiceHeaderId: values.purchaseInvoiceHeaderId,
           vendorId: values.vendorId,
           paymentMethodId: values.paymentMethodId,
           bankAccountId: values.bankAccountId,
@@ -306,55 +290,6 @@ export default function PurchasePaymentComp() {
     },
   });
 
-  const getPurchaseOrderLines = (invoice: any): PurchaseOrderLine[] => {
-
-    const lines = invoice?.purchaseOrderLines ||
-      invoice?.purchaseOrder?.lines ||
-      invoice?.purchaseOrder?.purchaseOrderLines ||
-      invoice?.poLines || [];
-
-    if (!Array.isArray(lines)) {
-      return [];
-    }
-
-    return lines.map((line: any) => ({
-      id: line.id,
-      lineNumber: line.lineNumber ??
-        line.line_no ??
-        line.sequence,
-      itemId: line.itemId ??
-        line.item_id,
-      itemName: line.item?.itemName ||
-        line.item?.name ||
-        line.itemName ||
-        line.item_name,
-      itemCode: line.item?.itemCode ||
-        line.item?.code ||
-        line.itemCode ||
-        line.item_code,
-      sku: line.item?.sku ||
-        line.sku,
-      description: line.description ||
-        line.item?.description || "",
-      quantity: Number(
-        line.quantity ||
-        line.orderQty ||
-        line.orderedQuantity || 0),
-      unitPrice: Number(
-        line.unitPrice ||
-        line.rate ||
-        line.price || 0),
-      discountPercent: Number(line.discountPercent || 0),
-      discountAmount: Number(line.discountAmount || 0),
-      taxPercent: Number(line.taxPercent || 0),
-      taxAmount: Number(line.taxAmount || 0),
-      lineTotal: Number(
-        line.lineTotal ||
-        line.totalAmount ||
-        line.amount || 0),
-    }));
-  };
-
   const getPurchaseOrderNumber = (invoice: any) => {
     return (
       invoice?.purchaseOrder?.purchaseNo ||
@@ -379,9 +314,7 @@ export default function PurchasePaymentComp() {
     const vendor = invoice.vendor || vendors.find((v: any) => String(v.id) === String(invoice.vendorId));
 
     const vendorName = vendor?.vendorName || vendor?.name || vendor?.vendor_name || "";
-    const poLines = getPurchaseOrderLines(invoice);
     const poNumber = invoice?.purchaseOrder?.purchaseNo;
-    // console.log(poNumber)
 
     formik.setValues({
       ...formik.values,
@@ -397,7 +330,7 @@ export default function PurchasePaymentComp() {
       invoiceStatus: invoice.status || "",
       currency: invoice.currency || invoice.currencyCode || "INR",
       exchangeRate: Number(invoice.exchangeRate || 1),
-      purchaseOrderNumber: poNumber,
+      purchaseOrderNumber: poNumber || "",
       totalAmount: 0,
       lines: [
         {
@@ -410,25 +343,30 @@ export default function PurchasePaymentComp() {
           remarks: "",
         } as any,
       ],
-      purchaseOrderLines: poLines,
     });
   };
 
   const handlePaymentAmountChange = (value: string) => {
-    const amount = Number(value || 0);
     const balance = Number(formik.values.invoiceBalanceAmount || 0);
 
-    if (amount > balance) {
+    formik.setFieldValue("totalAmount", value);
+
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed) && balance > 0 && parsed > balance) {
       toast.error("Payment amount cannot exceed invoice balance");
       formik.setFieldValue("totalAmount", balance);
+      const updatedLines = formik.values.lines.map((line) => ({
+        ...line,
+        amountPaid: balance,
+      }));
+      formik.setFieldValue("lines", updatedLines);
       return;
     }
 
-    formik.setFieldValue("totalAmount", amount);
-
+    const numericAmount = isNaN(parsed) ? 0 : parsed;
     const updatedLines = formik.values.lines.map((line) => ({
       ...line,
-      amountPaid: amount,
+      amountPaid: numericAmount,
     }));
 
     formik.setFieldValue("lines", updatedLines);
@@ -447,6 +385,11 @@ export default function PurchasePaymentComp() {
   const handleDelete = async () => {
     if (!paymentToDelete) return;
 
+    if (String(paymentToDelete.status || "").toUpperCase() !== "DRAFT") {
+      toast.error("Only draft purchase payments can be deleted");
+      return;
+    }
+
     try {
       await deletePurchasePayment(paymentToDelete.id).unwrap();
 
@@ -460,15 +403,15 @@ export default function PurchasePaymentComp() {
   };
 
   const handleEdit = (row: any) => {
+    if (String(row.status || "").toUpperCase() !== "DRAFT") {
+      toast.error("Only draft purchase payments can be edited");
+      return;
+    }
+
     setIsEdit(true);
     setEditId(row.id);
     const invoice = row.purchaseInvoice || row.invoice ||
       allInvoices.find((inv: any) => String(inv.id) === String(row.lines?.[0]?.purchaseInvoiceHeaderId));
-    let purchaseOrderLines: PurchaseOrderLine[] = [];
-
-    if (invoice) {
-      purchaseOrderLines = getPurchaseOrderLines(invoice);
-    }
 
     const paymentLine = row.lines?.[0];
     formik.setValues({
@@ -497,7 +440,6 @@ export default function PurchasePaymentComp() {
       remarks: row.remarks || "",
       status: row.status || "DRAFT",
       lines: row.lines || [],
-      purchaseOrderLines,
     });
     setOpen(true);
   };
@@ -506,7 +448,7 @@ export default function PurchasePaymentComp() {
     {
       key: "paymentNumber",
       label: "Payment No.",
-       render: (row: any) => row.paymentNumber ? row.paymentNumber : "-",
+      render: (row: any) => row.paymentNumber ? row.paymentNumber : "-",
     },
     {
       key: "paymentDate",
@@ -584,17 +526,19 @@ export default function PurchasePaymentComp() {
           >
             <Visibility fontSize="small" />
           </IconButton>
-          <IconButton
-            size="small"
-            color="secondary"
-            title="GL Impact"
-            onClick={() => {
-              setSelectedPaymentForGl(row);
-              setGlImpactOpen(true);
-            }}
-          >
-            <Assessment fontSize="small" />
-          </IconButton>
+          {row.status !== "DRAFT" && row.status !== "CANCELLED" && (
+            <IconButton
+              size="small"
+              color="secondary"
+              title="GL Impact"
+              onClick={() => {
+                setSelectedPaymentForGl(row);
+                setGlImpactOpen(true);
+              }}
+            >
+              <Assessment fontSize="small" />
+            </IconButton>
+          )}
           {row.status === "DRAFT" && (
             <>
               {canUpdate && (
@@ -726,7 +670,7 @@ export default function PurchasePaymentComp() {
               fontWeight="bold"
               sx={{ mt: 1, mb: 2 }}
             >
-              Payment & Invoice Details
+              Payment & Bill Details
             </Typography>
             <Grid
               container
@@ -747,9 +691,17 @@ export default function PurchasePaymentComp() {
                     name="purchaseInvoiceHeaderId"
                     value={formik.values.purchaseInvoiceHeaderId}
                     onChange={(e) => handleInvoiceSelect(e.target.value)}
+                    displayEmpty
+                    renderValue={(selected) => {
+                      if (!selected) {
+                        return <span style={{ color: "#888" }}>Select Purchase Invoice</span>;
+                      }
+                      const found = allInvoices.find((inv: any) => String(inv.id) === String(selected));
+                      return found ? (found.invoiceNumber || `Invoice #${found.id}`) : String(selected);
+                    }}
                   >
                     <MenuItem value="">
-                      Select Purchase Invoice
+                      <em>Select Purchase Invoice</em>
                     </MenuItem>
                     {allInvoices?.filter((inv: any) => inv.status === "POSTED" || inv.status === "PARTIAL_PAID")
                       .filter((inv: any) => inv.balanceAmount === undefined || Number(inv.balanceAmount) > 0
@@ -770,128 +722,160 @@ export default function PurchasePaymentComp() {
                   )}
                 </FormControl>
               </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Invoice Number</FormLabel>
-                  <TextField
-                    size="small"
-                    value={formik.values.invoiceNumber}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Vendor Invoice Number</FormLabel>
-                  <TextField
-                    size="small"
-                    value={formik.values.vendorInvoiceNumber}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Vendor</FormLabel>
-                  <TextField
-                    size="small"
-                    value={formik.values.vendorName}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Invoice Date</FormLabel>
-                  <TextField
-                    type="date"
-                    size="small"
-                    value={formik.values.invoiceDate}
-                    disabled
-                    InputLabelProps={{
-                      shrink: true,
-                    }}
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Purchase Order</FormLabel>
-                  <TextField
-                    size="small"
-                    value={formik.values.purchaseOrderNumber}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Invoice Total</FormLabel>
-                  <TextField
-                    size="small"
-                    value={`₹${Number(formik.values.invoiceTotalAmount || 0).toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}`}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Already Paid</FormLabel>
-                  <TextField
-                    size="small"
-                    value={`₹${Number(formik.values.invoicePaidAmount || 0).toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}`}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Balance Due</FormLabel>
-                  <TextField
-                    size="small"
-                    value={`₹${Number(formik.values.invoiceBalanceAmount || 0).toLocaleString("en-IN", {
-                      minimumFractionDigits: 2,
-                    })}`}
-                    disabled
-                    sx={{ "& .MuiInputBase-input": { fontWeight: "bold" } }}
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Invoice Status</FormLabel>
-                  <TextField
-                    size="small"
-                    value={formik.values.invoiceStatus}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Currency</FormLabel>
-                  <TextField
-                    size="small"
-                    value={formik.values.currency}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Exchange Rate</FormLabel>
-                  <TextField
-                    type="number"
-                    size="small"
-                    value={formik.values.exchangeRate}
-                    disabled
-                  />
-                </FormControl>
-              </Grid>
+
+              {/* Bill Details Fields - Only appear when Purchase Invoice is selected */}
+              {Boolean(formik.values.purchaseInvoiceHeaderId) && (
+                <>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Invoice Number</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="Auto-populated"
+                        value={formik.values.invoiceNumber}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Vendor Invoice Number</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="Auto-populated"
+                        value={formik.values.vendorInvoiceNumber}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Vendor</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="Auto-populated"
+                        value={formik.values.vendorName}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Invoice Date</FormLabel>
+                      <TextField
+                        type="date"
+                        size="small"
+                        value={formik.values.invoiceDate}
+                        disabled
+                        InputLabelProps={{
+                          shrink: true,
+                        }}
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Purchase Order</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="Auto-populated"
+                        value={formik.values.purchaseOrderNumber}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Invoice Total</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="₹0.00"
+                        value={`₹${Number(formik.values.invoiceTotalAmount || 0).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}`}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Already Paid</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="₹0.00"
+                        value={`₹${Number(formik.values.invoicePaidAmount || 0).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}`}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Balance Due</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="₹0.00"
+                        value={`₹${Number(formik.values.invoiceBalanceAmount || 0).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}`}
+                        disabled
+                        sx={{ "& .MuiInputBase-input": { fontWeight: "bold" } }}
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Currency</FormLabel>
+                      <TextField
+                        size="small"
+                        placeholder="INR"
+                        value={formik.values.currency}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Exchange Rate</FormLabel>
+                      <TextField
+                        type="number"
+                        size="small"
+                        placeholder="1"
+                        value={formik.values.exchangeRate}
+                        disabled
+                      />
+                    </FormControl>
+                  </Grid>
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel>Invoice Status</FormLabel>
+                      <Box sx={{ mt: 0.5, display: "flex", alignItems: "center", minHeight: 40 }}>
+                        {formik.values.invoiceStatus ? (
+                          <Chip
+                            label={formik.values.invoiceStatus}
+                            color={
+                              formik.values.invoiceStatus === "POSTED" || formik.values.invoiceStatus === "PAID"
+                                ? "success"
+                                : formik.values.invoiceStatus === "PARTIALLY_PAID" || formik.values.invoiceStatus === "APPROVED"
+                                  ? "warning"
+                                  : formik.values.invoiceStatus === "CANCELLED"
+                                    ? "error"
+                                    : "primary"
+                            }
+                            size="small"
+                            sx={{ fontWeight: "bold" }}
+                          />
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            -
+                          </Typography>
+                        )}
+                      </Box>
+                    </FormControl>
+                  </Grid>
+                </>
+              )}
             </Grid>
 
             <Divider sx={{ my: 3 }} />
@@ -902,27 +886,68 @@ export default function PurchasePaymentComp() {
               sx={{ mb: 2 }}
             > Payment Details</Typography>
 
-            <Grid container spacing={2} >
+            <Grid container spacing={2}>
+              {/* 1. Payment Number */}
               <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl
-                  fullWidth
-                  size="small"
-                >
-                  <Grid>
                 <FormControl fullWidth>
                   <FormLabel>Payment Number</FormLabel>
                   <TextField
                     name="paymentNumber"
                     size="small"
-                    placeholder="e.g. UTR12345678"
+                    placeholder="Enter Payment Number (e.g. PAY-123456)"
                     value={formik.values.paymentNumber}
                     onChange={formik.handleChange}
-                    error={formik.touched.paymentNumber &&
-                      Boolean(formik.errors.paymentNumber)
+                    error={formik.touched.paymentNumber && Boolean(formik.errors.paymentNumber)}
+                  />
+                </FormControl>
+              </Grid>
+
+              {/* 2. Reference / UTR / Cheque No */}
+              <Grid size={{ xs: 12, md: 4 }}>
+                <FormControl fullWidth>
+                  <FormLabel>Reference / UTR / Cheque No</FormLabel>
+                  <TextField
+                    name="referenceNo"
+                    size="small"
+                    placeholder="Enter Reference / UTR / Cheque No (e.g. UTR12345678)"
+                    value={formik.values.referenceNo}
+                    onChange={formik.handleChange}
+                  />
+                </FormControl>
+              </Grid>
+
+              {/* 3. Payment Amount */}
+              <Grid size={{ xs: 12, md: 4 }}>
+                <FormControl fullWidth>
+                  <FormLabel>Payment Amount *</FormLabel>
+                  <TextField
+                    type="number"
+                    name="totalAmount"
+                    size="small"
+                    placeholder="Enter Payment Amount"
+                    value={formik.values.totalAmount}
+                    onChange={(e) => handlePaymentAmountChange(e.target.value)}
+                    inputProps={{
+                      min: 0,
+                      step: "any",
+                      max: formik.values.invoiceBalanceAmount,
+                    }}
+                    error={formik.touched.totalAmount && Boolean(formik.errors.totalAmount)}
+                    helperText={
+                      formik.touched.totalAmount
+                        ? formik.errors.totalAmount
+                        : `Maximum payable: ₹${Number(
+                          formik.values.invoiceBalanceAmount || 0).toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}`
                     }
                   />
                 </FormControl>
               </Grid>
+
+              {/* 4. Payment Date */}
+              <Grid size={{ xs: 12, md: 4 }}>
+                <FormControl fullWidth>
                   <FormLabel>Payment Date *</FormLabel>
                   <TextField
                     type="date"
@@ -930,40 +955,41 @@ export default function PurchasePaymentComp() {
                     size="small"
                     value={formik.values.paymentDate}
                     onChange={formik.handleChange}
-                    error={formik.touched.paymentDate &&
-                      Boolean(formik.errors.paymentDate)
-                    }
+                    error={formik.touched.paymentDate && Boolean(formik.errors.paymentDate)}
                   />
                 </FormControl>
               </Grid>
+
+              {/* 5. Payment Method */}
               <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth  size="small"
-                >
+                <FormControl fullWidth size="small" error={formik.touched.paymentMethodId && Boolean(formik.errors.paymentMethodId)}>
                   <FormLabel>Payment Method *</FormLabel>
                   <Select
                     name="paymentMethodId"
-                    value={formik.values.paymentMethodId}
+                    value={formik.values.paymentMethodId || ""}
                     onChange={formik.handleChange}
+                    displayEmpty
+                    renderValue={(selected) => {
+                      if (!selected) {
+                        return <span style={{ color: "#888" }}>Select Payment Method</span>;
+                      }
+                      const found = paymentMethods.find((pay: any) => String(pay.id) === String(selected));
+                      return found ? found.name : String(selected);
+                    }}
                   >
-                    {/* <MenuItem value="Bank Transfer">Bank Transfer / NEFT /RTGS</MenuItem>
-                    <MenuItem value="Cheque">Cheque</MenuItem>
-                    <MenuItem value="Cash">Cash</MenuItem>
-                    <MenuItem value="UPI">UPI</MenuItem>
-                    <MenuItem value="Credit Card">Credit Card</MenuItem> */}
-                    <MenuItem value="">Select Payment</MenuItem>
-                    {paymentMethods?.map(
-                      (pay: any) => (
-                        <MenuItem
-                          key={pay?.id}
-                          value={pay?.id}
-                        >
-                          {pay?.name}
-                        </MenuItem>
-                      )
-                    )}
+                    <MenuItem value="">
+                      <em>Select Payment Method</em>
+                    </MenuItem>
+                    {paymentMethods?.map((pay: any) => (
+                      <MenuItem key={pay?.id} value={pay?.id}>
+                        {pay?.name}
+                      </MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
+
+              {/* 6. Paying Bank / Cash Account */}
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl
                   fullWidth
@@ -973,72 +999,30 @@ export default function PurchasePaymentComp() {
                   <FormLabel>Paying Bank / Cash Account *</FormLabel>
                   <Select
                     name="bankAccountId"
-                    value={formik.values.bankAccountId}
+                    value={formik.values.bankAccountId || ""}
                     onChange={formik.handleChange}
+                    displayEmpty
+                    renderValue={(selected) => {
+                      if (!selected) {
+                        return <span style={{ color: "#888" }}>Select Bank / Cash Account</span>;
+                      }
+                      const found = bankAccounts.find((acc: any) => String(acc.id) === String(selected));
+                      return found ? `${found.account_name} (${found.account_number})` : String(selected);
+                    }}
                   >
-                    <MenuItem value="">Select Account</MenuItem>
-                    {bankAccounts?.map(
-                      (acc: any) => (
-                        <MenuItem
-                          key={acc?.id}
-                          value={acc?.id}
-                        >
-                          {acc?.account_name} ({acc?.account_number})
-                        </MenuItem>
-                      )
-                    )}
+                    <MenuItem value="">
+                      <em>Select Bank / Cash Account</em>
+                    </MenuItem>
+                    {bankAccounts?.map((acc: any) => (
+                      <MenuItem key={acc?.id} value={acc?.id}>
+                        {acc?.account_name} ({acc?.account_number})
+                      </MenuItem>
+                    ))}
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Payment Amount *</FormLabel>
-                  <TextField
-                    type="number"
-                    name="totalAmount"
-                    size="small"
-                    value={formik.values.totalAmount}
-                    onChange={(e) => handlePaymentAmountChange(e.target.value)}
-                    inputProps={{
-                      min: 0,
-                      max: formik.values.invoiceBalanceAmount,
-                    }}
-                    error={formik.touched.totalAmount && Boolean(formik.errors.totalAmount)
-                    }
-                    helperText={
-                      formik.touched.totalAmount
-                        ? formik.errors.totalAmount
-                        : `Maximum payable: ₹${Number(
-                          formik.values.invoiceBalanceAmount || 0).toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          }
-                          )}`
-                    }
-                  />
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Reference / UTR / Cheque No</FormLabel>
-                  <TextField
-                    name="referenceNo"
-                    size="small"
-                    placeholder="e.g. UTR12345678"
-                    value={formik.values.referenceNo}
-                    onChange={formik.handleChange}
-                  />
-                </FormControl>
-              </Grid>
-              {/* <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel> Payment Status</FormLabel>
-                  <TextField
-                    size="small"
-                    value={formik.values.status}
-                    disabled
-                  />
-                </FormControl>
-              </Grid> */}
+
+              {/* 7. Remarks */}
               <Grid size={{ xs: 12 }}>
                 <FormControl fullWidth>
                   <FormLabel>Remarks</FormLabel>
@@ -1047,6 +1031,7 @@ export default function PurchasePaymentComp() {
                     size="small"
                     multiline
                     rows={2}
+                    placeholder="Enter payment remarks..."
                     value={formik.values.remarks}
                     onChange={formik.handleChange}
                   />
@@ -1054,103 +1039,7 @@ export default function PurchasePaymentComp() {
               </Grid>
             </Grid>
 
-            <Divider sx={{ my: 3 }} />
 
-            <Typography
-              variant="h6"
-              fontWeight="bold"
-              sx={{ mb: 1 }}
-            >Purchase Order Line Items
-            </Typography>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{ mb: 2 }}
-            >
-              Line items associated with the
-              Purchase Order of the selected
-              Purchase Invoice.
-            </Typography>
-
-            {formik.values.purchaseOrderLines.length === 0 ? (
-              <Paper
-                variant="outlined"
-                sx={{
-                  p: 3,
-                  textAlign: "center",
-                }}
-              >
-                <Typography color="text.secondary">
-                  {formik.values.purchaseInvoiceHeaderId
-                    ? "No Purchase Order line items found for this invoice."
-                    : "Select a Purchase Invoice to view Purchase Order line items."}
-                </Typography>
-              </Paper>
-            ) : (
-              <TableContainer
-                component={Paper}
-                variant="outlined"
-              >
-                <Table
-                  size="small"
-                  sx={{ minWidth: 1000 }}
-                >
-                  <TableHead
-                    sx={{ backgroundColor: "#f5f5f5" }}
-                  >
-                    <TableRow>
-                      <TableCell>#</TableCell>
-                      <TableCell>Item</TableCell>
-                      <TableCell>SKU / Code</TableCell>
-                      <TableCell>Description</TableCell>
-                      <TableCell align="right">Quantity</TableCell>
-                      <TableCell align="right">Unit Price</TableCell>
-                      <TableCell align="right">Discount</TableCell>
-                      <TableCell align="right">Tax</TableCell>
-                      <TableCell align="right">Line Total</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {formik.values.purchaseOrderLines.map((line, index) => (
-                      <TableRow
-                        key={line.id || index}
-                      >
-                        <TableCell>{line.lineNumber || index + 1}</TableCell>
-                        <TableCell><Typography fontWeight="bold">{line.itemName || "-"}</Typography></TableCell>
-                        <TableCell>{line.sku || line.itemCode || "-"}</TableCell>
-                        <TableCell>{line.description || "-"}</TableCell>
-                        <TableCell align="right">{Number(line.quantity || 0).toFixed(2)}</TableCell>
-                        <TableCell align="right">
-                          ₹ {Number(line.unitPrice || 0).toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          }
-                          )}
-                        </TableCell>
-                        <TableCell align="right">
-                          {Number(line.discountAmount || 0).toFixed(2)}
-                          {Number(line.discountPercent || 0) > 0 && ` (${Number(line.discountPercent).toFixed(2)}%)`}
-                        </TableCell>
-                        <TableCell align="right">
-                          ₹{Number(line.taxAmount || 0).toFixed(2)}
-                          {Number(line.taxPercent || 0) > 0 &&
-                            ` (${Number(line.taxPercent).toFixed(2)}%)`}
-                        </TableCell>
-                        <TableCell
-                          align="right"
-                          sx={{ fontWeight: "bold" }}
-                        >
-                          ₹ {Number(line.lineTotal || 0).toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          }
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    )
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
 
             <Divider sx={{ my: 3 }} />
 
@@ -1250,180 +1139,117 @@ export default function PurchasePaymentComp() {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle sx={{ fontWeight: "bold", borderBottom: "1px solid #eee" }}>Payment Details -{" "} {selectedPayment?.paymentNumber}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: "bold", borderBottom: "1px solid #eee" }}>Payment Details - {selectedPayment?.paymentNumber || "-"}</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           {selectedPayment && (
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="caption" color="text.secondary">Payment Number</Typography>
-                <Typography fontWeight="bold">{selectedPayment.paymentNumber}</Typography>
+                <Typography fontWeight="bold">{selectedPayment.paymentNumber || "-"}</Typography>
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="caption" color="text.secondary">Purchase Invoice</Typography>
                 <Typography fontWeight="bold">
-                  {selectedPayment.lines?.[0]?.purchaseInvoice?.invoiceNumber ||
-                    selectedPayment.invoiceNumber || selectedPayment.lines?.[0]?.purchaseInvoiceLineId || "-"}
+                  {selectedPayment.purchaseInvoice?.invoiceNumber ||
+                    selectedPayment.lines?.[0]?.purchaseInvoice?.invoiceNumber ||
+                    selectedPayment.invoiceNumber ||
+                    (selectedPayment.purchaseInvoiceHeaderId ? `Invoice #${selectedPayment.purchaseInvoiceHeaderId}` : "-")}
+                </Typography>
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <Typography variant="caption" color="text.secondary">Vendor Invoice No</Typography>
+                <Typography fontWeight="bold">
+                  {selectedPayment.purchaseInvoice?.vendorInvoiceNumber || selectedPayment.vendorInvoiceNumber || "-"}
                 </Typography>
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="caption" color="text.secondary">Vendor</Typography>
                 <Typography fontWeight="bold">
-                  {selectedPayment.vendor?.vendor_name || selectedPayment.vendor?.vendor_name || "-"}
+                  {selectedPayment.vendor?.vendor_name || selectedPayment.vendor?.vendorName || selectedPayment.vendorName || "-"}
                 </Typography>
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="caption" color="text.secondary">Payment Date</Typography>
                 <Typography fontWeight="bold">
-                  {selectedPayment.paymentDate?.slice(0, 10) ||"-"}
+                  {selectedPayment.paymentDate ? selectedPayment.paymentDate.slice(0, 10) : "-"}
                 </Typography>
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <Typography variant="caption" color="text.secondary">Payment Method</Typography>
-                <Typography fontWeight="bold">{selectedPayment.paymentMethodId}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                >
-                  Reference / UTR
-                </Typography>
                 <Typography fontWeight="bold">
-                  {
-                    selectedPayment.referenceNo
-                  }
+                  {selectedPayment.paymentMethod?.name || selectedPayment.paymentMethodId || "-"}
                 </Typography>
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                >
-                  Status
-                </Typography>
+                <Typography variant="caption" color="text.secondary">Reference / UTR</Typography>
+                <Typography fontWeight="bold">{selectedPayment.referenceNo || "-"}</Typography>
+              </Grid>
+              <Grid size={{ xs: 12, md: 4 }}>
+                <Typography variant="caption" color="text.secondary">Status</Typography>
                 <Box>
-                  <Chip
-                    label={
-                      selectedPayment.status
-                    }
-                    color="primary"
-                    size="small"
-                  />
+                  <Chip label={selectedPayment.status || "-"} color="primary" size="small" />
                 </Box>
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                >
-                  Total Amount
-                </Typography>
-                <Typography
-                  fontWeight="bold"
-                  color="success.main"
-                >
-                  ₹
-                  {Number(
-                    selectedPayment.totalAmount ||
-                    0
-                  ).toLocaleString(
-                    "en-IN",
-                    {
-                      minimumFractionDigits: 2,
-                    }
-                  )}
+                <Typography variant="caption" color="text.secondary">Total Amount</Typography>
+                <Typography fontWeight="bold" color="success.main">
+                  ₹{Number(selectedPayment.totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                 </Typography>
               </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                >
-                  Currency
-                </Typography>
-                <Typography fontWeight="bold">
-                  {
-                    selectedPayment.currency ||
-                    "INR"
-                  }
-                </Typography>
+                <Typography variant="caption" color="text.secondary">Currency</Typography>
+                <Typography fontWeight="bold">{selectedPayment.currency || "INR"}</Typography>
               </Grid>
 
               <Grid size={{ xs: 12 }}>
                 <Divider sx={{ my: 2 }} />
 
-                <Typography
-                  variant="h6"
-                  fontWeight="bold"
-                  sx={{ mb: 1 }}
-                >
+                <Typography variant="h6" fontWeight="bold" sx={{ mb: 1 }}>
                   Allocated Invoice
                 </Typography>
 
-                <TableContainer
-                  component={Paper}
-                  variant="outlined"
-                >
+                <TableContainer component={Paper} variant="outlined">
                   <Table size="small">
-                    <TableHead
-                      sx={{
-                        backgroundColor:
-                          "#f5f5f5",
-                      }}
-                    >
+                    <TableHead sx={{ backgroundColor: "#f5f5f5" }}>
                       <TableRow>
-                        <TableCell>
-                          Invoice #
-                        </TableCell>
-
-                        <TableCell align="right">
-                          Amount Paid
-                        </TableCell>
-
-                        <TableCell>
-                          Remarks
-                        </TableCell>
+                        <TableCell>Invoice #</TableCell>
+                        <TableCell align="right">Amount Paid</TableCell>
+                        <TableCell>Remarks</TableCell>
                       </TableRow>
                     </TableHead>
 
                     <TableBody>
-                      {selectedPayment.lines?.map(
-                        (
-                          line: any,
-                          idx: number
-                        ) => (
-                          <TableRow
-                            key={idx}
-                          >
-                            <TableCell>
-                              {line
-                                .purchaseInvoice
-                                ?.invoiceNumber ||
-                                line.purchaseInvoiceLineId}
+                      {selectedPayment.lines && selectedPayment.lines.length > 0 ? (
+                        selectedPayment.lines.map((line: any, idx: number) => (
+                          <TableRow key={idx}>
+                            <TableCell sx={{ fontWeight: "bold" }}>
+                              {selectedPayment.purchaseInvoice?.invoiceNumber ||
+                                line.purchaseInvoice?.invoiceNumber ||
+                                line.invoiceNumber ||
+                                (line.purchaseInvoiceHeaderId ? `Invoice #${line.purchaseInvoiceHeaderId}` : `Line #${idx + 1}`)}
                             </TableCell>
-
-                            <TableCell
-                              align="right"
-                              sx={{
-                                fontWeight:
-                                  "bold",
-                              }}
-                            >
-                              ₹
-                              {Number(
-                                line.amountPaid ||
-                                0
-                              ).toFixed(
-                                2
-                              )}
+                            <TableCell align="right" sx={{ fontWeight: "bold", color: "success.main" }}>
+                              ₹{Number(line.amountPaid || selectedPayment.totalAmount || 0).toLocaleString("en-IN", {
+                                minimumFractionDigits: 2,
+                              })}
                             </TableCell>
-
-                            <TableCell>
-                              {line.remarks ||
-                                "-"}
-                            </TableCell>
+                            <TableCell>{line.remarks || selectedPayment.remarks || "-"}</TableCell>
                           </TableRow>
-                        )
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: "bold" }}>
+                            {selectedPayment.purchaseInvoice?.invoiceNumber ||
+                              selectedPayment.invoiceNumber ||
+                              (selectedPayment.purchaseInvoiceHeaderId ? `Invoice #${selectedPayment.purchaseInvoiceHeaderId}` : "-")}
+                          </TableCell>
+                          <TableCell align="right" sx={{ fontWeight: "bold", color: "success.main" }}>
+                            ₹{Number(selectedPayment.totalAmount || 0).toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </TableCell>
+                          <TableCell>{selectedPayment.remarks || "-"}</TableCell>
+                        </TableRow>
                       )}
                     </TableBody>
                   </Table>
@@ -1432,6 +1258,9 @@ export default function PurchasePaymentComp() {
             </Grid>
           )}
         </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setViewModalOpen(false)}>Close</Button>
+        </DialogActions>
       </Dialog>
 
       {/* GL Impact Modal */}
@@ -1513,8 +1342,8 @@ export default function PurchasePaymentComp() {
                             {selectedPaymentForGl?.bankAccount
                               ? `${selectedPaymentForGl.bankAccount.account_name} (${selectedPaymentForGl.bankAccount.account_number})`
                               : selectedPaymentForGl?.paymentMethod?.name
-                              ? `${selectedPaymentForGl.paymentMethod.name} Account`
-                              : "Bank / Cash Account"}
+                                ? `${selectedPaymentForGl.paymentMethod.name} Account`
+                                : "Bank / Cash Account"}
                           </strong>
                         </TableCell>
                         <TableCell>Outward payment disbursement</TableCell>

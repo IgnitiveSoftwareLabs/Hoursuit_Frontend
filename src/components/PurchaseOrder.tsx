@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Add, RemoveCircleOutline } from "@mui/icons-material";
+import { Add, RemoveCircleOutline, Edit, Delete, LocalShipping } from "@mui/icons-material";
 import Grid from "@mui/material/Grid";
 import toast from "react-hot-toast";
 import { useFormik } from "formik";
@@ -61,25 +61,51 @@ const PurchaseOrderComp: React.FC = () => {
   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [selectedChallan, setSelectedChallan] = useState<any>(null);
+  const [hasOpenedForm, setHasOpenedForm] = useState(false);
 
   const [updatePurchaseOrder] = useUpdatePurchaseOrderMutation();
   const [deletePurchaseOrder] = useDeletePurchaseOrderMutation();
 
   // Queries
   const { data: purchaseOrdersData,
-    // error,
-    // isLoading,
     refetch,
   } = useGetPurchaseOrdersQuery({ page: 1, limit: 10 });
-  const { data: warehousesData } = useFetchWarehousesQuery({ page: 1, limit: 100 });
-  const { data: transportationModeData } = useGetTransportationModesQuery();
-  const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
-  const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 100 });
-  const { data: workCategoriesData } = useGetWorkCategoriesQuery();
-  const { data: subsidiariesData } = useGetSubsidiariesQuery();
-  const { data: hsnsacData } = useGetHSNSACsQuery();
-  const { data: citiesData } = useGetCitiesQuery();
-  const { data: uomsData } = useGetUOMsQuery();
+  const { data: warehousesData } = useFetchWarehousesQuery(
+    { page: 1, limit: 100 },
+    { skip: !hasOpenedForm }
+  );
+  const { data: transportationModeData } = useGetTransportationModesQuery(
+    undefined,
+    { skip: !hasOpenedForm }
+  );
+  const { data: vendorsData } = useGetVendorsQuery(
+    { page: 1, option: true },
+    { skip: !hasOpenedForm }
+  );
+  const { data: itemsData } = useGetItemsQuery(
+    { page: 1, limit: 100 },
+    { skip: !hasOpenedForm }
+  );
+  const { data: workCategoriesData } = useGetWorkCategoriesQuery(
+    undefined,
+    { skip: !hasOpenedForm }
+  );
+  const { data: subsidiariesData } = useGetSubsidiariesQuery(
+    undefined,
+    { skip: !hasOpenedForm }
+  );
+  const { data: hsnsacData } = useGetHSNSACsQuery(
+    undefined,
+    { skip: !hasOpenedForm }
+  );
+  const { data: citiesData } = useGetCitiesQuery(
+    undefined,
+    { skip: !hasOpenedForm }
+  );
+  const { data: uomsData } = useGetUOMsQuery(
+    undefined,
+    { skip: !hasOpenedForm }
+  );
 
   const transportationModes = Array.isArray(transportationModeData) ? transportationModeData : transportationModeData?.result ?? [];
   const workCategories = Array.isArray(workCategoriesData) ? workCategoriesData : workCategoriesData?.result ?? [];
@@ -143,7 +169,7 @@ const PurchaseOrderComp: React.FC = () => {
     },
     validationSchema: Yup.object({
       header: Yup.object({
-        purchaseNo: Yup.string().required("Purchase Number is required"),
+        purchaseNo: Yup.string().nullable(),
         purchaseDate: Yup.date().required("Purchase Date is required"),
         // customer_id: Yup.string().required("Customer is required"),
         vendor_id: Yup.string().required("Vendor is required"),
@@ -194,13 +220,13 @@ const PurchaseOrderComp: React.FC = () => {
   const selectedWarehouseId = formik.values.header.warehouse_id;
   const { data: godownsData } = useFetchGodownsQuery(
     { warehouseId: Number(selectedWarehouseId), page: 1, limit: 50 },
-    { skip: !selectedWarehouseId }
+    { skip: !selectedWarehouseId || !hasOpenedForm }
   );
 
   const selectedGodownId = formik.values.header.godown_id;
   const { data: stacksData } = useFetchStacksQuery(
     { godownId: Number(selectedGodownId), page: 1, limit: 50 },
-    { skip: !selectedGodownId }
+    { skip: !selectedGodownId || !hasOpenedForm }
   );
 
   const godowns = Array.isArray(godownsData) ? godownsData : godownsData?.result ?? [];
@@ -250,7 +276,12 @@ const PurchaseOrderComp: React.FC = () => {
 
     if (selectedItem) {
       lineItem.hsn_sac_id = selectedItem.hsn_sac_code_id ?? selectedItem.hsn_sac_id ?? "";
-      lineItem.work_category_id = selectedItem.work_category_id ?? selectedItem.item_category_id ?? "";
+      lineItem.work_category_id =
+        selectedItem.work_category_id ??
+        selectedItem.workCategoryId ??
+        selectedItem.item_category_id ??
+        selectedItem.workCategory?.id ??
+        "";
       lineItem.uom_id = selectedItem.uom_id ?? "";
     } else {
       lineItem.hsn_sac_id = "";
@@ -312,7 +343,7 @@ const PurchaseOrderComp: React.FC = () => {
         ndian_tax_nature: "Good",
         remarks: "",
         isActive: true,
-      }
+      },
     ]);
   };
 
@@ -330,7 +361,17 @@ const PurchaseOrderComp: React.FC = () => {
     const item = purchaseOrders.find((x: any) => String(x.id) === String(id));
     if (item) {
       const header = item.header ?? item;
+      const status = String(header.status || item.status || "DRAFT").toUpperCase();
+      if (status !== "DRAFT") {
+        toast.error("Only DRAFT Purchase Orders can be updated.");
+        return;
+      }
+      setHasOpenedForm(true);
       const lineSource = item.lineItems ?? item.line_items ?? item.purchaseOrderLines ?? [];
+      const rawPurchaseDate = header.purchaseDate ?? header.purchase_date;
+      const rawDeliveryDate = header.deliveryDate ?? header.delivery_date;
+      const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
+
       formik.setValues({
         header: {
           purchaseNo: header.purchaseNo ?? header.purchase_no ?? "",
@@ -343,8 +384,8 @@ const PurchaseOrderComp: React.FC = () => {
           vehicleNumber: header.vehicleNumber ?? header.vehicle_number ?? "",
           customer_id: header.customer_id ?? header.customerId ?? "",
           vendor_id: header.vendor_id ?? header.vendorId ?? "",
-          purchaseDate: header.purchaseDate ?? header.purchase_date ?? new Date().toISOString().split("T")[0],
-          deliveryDate: header.deliveryDate ?? header.delivery_date ?? "",
+          purchaseDate: formatDate(rawPurchaseDate) || new Date().toISOString().split("T")[0],
+          deliveryDate: formatDate(rawDeliveryDate),
           city_id: header.city_id ?? header.cityId ?? "",
           transportation_mode_id: header.transportation_mode_id ?? header.transportationModeId ?? "",
           warehouse_id: header.warehouse_id ?? header.warehouseId ?? "",
@@ -357,7 +398,15 @@ const PurchaseOrderComp: React.FC = () => {
           ? lineSource.map((line: any) => ({
               item_id: line.item_id ?? line.itemId ?? "",
               hsn_sac_id: line.hsn_sac_id ?? line.hsnSacId ?? "",
-              work_category_id: line.work_category_id ?? line.workCategoryId ?? "",
+              work_category_id:
+                line.work_category_id ??
+                line.workCategoryId ??
+                line.work_category_master_id ??
+                line.workCategory?.id ??
+                line.work_category?.id ??
+                line.item?.work_category_id ??
+                line.item?.workCategory?.id ??
+                "",
               work_order_no: line.work_order_no ?? line.workOrderNo ?? "",
               lot_number: line.lot_number ?? line.lotNumber ?? "",
               use_rate_calculation: line.use_rate_calculation ?? line.useRateCalculation ?? true,
@@ -401,22 +450,6 @@ const PurchaseOrderComp: React.FC = () => {
     }
   };
 
-  // // Handle view
-  // const handleView = (challan: any) => {
-  //   navigate(`/purchase-order/view/${challan.id}`);
-  //   // handleMenuClose();
-  // };
-
-  // // Handle delete
-  // const handleDelete = (purchaseOrder: any) => {
-  //   if (!canDelete("purchase_order")) {
-  //     toast.error("You do not have permission to delete this purchase order");
-  //     return;
-  //   }
-  //   setSelectedChallan(purchaseOrder);
-  //   setDeleteDialogOpen(true);
-  // };
-
   // Confirm delete
   const confirmDelete = async () => {
     const targetId = selectedChallan?.id ?? deleteId;
@@ -424,6 +457,18 @@ const PurchaseOrderComp: React.FC = () => {
       setDeleteDialogOpen(false);
       setSelectedChallan(null);
       return;
+    }
+
+    const item = purchaseOrders.find((x: any) => Number(x.id) === Number(targetId));
+    if (item) {
+      const status = String(item.status || item.header?.status || "DRAFT").toUpperCase();
+      if (status !== "DRAFT") {
+        toast.error("Only DRAFT Purchase Orders can be deleted.");
+        setDeleteDialogOpen(false);
+        setSelectedChallan(null);
+        setDeleteId(null);
+        return;
+      }
     }
 
     if (!canDelete("purchase_order")) {
@@ -487,6 +532,67 @@ const PurchaseOrderComp: React.FC = () => {
         );
       }
     },
+    {
+      key: "actions",
+      label: "Actions",
+      render: (row: any) => {
+        const isDraft = String(row.status || "DRAFT").toUpperCase() === "DRAFT";
+        const status = String(row.status || "").toUpperCase();
+        const showGrnRedirect =
+          status === "RECEIVED" ||
+          status === "PARTIAL_RECEIVED" ||
+          status === "PARTIALLY_RECEIVED" ||
+          status === "PARTIAL" ||
+          status === "COMPLETED";
+
+        return (
+          <Box sx={{ display: "flex", gap: 1 }}>
+            {showGrnRedirect && (
+              <IconButton
+                size="small"
+                color="secondary"
+                onClick={() => navigate("/grn")}
+                aria-label="View GRN"
+                title="Go to GRN"
+              >
+                <LocalShipping />
+              </IconButton>
+            )}
+
+            {canUpdate("purchase_order") && (
+              <IconButton
+                size="small"
+                color="primary"
+                disabled={!isDraft}
+                onClick={() => handleEdit(Number(row.id))}
+                aria-label="Edit Purchase Order"
+              >
+                <Edit />
+              </IconButton>
+            )}
+            {canDelete("purchase_order") && (
+              <IconButton
+                size="small"
+                color="error"
+                disabled={!isDraft}
+                onClick={() => {
+                  if (!isDraft) {
+                    toast.error("Only DRAFT Purchase Orders can be deleted.");
+                    return;
+                  }
+                  setSelectedChallan(row);
+                  setDeleteId(Number(row.id));
+                  setDeleteDialogOpen(true);
+                }}
+                aria-label="Delete Purchase Order"
+              >
+                <Delete />
+              </IconButton>
+            )}
+          </Box>
+        );
+      }
+    }
   ];
 
   if (!canRead("purchase_order")) {
@@ -514,6 +620,7 @@ const PurchaseOrderComp: React.FC = () => {
             variant="contained"
             startIcon={<Add />}
             onClick={() => {
+              setHasOpenedForm(true);
               setOpen(true);
               setIsEdit(false);
               setEditId(null);
@@ -529,17 +636,6 @@ const PurchaseOrderComp: React.FC = () => {
         columns={columns}
         data={purchaseOrders}
         getRowId={(row: any) => row.id}
-        onEdit={
-          canUpdate("purchase_order") ? (id) => handleEdit(Number(id)) : undefined
-        }
-        onDelete={
-          canDelete("purchase_order")
-            ? (id) => {
-              setDeleteId(Number(id));
-              setDeleteDialogOpen(true);
-            }
-            : undefined
-        }
       />
 
       <Dialog open={isDeleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} fullWidth maxWidth="xs">
@@ -563,20 +659,6 @@ const PurchaseOrderComp: React.FC = () => {
           <Box component="form" onSubmit={formik.handleSubmit} sx={{ mt: 1 }}>
             {/* <Typography variant="h6" gutterBottom color="primary">Header Information</Typography> */}
             <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={formik.touched.header?.purchaseNo && !!formik.errors.header?.purchaseNo}>
-                  <FormLabel>Purchase Number</FormLabel>
-                  <TextField
-                    size="small"
-                    name="header.purchaseNo"
-                    placeholder="Enter purchase number"
-                    value={formik.values.header.purchaseNo}
-                    onChange={formik.handleChange}
-                    error={formik.touched.header?.purchaseNo && !!formik.errors.header?.purchaseNo}
-                    helperText={formik.touched.header?.purchaseNo && (formik.errors.header as any)?.purchaseNo}
-                  />
-                </FormControl>
-              </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth error={formik.touched.header?.purchaseDate && !!formik.errors.header?.purchaseDate}>
                   <FormLabel>Purchase Date</FormLabel>

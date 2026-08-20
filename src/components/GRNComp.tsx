@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
   Add,
@@ -8,6 +9,7 @@ import {
   Delete,
   Edit,
   RemoveCircleOutline,
+  ReceiptLong,
 } from "@mui/icons-material";
 import Grid from "@mui/material/Grid";
 import toast from "react-hot-toast";
@@ -47,7 +49,7 @@ const createDefaultLineItem = () => ({
   serialNo: "",
   manufacturingDate: "",
   expiryDate: "",
-  qcRequired: true,
+  qcRequired: false,
   status: "PENDING",
   remarks: "",
 });
@@ -71,34 +73,45 @@ import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import DynamicTable from './Tables';
 
 const GRNComp: React.FC = () => {
+  const navigate = useNavigate();
   const { canRead, canCreate, canUpdate, canDelete } = usePermissions();
   const [isEdit, setIsEdit] = useState(false);
   const [isOpen, setOpen] = useState(false);
   const [editId, setEditId] = useState<number | string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [grnToDelete, setGrnToDelete] = useState<any>(null);
-  const [activeSection, setActiveSection] = useState<"lineItems" | "transport" | "glImpact">("lineItems");
+  const [activeSection, setActiveSection] = useState<"lineItems" | "transport">("lineItems");
 
   const [selectedGrnForGl, setSelectedGrnForGl] = useState<any>(null);
   const [glImpactOpen, setGlImpactOpen] = useState(false);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [grnToCancel, setGrnToCancel] = useState<any>(null);
   const [viewOpen, setViewOpen] = useState(false);
+  const [hasOpenedForm, setHasOpenedForm] = useState(false);
 
-  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 50 });
-  const { data: warehousesData } = useFetchWarehousesQuery({ page: 1, limit: 100 });
-  const { data: transportationModeData } = useGetTransportationModesQuery();
-  const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 100 });
-  const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 10 });
-  // const { data: journalEntriesData, isLoading: isJournalLoading, error: journalError } = useGetJournalEntriesQuery(
-  //   { grnId: selectedGrnForGl?.id },
-  //   { skip: !selectedGrnForGl?.id }
-  // );
+  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery(
+    { page: 1, limit: 50 },
+    { skip: !hasOpenedForm }
+  );
+  const { data: warehousesData } = useFetchWarehousesQuery(
+    { page: 1, limit: 100 },
+    { skip: !hasOpenedForm }
+  );
+  const { data: transportationModeData } = useGetTransportationModesQuery(
+    undefined,
+    { skip: !hasOpenedForm }
+  );
+  const { data: itemsData } = useGetItemsQuery(
+    { page: 1, limit: 100 },
+    { skip: !hasOpenedForm }
+  );
+  const { data: grnsData, refetch: refetchGRNs } = useGetGRNsQuery({ page: 1, limit: 10 });
 
   const {
     data: journalEntriesData,
     isLoading: isJournalLoading,
     error: journalError,
+    refetch: refetchJournalEntries,
   } = useGetJournalEntryByIdQuery(
     {
       id: selectedGrnForGl?.id as number,
@@ -108,6 +121,12 @@ const GRNComp: React.FC = () => {
       skip: !selectedGrnForGl?.id,
     }
   );
+
+  useEffect(() => {
+    if (glImpactOpen && selectedGrnForGl?.id && typeof refetchJournalEntries === "function") {
+      refetchJournalEntries().catch(() => {});
+    }
+  }, [glImpactOpen, selectedGrnForGl?.id, refetchJournalEntries]);
 
   const purchaseOrders = useMemo(
     () => (Array.isArray(purchaseOrdersData) ? purchaseOrdersData : purchaseOrdersData?.result ?? []),
@@ -119,7 +138,6 @@ const GRNComp: React.FC = () => {
   const warehouses = Array.isArray(warehousesData) ? warehousesData : warehousesData?.result ?? [];
   const items = Array.isArray(itemsData) ? itemsData : itemsData?.result ?? [];
   const grns = Array.isArray(grnsData) ? grnsData : grnsData?.result ?? [];
-  // const journalEntries = Array.isArray(journalEntriesData) ? journalEntriesData : journalEntriesData?.result ?? [];
   const journalHeader = journalEntriesData?.result;
 
   const journalEntries = journalHeader?.lines ?? [];
@@ -140,6 +158,7 @@ const GRNComp: React.FC = () => {
       record?.details,
       record?.data?.lineItems,
       record?.data?.purchaseOrderLines,
+      record?.data?.purchase_order_lines,
       record?.header?.lineItems,
       record?.header?.purchaseOrderLines,
       record?.header?.purchase_order_lines,
@@ -153,14 +172,14 @@ const GRNComp: React.FC = () => {
     purchaseOrderLineId: line?.purchaseOrderLineId ?? line?.purchase_order_line_id ?? line?.poLineId ?? line?.id ?? line?.lineId ?? "",
     itemId: line?.itemId ?? line?.item_id ?? line?.item?.id ?? line?.item?.item_id ?? "",
     orderedQty: Number(line?.orderedQty ?? line?.ordered_quantity ?? line?.quantity ?? line?.qty ?? line?.ordered_qty ?? 0),
-    receivedQty: Number(line?.receivedQty ?? line?.received_quantity ?? 0),
-    acceptedQty: Number(line?.acceptedQty ?? line?.accepted_quantity ?? 0),
-    rejectedQty: Number(line?.rejectedQty ?? line?.rejected_quantity ?? 0),
+    receivedQty: 0,
+    acceptedQty: 0,
+    rejectedQty: 0,
     batchNo: line?.batchNo ?? line?.batch_no ?? "",
     serialNo: line?.serialNo ?? line?.serial_no ?? "",
     manufacturingDate: line?.manufacturingDate ?? line?.manufacturing_date ?? "",
     expiryDate: line?.expiryDate ?? line?.expiry_date ?? "",
-    qcRequired: line?.qcRequired ?? line?.qc_required ?? true,
+    qcRequired: line?.qcRequired ?? line?.qc_required ?? false,
     status: line?.status ?? "PENDING",
     remarks: line?.remarks ?? "",
   });
@@ -169,6 +188,7 @@ const GRNComp: React.FC = () => {
     try {
       await updateGRNStatus({ id, body: { status: newStatus } }).unwrap();
       toast.success(`GRN status updated to ${newStatus}`);
+      refetchGRNs();
     } catch (error: any) {
       toast.error(error?.data?.message || "Failed to update GRN status");
     }
@@ -211,14 +231,11 @@ const GRNComp: React.FC = () => {
           receivedQty: 0,
           acceptedQty: 0,
           rejectedQty: 0,
-          // warehouseId: "",
-          // godownId: "",
-          // stackId: "",
           batchNo: "",
           serialNo: "",
           manufacturingDate: "",
           expiryDate: "",
-          qcRequired: true,
+          qcRequired: false,
           status: "PENDING",
           remarks: "",
         },
@@ -226,7 +243,7 @@ const GRNComp: React.FC = () => {
     },
     validationSchema: Yup.object({
       header: Yup.object({
-        grnNo: Yup.string().required("GRN Number is required"),
+        grnNo: Yup.string().nullable(),
         grnDate: Yup.date().required("GRN Date is required"),
         warehouseId: Yup.string().required("Warehouse is required"),
       }),
@@ -286,7 +303,7 @@ const GRNComp: React.FC = () => {
     const selectedPoId = formik.values.header.purchaseOrderId;
     const selectedPo = purchaseOrders.find((po: any) => String(po.id) === String(selectedPoId));
 
-    if (!selectedPoId || !selectedPo) {
+    if (!selectedPoId || !selectedPo || isEdit) {
       return;
     }
 
@@ -310,11 +327,31 @@ const GRNComp: React.FC = () => {
       lineItems: mappedLineItems.length ? mappedLineItems : [createDefaultLineItem()],
     });
     setActiveSection("lineItems");
-  }, [formik.values.header.purchaseOrderId, purchaseOrders]);
+  }, [formik.values.header.purchaseOrderId, purchaseOrders, isEdit]);
 
   const updateLineItemField = (index: number, field: string, value: any) => {
     const lineItems = [...formik.values.lineItems];
-    lineItems[index] = { ...lineItems[index], [field]: value };
+    let finalValue = value;
+
+    if (["receivedQty", "acceptedQty", "rejectedQty"].includes(field)) {
+      const numVal = Number(value || 0);
+      const ordered = Number(lineItems[index]?.orderedQty || 0);
+      if (numVal > ordered && ordered > 0) {
+        const fieldLabel =
+          field === "receivedQty"
+            ? "Received"
+            : field === "acceptedQty"
+              ? "Accepted"
+              : "Rejected";
+        toast.error(
+          `${fieldLabel} quantity cannot be greater than ordered quantity (${ordered})!`,
+          { id: `qty-warning-${index}-${field}` }
+        );
+        finalValue = ordered;
+      }
+    }
+
+    lineItems[index] = { ...lineItems[index], [field]: finalValue };
     formik.setFieldValue("lineItems", lineItems);
   };
 
@@ -355,6 +392,13 @@ const GRNComp: React.FC = () => {
     }
 
     const header = record?.header ?? record;
+    const initialPoId = header?.purchaseOrderId ?? header?.purchase_order_id ?? record?.purchaseOrderId ?? record?.purchase_order_id ?? "";
+
+    setIsEdit(true);
+    setEditId(record?.id ?? null);
+    setSelectedGrnForGl(record);
+    setHasOpenedForm(true);
+
     const lineSource = record?.lineItems ?? record?.line_items ?? [];
 
     formik.setValues({
@@ -364,7 +408,7 @@ const GRNComp: React.FC = () => {
         warehouseId: header?.warehouseId ?? header?.warehouse_id ?? "",
         godownId: header?.godownId ?? header?.godown_id ?? "",
         stackId: header?.stackId ?? header?.stack_id ?? "",
-        grnDate: header?.grnDate ?? header?.grn_date ?? new Date().toISOString().split("T")[0],
+        grnDate: header?.grnDate ?? header?.grn_date ? String(header?.grnDate ?? header?.grn_date).slice(0, 10) : new Date().toISOString().split("T")[0],
         transportation_mode_id: header?.transportation_mode_id ?? "",
         transporterName: header?.transporterName ?? header?.transporter_name ?? "",
         driverName: header?.driverName ?? header?.driver_name ?? "",
@@ -385,16 +429,13 @@ const GRNComp: React.FC = () => {
           serialNo: line?.serialNo ?? line?.serial_no ?? "",
           manufacturingDate: line?.manufacturingDate ?? line?.manufacturing_date ?? "",
           expiryDate: line?.expiryDate ?? line?.expiry_date ?? "",
-          qcRequired: line?.qcRequired ?? true,
+          qcRequired: line?.qcRequired ?? false,
           status: line?.status ?? "PENDING",
           remarks: line?.remarks ?? "",
         }))
         : [createDefaultLineItem()],
     });
 
-    setEditId(record?.id ?? null);
-    setSelectedGrnForGl(record);
-    setIsEdit(true);
     setOpen(true);
   };
 
@@ -482,53 +523,88 @@ const GRNComp: React.FC = () => {
       key: "actions",
       label: "Actions",
       render: (row: any) => {
-        const isApproved = row.status === "APPROVED" || row.status === "RECEIVED";
-        const isCancelled = row.status === "CANCELLED";
+        const isDraft = String(row.status || "DRAFT").toUpperCase() === "DRAFT";
+        const isApproved = row.status === "APPROVED" || row.status === "RECEIVED" || row.status === "COMPLETED";
+
         return (
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-            {!isApproved && !isCancelled && (
-              <IconButton
-                size="small"
-                color="success"
-                onClick={() => handleStatusChange(row.id, "RECEIVED")}
-                aria-label="Mark as Received"
-              >
-                <CheckCircleOutline />
-              </IconButton>
-            )}
             {isApproved && (
+              <>
+                <IconButton
+                  size="small"
+                  color="secondary"
+                  onClick={() => navigate("/purchase-invoice")}
+                  aria-label="View Purchase Invoice"
+                  title="Go to Purchase Invoice"
+                >
+                  <ReceiptLong />
+                </IconButton>
+
+                <IconButton
+                  size="small"
+                  color="info"
+                  onClick={() => {
+                    setSelectedGrnForGl(row);
+                    setGlImpactOpen(true);
+                  }}
+                  aria-label="GL impact"
+                >
+                  <Assessment />
+                </IconButton>
+              </>
+            )}
+
+            {canUpdate("grn") && (
               <IconButton
                 size="small"
-                color="info"
+                color="primary"
+                disabled={!isDraft}
                 onClick={() => {
-                  setSelectedGrnForGl(row);
-                  setGlImpactOpen(true);
+                  if (!isDraft) {
+                    toast.error("Only DRAFT GRNs can be updated.");
+                    return;
+                  }
+                  handleEdit(row);
                 }}
-                aria-label="GL impact"
+                aria-label="Edit GRN"
               >
-                <Assessment />
-              </IconButton>
-            )}
-            {(canUpdate("grn")) && (
-              <IconButton size="small" color="primary" onClick={() => handleEdit(row)} aria-label="Edit GRN">
                 <Edit />
               </IconButton>
             )}
-            {(canDelete("grn")) && (
-              <IconButton size="small" color="error" onClick={() => handleDeleteRequest(row)} aria-label="Delete GRN">
+
+            {canDelete("grn") && (
+              <IconButton
+                size="small"
+                color="error"
+                disabled={!isDraft}
+                onClick={() => {
+                  if (!isDraft) {
+                    toast.error("Only DRAFT GRNs can be deleted.");
+                    return;
+                  }
+                  handleDeleteRequest(row);
+                }}
+                aria-label="Delete GRN"
+              >
                 <Delete />
               </IconButton>
             )}
-            {!isCancelled && (
-              <IconButton
-                size="small"
-                color="warning"
-                onClick={() => handleGrnCancelRequest(row)}
-                aria-label="Cancel GRN"
-              >
-                <Cancel />
-              </IconButton>
-            )}
+
+            <IconButton
+              size="small"
+              color="warning"
+              disabled={!isDraft}
+              onClick={() => {
+                if (!isDraft) {
+                  toast.error("Only DRAFT GRNs can be cancelled.");
+                  return;
+                }
+                handleGrnCancelRequest(row);
+              }}
+              aria-label="Cancel GRN"
+            >
+              <Cancel />
+            </IconButton>
           </Box>
         );
       }
@@ -559,6 +635,7 @@ const GRNComp: React.FC = () => {
             variant="contained"
             startIcon={<Add />}
             onClick={() => {
+              setHasOpenedForm(true);
               setOpen(true);
               setSelectedGrnForGl(null);
               setIsEdit(false);
@@ -665,8 +742,16 @@ const GRNComp: React.FC = () => {
                     journalEntries.map((entry: any, idx: number) => (
                       <TableRow key={idx}>
                         <TableCell>{entry?.account?.account_name || entry?.account_name || entry?.accountId || `Acct ${idx + 1}`}</TableCell>
-                        <TableCell align="right">{Number(entry?.debit_amount ?? entry?.dr ?? 0) || '-'}</TableCell>
-                        <TableCell align="right">{Number(entry?.credit_amount ?? entry?.cr ?? 0) || '-'}</TableCell>
+                        <TableCell align="right" sx={{ color: Number(entry?.debit_amount ?? entry?.dr ?? 0) > 0 ? "success.main" : "text.secondary", fontWeight: Number(entry?.debit_amount ?? entry?.dr ?? 0) > 0 ? 600 : 400 }}>
+                          {Number(entry?.debit_amount ?? entry?.dr ?? 0) > 0
+                            ? `₹${Number(entry?.debit_amount ?? entry?.dr ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : "-"}
+                        </TableCell>
+                        <TableCell align="right" sx={{ color: Number(entry?.credit_amount ?? entry?.cr ?? 0) > 0 ? "error.main" : "text.secondary", fontWeight: Number(entry?.credit_amount ?? entry?.cr ?? 0) > 0 ? 600 : 400 }}>
+                          {Number(entry?.credit_amount ?? entry?.cr ?? 0) > 0
+                            ? `₹${Number(entry?.credit_amount ?? entry?.cr ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                            : "-"}
+                        </TableCell>
                       </TableRow>
                     ))
                   ) : (
@@ -699,6 +784,7 @@ const GRNComp: React.FC = () => {
                 <TableHead sx={{ bgcolor: "grey.100" }}>
                   <TableRow>
                     <TableCell>Account</TableCell>
+                    <TableCell>Narration</TableCell>
                     <TableCell align="right">Debit (DR)</TableCell>
                     <TableCell align="right">Credit (CR)</TableCell>
                   </TableRow>
@@ -706,34 +792,63 @@ const GRNComp: React.FC = () => {
                 <TableBody>
                   {isJournalLoading ? (
                     <TableRow>
-                      <TableCell colSpan={3} align="center">
+                      <TableCell colSpan={4} align="center">
                         Loading GL entries...
                       </TableCell>
                     </TableRow>
                   ) : journalEntries.length > 0 ? (
-                    journalEntries.map((line: any) => {
-                      const debit = parseFloat(line.debit_amount);
-                      const credit = parseFloat(line.credit_amount);
+                    <>
+                      {journalEntries.map((line: any) => {
+                        const debit = parseFloat(line.debit_amount || 0);
+                        const credit = parseFloat(line.credit_amount || 0);
 
-                      return (
-                        <TableRow key={line.id}>
-                          <TableCell>
-                            {line.account.account_name}
-                          </TableCell>
+                        return (
+                          <TableRow key={line.id}>
+                            <TableCell>
+                              {line.account?.account_number ? `${line.account.account_number} - ` : ""}
+                              {line.account?.account_name || line.account_name || `Account #${line.account_id}`}
+                            </TableCell>
 
-                          <TableCell align="right">
-                            {debit}
-                          </TableCell>
+                            <TableCell>
+                              {line.narration || line.description || journalHeader?.narration || "-"}
+                            </TableCell>
 
-                          <TableCell align="right">
-                            {credit}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
+                            <TableCell align="right" sx={{ color: debit > 0 ? "success.main" : "text.secondary", fontWeight: debit > 0 ? 600 : 400 }}>
+                              {debit > 0
+                                ? `₹${debit.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : "-"}
+                            </TableCell>
+
+                            <TableCell align="right" sx={{ color: credit > 0 ? "error.main" : "text.secondary", fontWeight: credit > 0 ? 600 : 400 }}>
+                              {credit > 0
+                                ? `₹${credit.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                : "-"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+
+                      <TableRow sx={{ bgcolor: "grey.100" }}>
+                        <TableCell colSpan={2} align="right">
+                          <strong>Total</strong>
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ color: "success.main" }}>
+                          <strong>
+                            ₹{Number(journalHeader?.total_debit ?? journalEntries.reduce((sum: number, l: any) => sum + Number(l.debit_amount || 0), 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </strong>
+                        </TableCell>
+
+                        <TableCell align="right" sx={{ color: "error.main" }}>
+                          <strong>
+                            ₹{Number(journalHeader?.total_credit ?? journalEntries.reduce((sum: number, l: any) => sum + Number(l.credit_amount || 0), 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </strong>
+                        </TableCell>
+                      </TableRow>
+                    </>
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={3} align="center">
+                      <TableCell colSpan={4} align="center">
                         {journalError
                           ? "Unable to load GL entries."
                           : "No GL postings found for this GRN."}
@@ -768,23 +883,7 @@ const GRNComp: React.FC = () => {
         <DialogTitle>{isEdit ? "Edit GRN" : "Create GRN"}</DialogTitle>
         <DialogContent sx={{ p: 3 }}>
           <Box component="form" onSubmit={formik.handleSubmit}>
-            {/* <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>GRN Header</Typography> */}
             <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={formik.touched.header?.grnNo && !!formik.errors.header?.grnNo}>
-                  <FormLabel>GRN Number</FormLabel>
-                  <TextField
-                    size="small"
-                    name="header.grnNo"
-                    placeholder="Enter GRN Number"
-                    value={formik.values.header.grnNo}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    error={formik.touched.header?.grnNo && !!formik.errors.header?.grnNo}
-                    helperText={formik.touched.header?.grnNo && (formik.errors.header as any)?.grnNo}
-                  />
-                </FormControl>
-              </Grid>
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth>
                   <FormLabel>Purchase Order</FormLabel>
@@ -794,16 +893,18 @@ const GRNComp: React.FC = () => {
                     value={formik.values.header.purchaseOrderId}
                     onChange={formik.handleChange}
                     displayEmpty
+                    disabled={isEdit}
                   >
                     <MenuItem value="">Select Purchase Order</MenuItem>
-                    {purchaseOrders.map((po: any) => (
-                      <MenuItem key={po.id} value={po.id}>
-                        {po.purchaseNo || `#${po.id}`}
+                    {purchaseOrders?.map((po: any) => (
+                      <MenuItem key={po?.id} value={po?.id}>
+                        {po?.purchaseNo || `#${po?.id}`}
                       </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </Grid>
+
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth error={formik.touched.header?.grnDate && !!formik.errors.header?.grnDate}>
                   <FormLabel>GRN Date</FormLabel>
@@ -821,6 +922,65 @@ const GRNComp: React.FC = () => {
                 </FormControl>
               </Grid>
 
+              {/* PO Read-Only Reference Details */}
+              {(() => {
+                const selectedPo = purchaseOrders.find(
+                  (po: any) => String(po.id) === String(formik.values.header.purchaseOrderId)
+                );
+                if (!selectedPo) return null;
+                const vendorName =
+                  selectedPo.vendor?.vendor_name || selectedPo.vendor?.name || selectedPo.vendor_name || "-";
+                const poDate = selectedPo.purchaseDate
+                  ? selectedPo.purchaseDate.slice(0, 10)
+                  : selectedPo.purchase_date
+                    ? selectedPo.purchase_date.slice(0, 10)
+                    : "-";
+                const locationName = selectedPo.city?.city_name || "-";
+                const subsidiaryName = selectedPo.subsidiary?.subsidiary_name || "-";
+                const shippedFrom = selectedPo.shipped_from || "-";
+                const shippedTo = selectedPo.shipped_to || "-";
+                return (
+                  <>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <FormControl fullWidth>
+                        <FormLabel>Vendor (PO Reference)</FormLabel>
+                        <TextField size="small" value={vendorName} disabled />
+                      </FormControl>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <FormControl fullWidth>
+                        <FormLabel>PO Date</FormLabel>
+                        <TextField size="small" value={poDate} disabled />
+                      </FormControl>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <FormControl fullWidth>
+                        <FormLabel>Location</FormLabel>
+                        <TextField size="small" value={locationName} disabled />
+                      </FormControl>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <FormControl fullWidth>
+                        <FormLabel>Subsidiary</FormLabel>
+                        <TextField size="small" value={subsidiaryName} disabled />
+                      </FormControl>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <FormControl fullWidth>
+                        <FormLabel>Shipped From</FormLabel>
+                        <TextField size="small" value={shippedFrom} disabled />
+                      </FormControl>
+                    </Grid>
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <FormControl fullWidth>
+                        <FormLabel>Shipped To</FormLabel>
+                        <TextField size="small" value={shippedTo} disabled />
+                      </FormControl>
+                    </Grid>
+                  </>
+                );
+              })()}
+
               <Grid size={{ xs: 12, md: 4 }}>
                 <FormControl fullWidth error={formik.touched.header?.warehouseId && !!formik.errors.header?.warehouseId}>
                   <FormLabel>Warehouse</FormLabel>
@@ -830,6 +990,7 @@ const GRNComp: React.FC = () => {
                     value={formik.values.header.warehouseId}
                     onChange={formik.handleChange}
                     displayEmpty
+                    disabled={true}
                   >
                     <MenuItem value="">Select Warehouse</MenuItem>
                     {warehouses.map((w: any) => (
@@ -849,7 +1010,7 @@ const GRNComp: React.FC = () => {
                     value={formik.values.header.godownId}
                     onChange={formik.handleChange}
                     displayEmpty
-                    disabled={!selectedWarehouseId}
+                    disabled={true}
                   >
                     <MenuItem value="">Select Godown</MenuItem>
                     {godowns.map((g: any) => (
@@ -869,7 +1030,7 @@ const GRNComp: React.FC = () => {
                     value={formik.values.header.stackId}
                     onChange={formik.handleChange}
                     displayEmpty
-                    disabled={!selectedGodownId}
+                    disabled={true}
                   >
                     <MenuItem value="">Select Stack</MenuItem>
                     {stacks.map((s: any) => (
@@ -912,13 +1073,6 @@ const GRNComp: React.FC = () => {
                 >
                   Transport Details
                 </Button>
-                <Button
-                  size="small"
-                  variant={activeSection === "glImpact" ? "contained" : "outlined"}
-                  onClick={() => setActiveSection("glImpact")}
-                >
-                  GL Impact
-                </Button>
               </Box>
             </Grid>
 
@@ -950,6 +1104,7 @@ const GRNComp: React.FC = () => {
                               value={formik.values.header.transportation_mode_id}
                               onChange={formik.handleChange}
                               displayEmpty
+                              disabled={true}
                             >
                               <MenuItem value="">Select Transportation Mode</MenuItem>
                               {transportationModes?.map((t: any) => (
@@ -968,6 +1123,7 @@ const GRNComp: React.FC = () => {
                             value={formik.values.header.transporterName}
                             onChange={formik.handleChange}
                             placeholder="Transporter Name"
+                            disabled={true}
                           />
                         </TableCell>
                         <TableCell>
@@ -978,6 +1134,7 @@ const GRNComp: React.FC = () => {
                             value={formik.values.header.driverName}
                             onChange={formik.handleChange}
                             placeholder="Driver Name"
+                            disabled={true}
                           />
                         </TableCell>
                         <TableCell>
@@ -988,6 +1145,7 @@ const GRNComp: React.FC = () => {
                             value={formik.values.header.driverPhone}
                             onChange={formik.handleChange}
                             placeholder="Driver Phone"
+                            disabled={true}
                           />
                         </TableCell>
                         <TableCell>
@@ -998,6 +1156,7 @@ const GRNComp: React.FC = () => {
                             value={formik.values.header.vehicleNo}
                             onChange={formik.handleChange}
                             placeholder="Vehicle Number"
+                            disabled={true}
                           />
                         </TableCell>
                       </TableRow>
@@ -1009,25 +1168,18 @@ const GRNComp: React.FC = () => {
               <>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                   <Typography variant="h6" color="primary">Line Items</Typography>
-                  <Button size="small" variant="outlined" startIcon={<Add />} onClick={handleAddLineItem}>
-                    Add Item
-                  </Button>
                 </Box>
 
                 <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', width: '100%' }}>
-                  <Table size="small" sx={{ minWidth: 1800 }}>
+                  <Table size="small" sx={{ minWidth: 1000 }}>
                     <TableHead sx={{ bgcolor: "grey.100" }}>
                       <TableRow>
-                        <TableCell width="8%">Item</TableCell>
-                        <TableCell width="8%">PO Line</TableCell>
-                        <TableCell width="6%">Ordered Qty</TableCell>
-                        <TableCell width="6%">Received Qty</TableCell>
-                        <TableCell width="6%">Accepted Qty</TableCell>
-                        <TableCell width="6%">Rejected Qty</TableCell>
-                        <TableCell width="6%">Mfg Date</TableCell>
-                        <TableCell width="6%">Expiry Date</TableCell>
-                        <TableCell width="5%">QC Required</TableCell>
-                        <TableCell width="5%">Action</TableCell>
+                        <TableCell width="25%">Item</TableCell>
+                        <TableCell width="15%">Ordered Qty</TableCell>
+                        <TableCell width="15%">Received Qty</TableCell>
+                        <TableCell width="15%">Accepted Qty</TableCell>
+                        <TableCell width="15%">Rejected Qty</TableCell>
+                        <TableCell width="15%">Action</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1040,6 +1192,7 @@ const GRNComp: React.FC = () => {
                               value={lineItem.itemId}
                               onChange={(e) => updateLineItemField(index, "itemId", e.target.value)}
                               displayEmpty
+                              disabled={true}
                             >
                               <MenuItem value="">Select Item</MenuItem>
                               {items.map((item: any) => (
@@ -1052,25 +1205,17 @@ const GRNComp: React.FC = () => {
                           <TableCell>
                             <TextField
                               size="small"
-                              value={lineItem.purchaseOrderLineId}
-                              onChange={(e) => updateLineItemField(index, "purchaseOrderLineId", e.target.value)}
-                              placeholder="PO Line Id"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              size="small"
                               type="number"
+                              disabled={true}
                               inputProps={{ min: 0, step: 0.01 }}
                               value={lineItem.orderedQty}
-                              onChange={(e) => updateLineItemField(index, "orderedQty", Number(e.target.value))}
                             />
                           </TableCell>
                           <TableCell>
                             <TextField
                               size="small"
                               type="number"
-                              inputProps={{ min: 0, step: 0.01 }}
+                              inputProps={{ min: 0, max: lineItem.orderedQty, step: 0.01 }}
                               value={lineItem.receivedQty}
                               onChange={(e) => updateLineItemField(index, "receivedQty", Number(e.target.value))}
                             />
@@ -1079,7 +1224,7 @@ const GRNComp: React.FC = () => {
                             <TextField
                               size="small"
                               type="number"
-                              inputProps={{ min: 0, step: 0.01 }}
+                              inputProps={{ min: 0, max: lineItem.orderedQty, step: 0.01 }}
                               value={lineItem.acceptedQty}
                               onChange={(e) => updateLineItemField(index, "acceptedQty", Number(e.target.value))}
                             />
@@ -1088,41 +1233,12 @@ const GRNComp: React.FC = () => {
                             <TextField
                               size="small"
                               type="number"
-                              inputProps={{ min: 0, step: 0.01 }}
+                              inputProps={{ min: 0, max: lineItem.orderedQty, step: 0.01 }}
                               value={lineItem.rejectedQty}
                               onChange={(e) => updateLineItemField(index, "rejectedQty", Number(e.target.value))}
                             />
                           </TableCell>
                           <TableCell>
-                            <TextField
-                              size="small"
-                              type="date"
-                              value={lineItem.manufacturingDate}
-                              onChange={(e) => updateLineItemField(index, "manufacturingDate", e.target.value)}
-                              InputLabelProps={{ shrink: true }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              size="small"
-                              type="date"
-                              value={lineItem.expiryDate}
-                              onChange={(e) => updateLineItemField(index, "expiryDate", e.target.value)}
-                              InputLabelProps={{ shrink: true }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Select
-                              fullWidth
-                              size="small"
-                              value={lineItem.qcRequired ? "true" : "false"}
-                              onChange={(e) => updateLineItemField(index, "qcRequired", e.target.value === "true")}
-                            >
-                              <MenuItem value="true">Yes</MenuItem>
-                              <MenuItem value="false">No</MenuItem>
-                            </Select>
-                          </TableCell>
-                          <TableCell align="center">
                             <IconButton size="small" color="error" onClick={() => handleRemoveLineItem(index)}>
                               <RemoveCircleOutline />
                             </IconButton>
@@ -1133,128 +1249,7 @@ const GRNComp: React.FC = () => {
                   </Table>
                 </TableContainer>
               </>
-            ) : activeSection === "glImpact" ? (
-              <>
-                <Box
-                  sx={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    mb: 2,
-                  }}
-                >
-                  <Typography variant="h6" color="primary">
-                    GL Impact
-                  </Typography>
-                </Box>
-
-                {journalHeader && (
-                  <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                    <Grid container spacing={2}>
-                      <Grid size={{ xs: 12, md: 3 }}>
-                        <Typography variant="caption">Journal No</Typography>
-                        <Typography>{journalHeader.entry_no}</Typography>
-                      </Grid>
-
-                      <Grid size={{ xs: 12, md: 3 }}>
-                        <Typography variant="caption">Voucher Type</Typography>
-                        <Typography>{journalHeader.voucherType?.name}</Typography>
-                      </Grid>
-
-                      <Grid size={{ xs: 12, md: 3 }}>
-                        <Typography variant="caption">Reference No</Typography>
-                        <Typography>{journalHeader.reference_no}</Typography>
-                      </Grid>
-
-                      <Grid size={{ xs: 12, md: 3 }}>
-                        <Typography variant="caption">Status</Typography>
-                        <Typography>{journalHeader.status}</Typography>
-                      </Grid>
-                    </Grid>
-                  </Paper>
-                )}
-
-                <TableContainer component={Paper} variant="outlined">
-                  <Table size="small">
-                    <TableHead sx={{ bgcolor: "grey.100" }}>
-                      <TableRow>
-                        <TableCell>Account</TableCell>
-                        <TableCell>Description</TableCell>
-                        <TableCell align="right">Debit</TableCell>
-                        <TableCell align="right">Credit</TableCell>
-                      </TableRow>
-                    </TableHead>
-
-                    <TableBody>
-                      {!selectedGrnForGl ? (
-                        <TableRow>
-                          <TableCell colSpan={4} align="center">
-                            Select an existing GRN to view the GL Impact.
-                          </TableCell>
-                        </TableRow>
-                      ) : isJournalLoading ? (
-                        <TableRow>
-                          <TableCell colSpan={4} align="center">
-                            Loading GL entries...
-                          </TableCell>
-                        </TableRow>
-                      ) : journalEntries.length > 0 ? (
-                        <>
-                          {journalEntries.map((line: any) => (
-                            <TableRow key={line.id}>
-                              <TableCell>
-                                {line.account?.account_number} - {line.account?.account_name}
-                              </TableCell>
-
-                              <TableCell>{line.narration}</TableCell>
-
-                              <TableCell align="right">
-                                {Number(line.debit_amount) > 0
-                                  ? Number(line.debit_amount).toLocaleString()
-                                  : "-"}
-                              </TableCell>
-
-                              <TableCell align="right">
-                                {Number(line.credit_amount) > 0
-                                  ? Number(line.credit_amount).toLocaleString()
-                                  : "-"}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-
-                          <TableRow sx={{ bgcolor: "grey.100" }}>
-                            <TableCell colSpan={2} align="right">
-                              <strong>Total</strong>
-                            </TableCell>
-
-                            <TableCell align="right">
-                              <strong>
-                                {Number(journalHeader?.total_debit ?? 0).toLocaleString()}
-                              </strong>
-                            </TableCell>
-
-                            <TableCell align="right">
-                              <strong>
-                                {Number(journalHeader?.total_credit ?? 0).toLocaleString()}
-                              </strong>
-                            </TableCell>
-                          </TableRow>
-                        </>
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={4} align="center">
-                            {journalError
-                              ? "Unable to load GL entries for the selected GRN."
-                              : "No GL postings found for this GRN."}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </>
-            ) : <></>
-            }
+            ) : null}
 
             <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2, mt: 3 }}>
               <Button variant="outlined" onClick={() => setOpen(false)}>

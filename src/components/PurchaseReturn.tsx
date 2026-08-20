@@ -1,3 +1,4 @@
+// Touch trigger for Vite HMR
 import React, { useMemo, useState } from "react";
 
 import {
@@ -8,7 +9,7 @@ import {
   Delete,
   Edit,
   LocalShipping,
-  RemoveCircleOutline,
+  ReceiptLong,
   Visibility,
 } from "@mui/icons-material";
 import { useFormik } from "formik";
@@ -53,10 +54,14 @@ import {
   useGetPurchaseReturnsQuery,
   useUpdatePurchaseReturnMutation,
   useUpdatePurchaseReturnStatusMutation,
+  useCreateReturnFulfillmentMutation,
+  useCreateVendorCreditMutation,
+  useGetReturnFulfillmentsQuery,
+  useGetVendorCreditsQuery,
 } from "../RTK/services/purchaseApi";
 import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 
-const STATUS_OPTIONS = ["DRAFT", "APPROVED", "RETURNED", "CANCELLED"] as const;
+const STATUS_OPTIONS = ["DRAFT", "AUTHORIZED", "APPROVED", "PARTIALLY_FULFILLED", "FULFILLED", "RETURNED", "CANCELLED"] as const;
 type ReturnStatus = (typeof STATUS_OPTIONS)[number];
 
 interface PurchaseReturnHeaderForm {
@@ -103,6 +108,9 @@ const PurchaseReturnComp: React.FC = () => {
   const currentUser = useAppSelector((state) => state.currentUser.user);
   const userId = currentUser?.id ?? "";
 
+  const canReadPurchaseReturn = canRead("purchase_return") || canRead("purchase");
+  const canCreatePurchaseReturn = canCreate("purchase_return") || canCreate("purchase");
+
   const [isOpen, setOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
   const [editId, setEditId] = useState<number | string | null>(null);
@@ -110,16 +118,103 @@ const PurchaseReturnComp: React.FC = () => {
   const [returnToDelete, setReturnToDelete] = useState<any>(null);
 
   const { data: purchaseReturnsData } = useGetPurchaseReturnsQuery({ page: 1, limit: 20 });
-  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 50 });
-  const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 50 });
-  const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 50 });
-  const { data: vendorsData } = useGetVendorsQuery({ option: true });
+  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 50 }, { skip: !isOpen });
+  const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 50 }, { skip: !isOpen });
+  const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 50 }, { skip: !isOpen });
+  const { data: vendorsData } = useGetVendorsQuery({ option: true }, { skip: !isOpen });
 
   const [createPurchaseReturn] = useCreatePurchaseReturnMutation();
   const [updatePurchaseReturn] = useUpdatePurchaseReturnMutation();
   const [updatePurchaseReturnStatus] = useUpdatePurchaseReturnStatusMutation();
   const [deletePurchaseReturn] = useDeletePurchaseReturnMutation();
 
+  const [createReturnFulfillment] = useCreateReturnFulfillmentMutation();
+  const [createVendorCredit] = useCreateVendorCreditMutation();
+
+  const [fulfillmentModalOpen, setFulfillmentModalOpen] = useState(false);
+  const [vendorCreditModalOpen, setVendorCreditModalOpen] = useState(false);
+  const [selectedReturnForAction, setSelectedReturnForAction] = useState<any>(null);
+  const [fulfillmentLines, setFulfillmentLines] = useState<any[]>([]);
+  const [vendorCreditLines, setVendorCreditLines] = useState<any[]>([]);
+  const [fulfillmentDate, setFulfillmentDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [creditDate, setCreditDate] = useState<string>(new Date().toISOString().split("T")[0]);
+
+  const handleOpenFulfillment = (record: any) => {
+    setSelectedReturnForAction(record);
+    const lines = (record.lineItems || record.purchaseReturnLines || []).map((line: any) => ({
+      purchaseReturnLineId: line.id,
+      itemId: line.itemId,
+      authorizedQty: Number(line.returnQty || 0),
+      fulfilledQty: Number(line.returnQty || 0),
+      unitPrice: Number(line.unitPrice || 0),
+      batchNo: line.batchNo || "",
+    }));
+    setFulfillmentLines(lines);
+    setFulfillmentDate(new Date().toISOString().split("T")[0]);
+    setFulfillmentModalOpen(true);
+  };
+
+  const handleOpenVendorCredit = (record: any) => {
+    setSelectedReturnForAction(record);
+    const lines = (record.lineItems || record.purchaseReturnLines || []).map((line: any) => ({
+      purchaseReturnLineId: line.id,
+      itemId: line.itemId,
+      authorizedQty: Number(line.returnQty || 0),
+      creditQty: Number(line.returnQty || 0),
+      unitPrice: Number(line.unitPrice || 0),
+    }));
+    setVendorCreditLines(lines);
+    setCreditDate(new Date().toISOString().split("T")[0]);
+    setVendorCreditModalOpen(true);
+  };
+
+  const handleSubmitFulfillment = async () => {
+    if (!selectedReturnForAction?.id) return;
+    try {
+      await createReturnFulfillment({
+        header: {
+          purchaseReturnHeaderId: selectedReturnForAction.id,
+          fulfillmentDate,
+          fulfillmentNumber: `PRF-${Date.now()}`,
+        },
+        lineItems: fulfillmentLines.map(l => ({
+          purchaseReturnLineId: l.purchaseReturnLineId,
+          itemId: l.itemId,
+          fulfilledQty: Number(l.fulfilledQty),
+          unitPrice: Number(l.unitPrice),
+          batchNo: l.batchNo || null
+        }))
+      }).unwrap();
+      toast.success("Return Fulfillment created and stock reduced successfully");
+      setFulfillmentModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.data?.message || "Failed to create return fulfillment");
+    }
+  };
+
+  const handleSubmitVendorCredit = async () => {
+    if (!selectedReturnForAction?.id) return;
+    try {
+      await createVendorCredit({
+        header: {
+          purchaseReturnHeaderId: selectedReturnForAction.id,
+          vendorId: selectedReturnForAction.vendorId,
+          creditDate,
+          creditNoteNumber: `VC-${Date.now()}`,
+        },
+        lineItems: vendorCreditLines.map(l => ({
+          purchaseReturnLineId: l.purchaseReturnLineId,
+          itemId: l.itemId,
+          creditQty: Number(l.creditQty),
+          unitPrice: Number(l.unitPrice),
+        }))
+      }).unwrap();
+      toast.success("Vendor Credit note issued successfully");
+      setVendorCreditModalOpen(false);
+    } catch (err: any) {
+      toast.error(err?.data?.message || "Failed to issue vendor credit");
+    }
+  };
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [selectedReturn, setSelectedReturn] = useState<any>(null);
   const [glModalOpen, setGlModalOpen] = useState(false);
@@ -131,7 +226,7 @@ const PurchaseReturnComp: React.FC = () => {
       source: "PURCHASE_RETURN",
     },
     {
-      skip: !selectedReturnForGl?.id,
+      skip: !glModalOpen || !selectedReturnForGl?.id,
     }
   );
 
@@ -208,13 +303,13 @@ const PurchaseReturnComp: React.FC = () => {
     },
     validationSchema: Yup.object({
       header: Yup.object({
-        returnNumber: Yup.string().required("Return Number is required"),
+        returnNumber: Yup.string().nullable(),
         vendorId: Yup.string().required("Vendor is required"),
         grnHeaderId: Yup.string().nullable(),
         purchaseOrderHeaderId: Yup.string().nullable(),
         purchaseInvoiceHeaderId: Yup.string().nullable(),
         returnDate: Yup.date().required("Return Date is required"),
-        status: Yup.string().oneOf([...STATUS_OPTIONS], "Invalid status").required("Status is required"),
+        status: Yup.string().nullable(),
       }),
       lineItems: Yup.array()
         .of(
@@ -233,13 +328,13 @@ const PurchaseReturnComp: React.FC = () => {
       try {
         const payload = {
           header: {
-            returnNumber: values.header.returnNumber,
+            returnNumber: values.header.returnNumber || undefined,
             vendorId: Number(values.header.vendorId),
             grnHeaderId: values.header.grnHeaderId ? Number(values.header.grnHeaderId) : null,
             purchaseOrderHeaderId: values.header.purchaseOrderHeaderId ? Number(values.header.purchaseOrderHeaderId) : null,
             purchaseInvoiceHeaderId: values.header.purchaseInvoiceHeaderId ? Number(values.header.purchaseInvoiceHeaderId) : null,
             returnDate: values.header.returnDate,
-            status: values.header.status,
+            status: values.header.status || "DRAFT",
             reason: values.header.reason || null,
             remarks: values.header.remarks || null,
             user_id: Number(userId || values.header.user_id) || null,
@@ -274,9 +369,6 @@ const PurchaseReturnComp: React.FC = () => {
       }
     },
   });
-
-  const canReadPurchaseReturn = canRead("purchase_return") || canRead("purchase");
-  const canCreatePurchaseReturn = canCreate("purchase_return") || canCreate("purchase");
 
   const getFieldError = (field: string) => {
     const error = field.split(".").reduce((obj: any, key: string) => obj?.[key], formik.errors);
@@ -375,28 +467,66 @@ const PurchaseReturnComp: React.FC = () => {
     if (!poId) return;
 
     const po = purchaseOrders.find((p: any) => String(p.id ?? p._id) === String(poId));
-    if (!po) return;
 
-    if (po.vendor_id || po.vendorId) {
-      formik.setFieldValue("header.vendorId", String(po.vendor_id || po.vendorId));
+    // 1. Auto-select Vendor from PO
+    const vId = po?.vendorId ?? po?.vendor_id ?? po?.vendor?.id;
+    if (vId) {
+      formik.setFieldValue("header.vendorId", String(vId));
     }
 
-    const rawLines = po.purchaseOrderLines ?? po.lineItems ?? po.lines ?? [];
-    if (Array.isArray(rawLines) && rawLines.length > 0) {
+    // 2. Auto-select associated GRN (if any)
+    const grn = grns.find((g: any) =>
+      String(g.poHeaderId ?? g.purchaseOrderHeaderId ?? g.purchase_order_header_id ?? g.purchaseOrderId ?? g.po_id) === String(poId)
+    );
+    if (grn) {
+      formik.setFieldValue("header.grnHeaderId", String(grn.id ?? grn._id));
+      if (!vId && (grn.vendorId || grn.vendor_id)) {
+        formik.setFieldValue("header.vendorId", String(grn.vendorId || grn.vendor_id));
+      }
+    }
+
+    // 3. Auto-select associated Purchase Invoice (if any)
+    const inv = purchaseInvoices.find((i: any) =>
+      String(i.poHeaderId ?? i.purchaseOrderHeaderId ?? i.purchase_order_header_id) === String(poId) ||
+      (grn && String(i.grnHeaderId ?? i.grn_header_id) === String(grn.id ?? grn._id))
+    );
+    if (inv) {
+      formik.setFieldValue("header.purchaseInvoiceHeaderId", String(inv.id ?? inv._id));
+      if (!vId && (inv.vendorId || inv.vendor_id)) {
+        formik.setFieldValue("header.vendorId", String(inv.vendorId || inv.vendor_id));
+      }
+    }
+
+    // 4. Auto-populate Line Items from GRN -> Invoice -> PO
+    let rawLines: any[] = [];
+    let lineSource = "";
+
+    if (grn && Array.isArray(grn.grnLines || grn.lineItems || grn.lines) && (grn.grnLines || grn.lineItems || grn.lines).length > 0) {
+      rawLines = grn.grnLines || grn.lineItems || grn.lines;
+      lineSource = `GRN #${grn.grnNo || grn.grnNumber || grn.id}`;
+    } else if (inv && Array.isArray(inv.purchaseInvoiceLines || inv.invoice_lines || inv.lines) && (inv.purchaseInvoiceLines || inv.invoice_lines || inv.lines).length > 0) {
+      rawLines = inv.purchaseInvoiceLines || inv.invoice_lines || inv.lines;
+      lineSource = `Invoice #${inv.invoiceNumber || inv.id}`;
+    } else if (po && Array.isArray(po.purchaseOrderLines || po.lines) && (po.purchaseOrderLines || po.lines).length > 0) {
+      rawLines = po.purchaseOrderLines || po.lines;
+      lineSource = `PO #${po.purchaseNo || po.orderNumber || po.id}`;
+    }
+
+    if (rawLines.length > 0) {
       const populatedLines = rawLines.map((line: any) => ({
         returnHeaderId: "",
-        grnLineId: "",
-        itemId: String(line.item_id ?? line.itemId ?? line.item?.id ?? ""),
-        batchNo: line.lot_number ?? line.batchNo ?? "",
-        returnQty: Number(line.quantity ?? line.qty ?? 0),
+        grnLineId: String(line.id || line.grnLineId || line.grn_line_id || ""),
+        itemId: String(line.itemId ?? line.item_id ?? line.item?.id ?? ""),
+        batchNo: line.batchNo ?? line.batch_no ?? "",
+        returnQty: Number(line.acceptedQty ?? line.receivedQty ?? line.quantity ?? line.qty ?? 0),
         rejectedQty: 0,
         damagedQty: 0,
-        unitPrice: Number(line.rate ?? line.unitPrice ?? 0),
+        unitPrice: Number(line.unitPrice ?? line.unit_price ?? line.rate ?? 0),
         reason: "",
         remarks: "",
       }));
       formik.setFieldValue("lineItems", populatedLines);
-      toast.success(`Auto-filled ${rawLines.length} item(s) from PO #${po.purchaseNo || po.id}`);
+      toast.success(`Auto-selected GRN, Invoice & Vendor, populated ${rawLines.length} item(s) from ${lineSource}`);
     }
   };
 
@@ -423,16 +553,16 @@ const PurchaseReturnComp: React.FC = () => {
     }
 
     const header = record?.header ?? record;
-    const lineSource = record?.lineItems ?? record?.line_items ?? [];
+    const lineSource = record?.purchaseReturnLines ?? record?.returnLines ?? record?.lineItems ?? record?.line_items ?? [];
 
     formik.setValues({
       header: {
         returnNumber: header?.returnNumber ?? header?.return_number ?? "",
-        vendorId: header?.vendorId ?? header?.vendor_id ?? "",
-        grnHeaderId: header?.grnHeaderId ?? header?.grn_header_id ?? "",
-        purchaseOrderHeaderId: header?.purchaseOrderHeaderId ?? header?.purchase_order_header_id ?? "",
-        purchaseInvoiceHeaderId: header?.purchaseInvoiceHeaderId ?? header?.purchase_invoice_header_id ?? "",
-        returnDate: header?.returnDate ?? header?.return_date ?? new Date().toISOString().split("T")[0],
+        vendorId: String(header?.vendorId ?? header?.vendor_id ?? ""),
+        grnHeaderId: String(header?.grnHeaderId ?? header?.grn_header_id ?? ""),
+        purchaseOrderHeaderId: String(header?.purchaseOrderHeaderId ?? header?.purchase_order_header_id ?? ""),
+        purchaseInvoiceHeaderId: String(header?.purchaseInvoiceHeaderId ?? header?.purchase_invoice_header_id ?? ""),
+        returnDate: header?.returnDate ? String(header.returnDate).slice(0, 10) : new Date().toISOString().split("T")[0],
         status: header?.status ?? "DRAFT",
         reason: header?.reason ?? "",
         remarks: header?.remarks ?? "",
@@ -440,11 +570,11 @@ const PurchaseReturnComp: React.FC = () => {
       },
       lineItems: Array.isArray(lineSource) && lineSource.length
         ? lineSource.map((line: any) => ({
-          returnHeaderId: line?.returnHeaderId ?? line?.return_header_id ?? "",
-          grnLineId: line?.grnLineId ?? line?.grn_line_id ?? "",
-          itemId: line?.itemId ?? line?.item_id ?? "",
+          returnHeaderId: String(line?.returnHeaderId ?? line?.return_header_id ?? header?.id ?? ""),
+          grnLineId: String(line?.grnLineId ?? line?.grn_line_id ?? ""),
+          itemId: String(line?.itemId ?? line?.item_id ?? line?.item?.id ?? ""),
           batchNo: line?.batchNo ?? line?.batch_no ?? "",
-          returnQty: Number(line?.returnQty ?? line?.return_qty ?? 0),
+          returnQty: Number(line?.returnQty ?? line?.return_qty ?? line?.quantity ?? 0),
           rejectedQty: Number(line?.rejectedQty ?? line?.rejected_qty ?? 0),
           damagedQty: Number(line?.damagedQty ?? line?.damaged_qty ?? 0),
           unitPrice: Number(line?.unitPrice ?? line?.unit_price ?? 0),
@@ -503,8 +633,9 @@ const PurchaseReturnComp: React.FC = () => {
   const getStatusChip = (status: string) => {
     let color: "default" | "info" | "success" | "warning" | "error" = "default";
     if (status === "DRAFT") color = "info";
-    if (status === "APPROVED") color = "warning";
-    if (status === "RETURNED") color = "success";
+    if (status === "AUTHORIZED" || status === "APPROVED") color = "warning";
+    if (status === "PARTIALLY_FULFILLED") color = "info";
+    if (status === "FULFILLED" || status === "RETURNED") color = "success";
     if (status === "CANCELLED") color = "error";
     return <Chip label={status} color={color} size="small" variant="outlined" />;
   };
@@ -552,101 +683,149 @@ const PurchaseReturnComp: React.FC = () => {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Return Number</TableCell>
-                <TableCell>Vendor</TableCell>
-                <TableCell>GRN</TableCell>
-                <TableCell>Return Date</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Return Number</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Purchase Invoice</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>PO #</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>GRN #</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Vendor</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Return Date</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Status</TableCell>
+                <TableCell sx={{ fontWeight: "bold" }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {purchaseReturns.map((ret: any) => (
-                <TableRow key={ret.id ?? ret.returnNumber ?? ret._id}>
-                  <TableCell>{ret.returnNumber}</TableCell>
-                  <TableCell>{getVendorName(ret.vendorId)}</TableCell>
-                  <TableCell>{ret.grnHeaderId || "-"}</TableCell>
-                  <TableCell>{ret.returnDate ? ret.returnDate.slice(0, 10) : "-"}</TableCell>
-                  <TableCell>{getStatusChip(ret.status)}</TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                      {/* View Details */}
-                      <IconButton
-                        size="small"
-                        color="info"
-                        title="View Details"
-                        onClick={() => {
-                          setSelectedReturn(ret);
-                          setViewModalOpen(true);
-                        }}
-                      >
-                        <Visibility fontSize="small" />
-                      </IconButton>
+              {purchaseReturns.map((ret: any) => {
+                const invoiceNumber =
+                  ret.purchaseInvoiceHeader?.invoiceNumber ||
+                  ret.purchaseInvoice?.invoiceNumber ||
+                  (ret.purchaseInvoiceHeaderId ? `INV-${ret.purchaseInvoiceHeaderId}` : "-");
 
-                      <IconButton
-                        size="small"
-                        color="secondary"
-                        title="GL Impact"
-                        onClick={() => {
-                          setSelectedReturnForGl(ret);
-                          setGlModalOpen(true);
-                        }}
-                      >
-                        <Assessment fontSize="small" />
-                      </IconButton>
+                const poNumber =
+                  ret.purchaseOrderHeader?.purchaseNo ||
+                  ret.purchaseOrder?.purchaseNo ||
+                  (ret.purchaseOrderHeaderId ? `PO-${ret.purchaseOrderHeaderId}` : "-");
 
-                      {/* DRAFT -> Edit / Approve / Delete */}
-                      {ret.status === "DRAFT" && (
-                        <>
-                          {(canUpdate("purchase_return") || canUpdate("purchase")) && (
-                            <IconButton size="small" color="primary" onClick={() => handleEdit(ret)} aria-label="Edit purchase return">
-                              <Edit fontSize="small" />
-                            </IconButton>
-                          )}
+                const grnNumber =
+                  ret.grnHeader?.grnNo ||
+                  ret.grn?.grnNo ||
+                  (ret.grnHeaderId ? `GRN-${ret.grnHeaderId}` : "-");
+
+                const vendorName =
+                  ret.vendor?.vendor_name ||
+                  ret.vendor?.name ||
+                  getVendorName(ret.vendorId);
+
+                return (
+                  <TableRow key={ret.id ?? ret.returnNumber ?? ret._id}>
+                    <TableCell sx={{ fontWeight: "bold" }}>{ret.returnNumber || "-"}</TableCell>
+                    <TableCell>{invoiceNumber}</TableCell>
+                    <TableCell>{poNumber}</TableCell>
+                    <TableCell>{grnNumber}</TableCell>
+                    <TableCell>{vendorName}</TableCell>
+                    <TableCell>{ret.returnDate ? ret.returnDate.slice(0, 10) : "-"}</TableCell>
+                    <TableCell>{getStatusChip(ret.status)}</TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                        {/* View Details */}
+                        <IconButton
+                          size="small"
+                          color="info"
+                          title="View Details"
+                          onClick={() => {
+                            setSelectedReturn(ret);
+                            setViewModalOpen(true);
+                          }}
+                        >
+                          <Visibility fontSize="small" />
+                        </IconButton>
+
+                        {ret.status !== "DRAFT" && ret.status !== "CANCELLED" && (
+                          <IconButton
+                            size="small"
+                            color="secondary"
+                            title="GL Impact"
+                            onClick={() => {
+                              setSelectedReturnForGl(ret);
+                              setGlModalOpen(true);
+                            }}
+                          >
+                            <Assessment fontSize="small" />
+                          </IconButton>
+                        )}
+
+                        {/* DRAFT -> Edit / Authorize / Delete */}
+                        {ret.status === "DRAFT" && (
+                          <>
+                            {(canUpdate("purchase_return") || canUpdate("purchase")) && (
+                              <IconButton size="small" color="primary" onClick={() => handleEdit(ret)} aria-label="Edit purchase return">
+                                <Edit fontSize="small" />
+                              </IconButton>
+                            )}
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="warning"
+                              startIcon={<CheckCircleOutline />}
+                              onClick={() => handleStatusChange(ret.id, "AUTHORIZED")}
+                            >
+                              Authorize
+                            </Button>
+                            {(canDelete("purchase_return") || canDelete("purchase")) && (
+                              <IconButton size="small" color="error" onClick={() => handleDeleteRequest(ret)} aria-label="Delete purchase return">
+                                <Delete fontSize="small" />
+                              </IconButton>
+                            )}
+                          </>
+                        )}
+
+                        {/* AUTHORIZED / APPROVED / PARTIALLY_FULFILLED -> Fulfill Return & Issue Vendor Credit */}
+                        {(ret.status === "AUTHORIZED" || ret.status === "APPROVED" || ret.status === "PARTIALLY_FULFILLED") && (
+                          <>
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="success"
+                              startIcon={<LocalShipping />}
+                              onClick={() => handleOpenFulfillment(ret)}
+                            >
+                              Fulfill Return
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="primary"
+                              onClick={() => handleOpenVendorCredit(ret)}
+                            >
+                              Vendor Credit
+                            </Button>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              startIcon={<Cancel />}
+                              onClick={() => handleStatusChange(ret.id, "CANCELLED")}
+                            >
+                              Cancel
+                            </Button>
+                          </>
+                        )}
+
+                        {/* FULFILLED / RETURNED -> Issue Vendor Credit */}
+                        {(ret.status === "FULFILLED" || ret.status === "RETURNED") && (
                           <Button
                             size="small"
                             variant="contained"
-                            color="warning"
-                            startIcon={<CheckCircleOutline />}
-                            onClick={() => handleStatusChange(ret.id, "APPROVED")}
+                            color="primary"
+                            onClick={() => handleOpenVendorCredit(ret)}
                           >
-                            Approve
+                            Issue Vendor Credit
                           </Button>
-                          {(canDelete("purchase_return") || canDelete("purchase")) && (
-                            <IconButton size="small" color="error" onClick={() => handleDeleteRequest(ret)} aria-label="Delete purchase return">
-                              <Delete fontSize="small" />
-                            </IconButton>
-                          )}
-                        </>
-                      )}
-
-                      {/* APPROVED -> Mark Returned / Cancel */}
-                      {ret.status === "APPROVED" && (
-                        <>
-                          <Button
-                            size="small"
-                            variant="contained"
-                            color="success"
-                            startIcon={<LocalShipping />}
-                            onClick={() => handleStatusChange(ret.id, "RETURNED")}
-                          >
-                            Mark Returned
-                          </Button>
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            color="error"
-                            startIcon={<Cancel />}
-                            onClick={() => handleStatusChange(ret.id, "CANCELLED")}
-                          >
-                            Cancel
-                          </Button>
-                        </>
-                      )}
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        )}
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>
@@ -660,43 +839,57 @@ const PurchaseReturnComp: React.FC = () => {
         <DialogContent sx={{ pt: 2 }}>
           {selectedReturn && (
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid xs={6} sm={4}>
+              <Grid size={{ xs: 6, sm: 4 }}>
                 <Typography variant="caption" color="text.secondary">Vendor</Typography>
-                <Typography fontWeight="bold">{getVendorName(selectedReturn.vendorId)}</Typography>
+                <Typography fontWeight="bold">
+                  {selectedReturn.vendor?.vendor_name || selectedReturn.vendor?.name || getVendorName(selectedReturn.vendorId)}
+                </Typography>
               </Grid>
-              <Grid xs={6} sm={4}>
+              <Grid size={{ xs: 6, sm: 4 }}>
                 <Typography variant="caption" color="text.secondary">Return Date</Typography>
                 <Typography fontWeight="bold">{selectedReturn.returnDate?.slice(0, 10)}</Typography>
               </Grid>
-              <Grid xs={6} sm={4}>
+              <Grid size={{ xs: 6, sm: 4 }}>
                 <Typography variant="caption" color="text.secondary">Status</Typography>
                 <Box>{getStatusChip(selectedReturn.status)}</Box>
               </Grid>
-              <Grid xs={6} sm={4}>
-                <Typography variant="caption" color="text.secondary">GRN Ref</Typography>
-                <Typography fontWeight="bold">{selectedReturn.grnHeaderId || "-"}</Typography>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Typography variant="caption" color="text.secondary">Purchase Invoice</Typography>
+                <Typography fontWeight="bold">
+                  {selectedReturn.purchaseInvoiceHeader?.invoiceNumber ||
+                    selectedReturn.purchaseInvoice?.invoiceNumber ||
+                    (selectedReturn.purchaseInvoiceHeaderId ? `INV-${selectedReturn.purchaseInvoiceHeaderId}` : "-")}
+                </Typography>
               </Grid>
-              <Grid xs={6} sm={4}>
+              <Grid size={{ xs: 6, sm: 4 }}>
                 <Typography variant="caption" color="text.secondary">PO Ref</Typography>
-                <Typography fontWeight="bold">{selectedReturn.purchaseOrderHeaderId || "-"}</Typography>
+                <Typography fontWeight="bold">
+                  {selectedReturn.purchaseOrderHeader?.purchaseNo ||
+                    selectedReturn.purchaseOrder?.purchaseNo ||
+                    (selectedReturn.purchaseOrderHeaderId ? `PO-${selectedReturn.purchaseOrderHeaderId}` : "-")}
+                </Typography>
               </Grid>
-              <Grid xs={6} sm={4}>
-                <Typography variant="caption" color="text.secondary">Invoice Ref</Typography>
-                <Typography fontWeight="bold">{selectedReturn.purchaseInvoiceHeaderId || "-"}</Typography>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Typography variant="caption" color="text.secondary">GRN Ref</Typography>
+                <Typography fontWeight="bold">
+                  {selectedReturn.grnHeader?.grnNo ||
+                    selectedReturn.grn?.grnNo ||
+                    (selectedReturn.grnHeaderId ? `GRN-${selectedReturn.grnHeaderId}` : "-")}
+                </Typography>
               </Grid>
               {selectedReturn.reason && (
-                <Grid xs={12}>
+                <Grid size={{ xs: 12 }}>
                   <Typography variant="caption" color="text.secondary">Reason</Typography>
                   <Typography>{selectedReturn.reason}</Typography>
                 </Grid>
               )}
               {selectedReturn.remarks && (
-                <Grid xs={12}>
+                <Grid size={{ xs: 12 }}>
                   <Typography variant="caption" color="text.secondary">Remarks</Typography>
                   <Typography>{selectedReturn.remarks}</Typography>
                 </Grid>
               )}
-              <Grid xs={12}>
+              <Grid size={{ xs: 12 }}>
                 <Divider sx={{ my: 1 }} />
                 <Typography variant="h6" fontWeight="bold" sx={{ mb: 1 }}>Line Items</Typography>
                 <TableContainer component={Paper} variant="outlined">
@@ -754,315 +947,326 @@ const PurchaseReturnComp: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isOpen} onClose={() => setOpen(false)} fullWidth maxWidth="xl">
-        <DialogTitle>{isEdit ? "Edit Purchase Return" : "Create Purchase Return"}</DialogTitle>
-        <DialogContent>
+      <Dialog
+        open={isOpen}
+        onClose={() => setOpen(false)}
+        fullWidth
+        maxWidth={formik.values.header.purchaseInvoiceHeaderId ? "xl" : "md"}
+      >
+        <DialogTitle sx={{ fontWeight: "bold", borderBottom: "1px solid #e2e8f0" }}>
+          {isEdit ? "Edit Purchase Return" : "Create Purchase Return"}
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2.5 }}>
           <Box component="form" onSubmit={formik.handleSubmit} sx={{ mt: 1 }}>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.returnNumber"))}>
-                  <FormLabel>Return Number</FormLabel>
-                  <TextField
-                    name="header.returnNumber"
-                    placeholder="Enter return Number"
-                    value={formik.values.header.returnNumber}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  />
-                  <FormHelperText>{getFieldError("header.returnNumber")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.vendorId"))}>
-                  <FormLabel>Vendor</FormLabel>
-                  <Select
-                    name="header.vendorId"
-                    value={formik.values.header.vendorId}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    displayEmpty
-                    size="small"
-                  >
-                    <MenuItem value="">
-                      <em>Select vendor</em>
-                    </MenuItem>
-                    {vendors.map((vendor: any) => (
-                      <MenuItem key={vendor.id ?? vendor._id} value={String(vendor.id ?? vendor._id)}>
-                        {vendor.vendor_name ?? vendor.name ?? `Vendor-${vendor.id ?? vendor._id}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>{getFieldError("header.vendorId")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.grnHeaderId"))}>
-                  <FormLabel>GRN</FormLabel>
-                  <Select
-                    name="header.grnHeaderId"
-                    value={formik.values.header.grnHeaderId}
-                    onChange={handleGrnChange}
-                    onBlur={formik.handleBlur}
-                    displayEmpty
-                    size="small"
-                  >
-                    <MenuItem value="">
-                      <em>Select GRN</em>
-                    </MenuItem>
-                    {grns.map((grn: any) => (
-                      <MenuItem key={grn.id ?? grn._id} value={String(grn.id ?? grn._id)}>
-                        {grn.grnNumber ?? grn.grn_number ?? `GRN-${grn.id ?? grn._id}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>{getFieldError("header.grnHeaderId")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.purchaseOrderHeaderId"))}>
-                  <FormLabel>Purchase Order</FormLabel>
-                  <Select
-                    name="header.purchaseOrderHeaderId"
-                    value={formik.values.header.purchaseOrderHeaderId}
-                    onChange={handlePoChange}
-                    onBlur={formik.handleBlur}
-                    displayEmpty
-                    size="small"
-                  >
-                    <MenuItem value="">
-                      <em>Select PO</em>
-                    </MenuItem>
-                    {purchaseOrders.map((po: any) => (
-                      <MenuItem key={po.id ?? po._id} value={String(po.id ?? po._id)}>
-                        {po.purchaseNo ?? po.purchase_no ?? `PO-${po.id ?? po._id}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>{getFieldError("header.purchaseOrderHeaderId")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.purchaseInvoiceHeaderId"))}>
-                  <FormLabel>Purchase Invoice</FormLabel>
-                  <Select
-                    name="header.purchaseInvoiceHeaderId"
-                    value={formik.values.header.purchaseInvoiceHeaderId}
-                    onChange={handleInvoiceChange}
-                    onBlur={formik.handleBlur}
-                    displayEmpty
-                    size="small"
-                  >
-                    <MenuItem value="">
-                      <em>Select Invoice</em>
-                    </MenuItem>
-                    {purchaseInvoices.map((inv: any) => (
-                      <MenuItem key={inv.id ?? inv._id} value={String(inv.id ?? inv._id)}>
-                        {inv.invoiceNumber ?? inv.invoice_number ?? `INV-${inv.id ?? inv._id}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>{getFieldError("header.purchaseInvoiceHeaderId")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.returnDate"))}>
-                  <FormLabel>Return Date</FormLabel>
-                  <TextField
-                    name="header.returnDate"
-                    type="date"
-                    value={formik.values.header.returnDate}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  />
-                  <FormHelperText>{getFieldError("header.returnDate")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={Boolean(getFieldError("header.status"))}>
-                  <FormLabel>Status</FormLabel>
-                  <Select
-                    name="header.status"
-                    value={formik.values.header.status}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  >
-                    {STATUS_OPTIONS.map((status) => (
-                      <MenuItem key={status} value={status}>
-                        {status}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                  <FormHelperText>{getFieldError("header.status")}</FormHelperText>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Reason</FormLabel>
-                  <TextField
-                    name="header.reason"
-                    placeholder="Enter reason"
-                    value={formik.values.header.reason}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    size="small"
-                  />
-                </FormControl>
-              </Grid>
+            {/* Purchase Invoice Header Selection */}
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2.5,
+                mb: 3,
+                backgroundColor: "#f8fafc",
+                borderColor: "#e2e8f0",
+                borderRadius: 2,
+              }}
+            >
+              <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+                <ReceiptLong color="primary" />
+                <Box>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    Select Purchase Invoice
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Choose a purchase invoice to automatically load vendor, PO, GRN, and line item details for the return.
+                  </Typography>
+                </Box>
+              </Box>
 
-            </Grid>
-            <Grid size={{ xs: 12, md: 4 }} sx={{ mt: 2 }}>
-              <FormControl fullWidth>
-                <FormLabel>Remarks</FormLabel>
-                <TextField
-                  name="header.remarks"
-                  placeholder="Enter remarks"
-                  value={formik.values.header.remarks}
-                  onChange={formik.handleChange}
-                  onBlur={formik.handleBlur}
-                  size="small"
-                />
-              </FormControl>
-            </Grid>
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 12, md: 6 }}>
+                  <FormControl fullWidth error={Boolean(getFieldError("header.purchaseInvoiceHeaderId"))}>
+                    <FormLabel sx={{ fontWeight: 600, mb: 0.5 }}>Purchase Invoice *</FormLabel>
+                    <Select
+                      name="header.purchaseInvoiceHeaderId"
+                      value={formik.values.header.purchaseInvoiceHeaderId}
+                      onChange={handleInvoiceChange}
+                      onBlur={formik.handleBlur}
+                      displayEmpty
+                      size="small"
+                      disabled={isEdit}
+                      renderValue={(selected) => {
+                        if (!selected) return <span style={{ color: "#888" }}>Select Purchase Invoice</span>;
+                        const inv = purchaseInvoices.find((i: any) => String(i.id ?? i._id) === String(selected));
+                        return inv?.invoiceNumber ?? inv?.invoice_number ?? `INV-${selected}`;
+                      }}
+                    >
+                      <MenuItem value="">
+                        <em>Select Purchase Invoice</em>
+                      </MenuItem>
+                      {purchaseInvoices.map((inv: any) => (
+                        <MenuItem key={inv.id ?? inv._id} value={String(inv.id ?? inv._id)}>
+                          {inv.invoiceNumber ?? inv.invoice_number ?? `INV-${inv.id ?? inv._id}`}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                    <FormHelperText>{getFieldError("header.purchaseInvoiceHeaderId")}</FormHelperText>
+                  </FormControl>
+                </Grid>
+              </Grid>
+            </Paper>
 
-            <Divider sx={{ my: 1 }} />
+            {Boolean(formik.values.header.purchaseInvoiceHeaderId) && (
+              <>
+                <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1.5 }}>
+                  Return Header Details
+                </Typography>
+                <Grid container spacing={2} sx={{ mb: 3 }}>
 
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-              <Typography variant="h6" gutterBottom>Lines Items</Typography>
-              <Button size="small" variant="outlined" startIcon={<Add />} onClick={handleAddLineItem}>
-                Add Line Item
-              </Button>
-            </Box>
+                  {/* Vendor */}
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth error={Boolean(getFieldError("header.vendorId"))}>
+                      <FormLabel sx={{ fontWeight: 500, mb: 0.5 }}>Vendor</FormLabel>
+                      <Select
+                        name="header.vendorId"
+                        value={formik.values.header.vendorId}
+                        onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
+                        displayEmpty
+                        size="small"
+                        disabled
+                      >
+                        <MenuItem value="">
+                          <em>Select vendor</em>
+                        </MenuItem>
+                        {vendors.map((vendor: any) => (
+                          <MenuItem key={vendor.id ?? vendor._id} value={String(vendor.id ?? vendor._id)}>
+                            {vendor.vendor_name ?? vendor.name ?? `Vendor-${vendor.id ?? vendor._id}`}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <FormHelperText>{getFieldError("header.vendorId")}</FormHelperText>
+                    </FormControl>
+                  </Grid>
 
-            <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', width: '100%' }}>
-              <Table size="small" sx={{ minWidth: 2000 }}>
-                <TableHead sx={{ bgcolor: 'grey.100' }}>
-                  <TableRow>
-                    <TableCell width="10%">GRN Line Id</TableCell>
-                    <TableCell width="10%">Item</TableCell>
-                    <TableCell width="10%">Batch No</TableCell>
-                    <TableCell width="8%">Return Qty</TableCell>
-                    <TableCell width="8%">Rejected Qty</TableCell>
-                    <TableCell width="8%">Damaged Qty</TableCell>
-                    <TableCell width="8%">Unit Price</TableCell>
-                    <TableCell width="8%">Line Amount</TableCell>
-                    <TableCell width="10%">Reason</TableCell>
-                    <TableCell width="10%">Remarks</TableCell>
-                    <TableCell align="center" width="8%">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {formik.values.lineItems.map((line, index) => {
-                    const lineAmount = (Number(line.returnQty) || 0) * (Number(line.unitPrice) || 0);
-                    return (
-                      <TableRow key={index}>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={line.grnLineId}
-                            onChange={(e) => updateLineItemField(index, "grnLineId", e.target.value)}
-                          />
-                        </TableCell>
-                        <TableCell sx={{ minWidth: 180 }}>
-                          <FormControl fullWidth error={Boolean(getFieldError(`lineItems.${index}.itemId`))}>
-                            <Select
-                              size="small"
-                              value={line.itemId}
-                              onChange={(e) => updateLineItemField(index, "itemId", e.target.value)}
-                            >
-                              <MenuItem value="">
-                                <em>Select item</em>
-                              </MenuItem>
-                              {items?.map((item: any) => (
-                                <MenuItem key={item.id ?? item._id} value={String(item.id ?? item._id)}>
-                                  {item.item_name ?? item.name ?? item.itemName ?? `Item-${item.id ?? item._id}`}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                            <FormHelperText>{getFieldError(`lineItems.${index}.itemId`)}</FormHelperText>
-                          </FormControl>
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            placeholder="Batch No"
-                            value={line.batchNo}
-                            onChange={(e) => updateLineItemField(index, "batchNo", e.target.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={line.returnQty}
-                            onChange={(e) => updateLineItemField(index, "returnQty", Number(e.target.value))}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={line.rejectedQty}
-                            onChange={(e) => updateLineItemField(index, "rejectedQty", Number(e.target.value))}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={line.damagedQty}
-                            onChange={(e) => updateLineItemField(index, "damagedQty", Number(e.target.value))}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            type="number"
-                            value={line.unitPrice}
-                            onChange={(e) => updateLineItemField(index, "unitPrice", Number(e.target.value))}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField size="small" value={lineAmount.toFixed(2)} InputProps={{ readOnly: true }} />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            placeholder="Reason"
-                            value={line.reason}
-                            onChange={(e) => updateLineItemField(index, "reason", e.target.value)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            size="small"
-                            placeholder="Remarks"
-                            value={line.remarks}
-                            onChange={(e) => updateLineItemField(index, "remarks", e.target.value)}
-                          />
-                        </TableCell>
+                  {/* Purchase Order */}
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth error={Boolean(getFieldError("header.purchaseOrderHeaderId"))}>
+                      <FormLabel sx={{ fontWeight: 500, mb: 0.5 }}>Purchase Order</FormLabel>
+                      <Select
+                        name="header.purchaseOrderHeaderId"
+                        value={formik.values.header.purchaseOrderHeaderId}
+                        onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
+                        displayEmpty
+                        size="small"
+                        disabled
+                      >
+                        <MenuItem value="">
+                          <em>Select PO</em>
+                        </MenuItem>
+                        {purchaseOrders.map((po: any) => (
+                          <MenuItem key={po.id ?? po._id} value={String(po.id ?? po._id)}>
+                            {po.purchaseNo ?? po.purchase_no ?? `PO-${po.id ?? po._id}`}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <FormHelperText>{getFieldError("header.purchaseOrderHeaderId")}</FormHelperText>
+                    </FormControl>
+                  </Grid>
 
-                        <TableCell align="center">
-                          <IconButton onClick={() => handleRemoveLineItem(index)}>
-                            <RemoveCircleOutline />
-                          </IconButton>
-                        </TableCell>
+                  {/* GRN */}
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth error={Boolean(getFieldError("header.grnHeaderId"))}>
+                      <FormLabel sx={{ fontWeight: 500, mb: 0.5 }}>GRN</FormLabel>
+                      <Select
+                        name="header.grnHeaderId"
+                        value={formik.values.header.grnHeaderId}
+                        onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
+                        displayEmpty
+                        size="small"
+                        disabled
+                      >
+                        <MenuItem value="">
+                          <em>Select GRN</em>
+                        </MenuItem>
+                        {grns.map((grn: any) => (
+                          <MenuItem key={grn.id ?? grn._id} value={String(grn.id ?? grn._id)}>
+                            {grn.grnNumber ?? grn.grn_number ?? `GRN-${grn.id ?? grn._id}`}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                      <FormHelperText>{getFieldError("header.grnHeaderId")}</FormHelperText>
+                    </FormControl>
+                  </Grid>
+
+                  {/* Return Date */}
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth error={Boolean(getFieldError("header.returnDate"))}>
+                      <FormLabel sx={{ fontWeight: 500, mb: 0.5 }}>Return Date *</FormLabel>
+                      <TextField
+                        name="header.returnDate"
+                        type="date"
+                        value={formik.values.header.returnDate}
+                        onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
+                        size="small"
+                      />
+                      <FormHelperText>{getFieldError("header.returnDate")}</FormHelperText>
+                    </FormControl>
+                  </Grid>
+
+                  {/* Reason */}
+                  <Grid size={{ xs: 12, md: 4 }}>
+                    <FormControl fullWidth>
+                      <FormLabel sx={{ fontWeight: 500, mb: 0.5 }}>Reason</FormLabel>
+                      <TextField
+                        name="header.reason"
+                        placeholder="Enter return reason"
+                        value={formik.values.header.reason}
+                        onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
+                        size="small"
+                      />
+                    </FormControl>
+                  </Grid>
+
+                  {/* Remarks */}
+                  <Grid size={{ xs: 12, md: 12 }}>
+                    <FormControl fullWidth>
+                      <FormLabel sx={{ fontWeight: 500, mb: 0.5 }}>Remarks</FormLabel>
+                      <TextField
+                        name="header.remarks"
+                        placeholder="Enter remarks"
+                        value={formik.values.header.remarks}
+                        onChange={formik.handleChange}
+                        onBlur={formik.handleBlur}
+                        size="small"
+                      />
+                    </FormControl>
+                  </Grid>
+                </Grid>
+
+                <Divider sx={{ my: 2.5 }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
+                  <Typography variant="subtitle1" fontWeight="bold">Line Items</Typography>
+                </Box>
+
+                <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', width: '100%', borderRadius: 2 }}>
+                  <Table size="small" sx={{ minWidth: 1400 }}>
+                    <TableHead sx={{ bgcolor: '#f1f5f9' }}>
+                      <TableRow>
+                        <TableCell width="18%" sx={{ fontWeight: "bold" }}>Item</TableCell>
+                        <TableCell width="12%" sx={{ fontWeight: "bold" }}>Batch No</TableCell>
+                        <TableCell width="10%" sx={{ fontWeight: "bold" }}>Return Qty</TableCell>
+                        <TableCell width="10%" sx={{ fontWeight: "bold" }}>Rejected Qty</TableCell>
+                        <TableCell width="10%" sx={{ fontWeight: "bold" }}>Damaged Qty</TableCell>
+                        <TableCell width="10%" sx={{ fontWeight: "bold" }}>Unit Price</TableCell>
+                        <TableCell width="10%" sx={{ fontWeight: "bold" }}>Line Amount</TableCell>
+                        <TableCell width="10%" sx={{ fontWeight: "bold" }}>Reason</TableCell>
+                        <TableCell width="10%" sx={{ fontWeight: "bold" }}>Remarks</TableCell>
                       </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                    </TableHead>
+                    <TableBody>
+                      {formik.values.lineItems.map((line, index) => {
+                        const lineAmount = (Number(line.returnQty) || 0) * (Number(line.unitPrice) || 0);
+                        return (
+                          <TableRow key={index}>
+                            <TableCell sx={{ minWidth: 180 }}>
+                              <FormControl fullWidth error={Boolean(getFieldError(`lineItems.${index}.itemId`))}>
+                                <Select
+                                  size="small"
+                                  value={line.itemId}
+                                  onChange={(e) => updateLineItemField(index, "itemId", e.target.value)}
+                                  disabled
+                                >
+                                  <MenuItem value="">
+                                    <em>Select item</em>
+                                  </MenuItem>
+                                  {items?.map((item: any) => (
+                                    <MenuItem key={item.id ?? item._id} value={String(item.id ?? item._id)}>
+                                      {item.item_name ?? item.name ?? item.itemName ?? `Item-${item.id ?? item._id}`}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                                <FormHelperText>{getFieldError(`lineItems.${index}.itemId`)}</FormHelperText>
+                              </FormControl>
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                size="small"
+                                placeholder="Batch No"
+                                value={line.batchNo}
+                                onChange={(e) => updateLineItemField(index, "batchNo", e.target.value)}
+                                disabled
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={line.returnQty}
+                                onChange={(e) => updateLineItemField(index, "returnQty", Number(e.target.value))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={line.rejectedQty}
+                                onChange={(e) => updateLineItemField(index, "rejectedQty", Number(e.target.value))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={line.damagedQty}
+                                onChange={(e) => updateLineItemField(index, "damagedQty", Number(e.target.value))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                size="small"
+                                type="number"
+                                value={line.unitPrice}
+                                onChange={(e) => updateLineItemField(index, "unitPrice", Number(e.target.value))}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField size="small" value={lineAmount.toFixed(2)} InputProps={{ readOnly: true }} />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                size="small"
+                                placeholder="Reason"
+                                value={line.reason}
+                                onChange={(e) => updateLineItemField(index, "reason", e.target.value)}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                size="small"
+                                placeholder="Remarks"
+                                value={line.remarks}
+                                onChange={(e) => updateLineItemField(index, "remarks", e.target.value)}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            )}
 
-            <Box display="flex" justifyContent="flex-end" gap={2} mt={3}>
+            <Box display="flex" justifyContent="flex-end" gap={2} mt={3} pt={2} borderTop="1px solid #e2e8f0">
               <Button onClick={() => setOpen(false)} color="inherit">
                 Cancel
               </Button>
-              <Button type="submit" variant="contained" disabled={!canCreatePurchaseReturn}>
-                {isEdit ? "Update" : "Create"}
+              <Button type="submit" variant="contained" disabled={!canCreatePurchaseReturn || !formik.values.header.purchaseInvoiceHeaderId}>
+                {isEdit ? "Update Return" : "Create Return"}
               </Button>
             </Box>
           </Box>
@@ -1119,12 +1323,168 @@ const PurchaseReturnComp: React.FC = () => {
             </TableContainer>
           ) : (
             <Typography color="text.secondary">
-              No GL postings recorded for this return document yet. Approving or Returning will post accounting impact to the ledger.
+              Purchase Return Authorization is a non-posting operational document. GL entries occur upon Return Fulfillment (DR Purchase Return Clearing / CR Inventory Asset) and Vendor Credit posting (DR Accounts Payable / CR Purchase Return Clearing).
             </Typography>
           )}
         </DialogContent>
         <Box sx={{ p: 2, display: "flex", justifyContent: "flex-end" }}>
           <Button onClick={() => setGlModalOpen(false)}>Close</Button>
+        </Box>
+      </Dialog>
+
+      {/* Return Fulfillment Modal */}
+      <Dialog open={fulfillmentModalOpen} onClose={() => setFulfillmentModalOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: "bold" }}>
+          Physical Return Fulfillment - {selectedReturnForAction?.returnNumber}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" mb={1}>
+              Executing this return fulfillment will physically reduce inventory stock and post GL entry (DR Purchase Return Clearing, CR Inventory Asset).
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <FormLabel>Fulfillment Date</FormLabel>
+                <TextField
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={fulfillmentDate}
+                  onChange={(e) => setFulfillmentDate(e.target.value)}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead sx={{ bgcolor: "grey.100" }}>
+                <TableRow>
+                  <TableCell>Item</TableCell>
+                  <TableCell align="right">Authorized Qty</TableCell>
+                  <TableCell align="right">Fulfilled Qty</TableCell>
+                  <TableCell align="right">Unit Price</TableCell>
+                  <TableCell>Batch No</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {fulfillmentLines.map((line, idx) => {
+                  const itemName = items.find((it: any) => String(it.id) === String(line.itemId))?.itemName || line.itemId;
+                  return (
+                    <TableRow key={idx}>
+                      <TableCell>{itemName}</TableCell>
+                      <TableCell align="right">{line.authorizedQty}</TableCell>
+                      <TableCell align="right" sx={{ width: 130 }}>
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={line.fulfilledQty}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setFulfillmentLines((prev) =>
+                              prev.map((item, i) => (i === idx ? { ...item, fulfilledQty: val } : item))
+                            );
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell align="right">₹{Number(line.unitPrice || 0).toFixed(2)}</TableCell>
+                      <TableCell sx={{ width: 140 }}>
+                        <TextField
+                          size="small"
+                          value={line.batchNo}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFulfillmentLines((prev) =>
+                              prev.map((item, i) => (i === idx ? { ...item, batchNo: val } : item))
+                            );
+                          }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <Box sx={{ p: 2, display: "flex", justifyContent: "flex-end", gap: 2 }}>
+          <Button onClick={() => setFulfillmentModalOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="success" onClick={handleSubmitFulfillment}>
+            Confirm & Fulfill Return
+          </Button>
+        </Box>
+      </Dialog>
+
+      {/* Vendor Credit Modal */}
+      <Dialog open={vendorCreditModalOpen} onClose={() => setVendorCreditModalOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: "bold" }}>
+          Issue Vendor Credit Note - {selectedReturnForAction?.returnNumber}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="body2" color="text.secondary" mb={1}>
+              Issuing a Vendor Credit Note decreases Accounts Payable liability and clears the Purchase Return Clearing account (DR Accounts Payable, CR Purchase Return Clearing).
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <FormLabel>Credit Date</FormLabel>
+                <TextField
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={creditDate}
+                  onChange={(e) => setCreditDate(e.target.value)}
+                />
+              </Grid>
+            </Grid>
+          </Box>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead sx={{ bgcolor: "grey.100" }}>
+                <TableRow>
+                  <TableCell>Item</TableCell>
+                  <TableCell align="right">Authorized Return Qty</TableCell>
+                  <TableCell align="right">Credit Qty</TableCell>
+                  <TableCell align="right">Unit Price</TableCell>
+                  <TableCell align="right">Total Credit Amount</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {vendorCreditLines.map((line, idx) => {
+                  const itemName = items.find((it: any) => String(it.id) === String(line.itemId))?.itemName || line.itemId;
+                  const totalLineCredit = (Number(line.creditQty) || 0) * (Number(line.unitPrice) || 0);
+                  return (
+                    <TableRow key={idx}>
+                      <TableCell>{itemName}</TableCell>
+                      <TableCell align="right">{line.authorizedQty}</TableCell>
+                      <TableCell align="right" sx={{ width: 130 }}>
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={line.creditQty}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setVendorCreditLines((prev) =>
+                              prev.map((item, i) => (i === idx ? { ...item, creditQty: val } : item))
+                            );
+                          }}
+                        />
+                      </TableCell>
+                      <TableCell align="right">₹{Number(line.unitPrice || 0).toFixed(2)}</TableCell>
+                      <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                        ₹{totalLineCredit.toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </DialogContent>
+        <Box sx={{ p: 2, display: "flex", justifyContent: "flex-end", gap: 2 }}>
+          <Button onClick={() => setVendorCreditModalOpen(false)}>Cancel</Button>
+          <Button variant="contained" color="primary" onClick={handleSubmitVendorCredit}>
+            Issue Vendor Credit
+          </Button>
         </Box>
       </Dialog>
     </Box>
