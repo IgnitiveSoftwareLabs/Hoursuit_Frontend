@@ -1,66 +1,19 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
-
-import {
-  Add,
-  Assessment,
-  Cancel,
-  CheckCircleOutline,
-  Delete,
-  Edit,
-  RemoveCircleOutline,
-  ReceiptLong,
-} from "@mui/icons-material";
-import Grid from "@mui/material/Grid";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Add, Delete, Edit, Search, List as ListIcon, Print, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
 import toast from "react-hot-toast";
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import {
-  Box,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  FormLabel,
-  MenuItem,
-  Select,
-  TextField,
-  Typography,
-  IconButton,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Divider,
-} from "@mui/material";
 
-const createDefaultLineItem = () => ({
-  purchaseOrderLineId: "",
-  itemId: "",
-  orderedQty: 0,
-  receivedQty: 0,
-  acceptedQty: 0,
-  rejectedQty: 0,
-  batchNo: "",
-  serialNo: "",
-  manufacturingDate: "",
-  expiryDate: "",
-  qcRequired: false,
-  status: "PENDING",
-  remarks: "",
-});
-
-import { useGetTransportationModesQuery } from "../RTK/services/transportationModeApi";
-import { useFetchWarehousesQuery } from "../RTK/services/warehouseApi";
-import { useFetchGodownsQuery } from "../RTK/services/godownApi";
-import { useFetchStacksQuery } from "../RTK/services/stackApi";
 import { useGetItemsQuery } from "../RTK/services/itemApi";
+import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
+import { useGetClassesQuery } from "../RTK/services/classApi";
+import { useGetDepartmentsQuery } from "../RTK/services/departmentApi";
+import { useGetCitiesQuery } from "../RTK/services/cityApi";
+import { useGetUOMsQuery } from "../RTK/services/uomApi";
+import { useGetTransportationModesQuery } from "../RTK/services/transportationModeApi";
+import { useGetInventoryQuery } from "../RTK/services/inventoryApi";
 import { usePermissions } from "../Hooks/usePermissions";
-import NavbarBreadcrumbs from "./NavbarBreadcrumbs";
 import {
   useGetPurchaseOrdersQuery,
   useGetGRNsQuery,
@@ -69,83 +22,125 @@ import {
   useUpdateGRNMutation,
   useUpdateGRNStatusMutation,
 } from "../RTK/services/purchaseApi";
-import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
-import DynamicTable from './Tables';
+
+import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
+import { GLImpactSubtab } from "./Layout/GLImpactSubtab";
+import ConfirmationDialog from "./Dialog/ConfirmationDialog";
+
+const createDefaultLineItem = () => ({
+  purchaseOrderLineId: "",
+  itemId: "",
+  uom_id: "",
+  locationId: "",
+  onHand: 0,
+  orderedQty: 0,
+  receivedQty: 1,
+  acceptedQty: 1,
+  rejectedQty: 0,
+  manufacturingDate: "",
+  expiryDate: "",
+  qcRequired: false,
+  status: "PENDING",
+  remarks: "",
+});
+
+const isDecimalAllowedForUOM = (uomObj: any) => {
+  if (!uomObj) return true;
+  const name = String(uomObj.uom_name || uomObj.name || uomObj.uom_symbol || "").toUpperCase();
+  const integerUOMs = ["EACH", "PCS", "PIECE", "PIECES", "NOS", "NUMBER", "NUMBERS", "BOX", "BOXES", "UNIT", "UNITS", "SET", "SETS", "PACK", "PACKS", "BAG", "BAGS", "BOTTLE", "BOTTLES", "CAN", "CANS", "DRUM", "DRUMS", "CARTON", "CARTONS"];
+  return !integerUOMs.some((u) => name.includes(u));
+};
+
+const helperVendorName = (v: any) => {
+  if (!v) return "";
+  return v.company_name || [v.salutation, v.first_name, v.last_name].filter(Boolean).join(" ");
+};
+
+const getVendorDisplayName = (vendorObj: any) => {
+  if (!vendorObj) return "—";
+  const code = vendorObj.entity_id ? `${vendorObj.entity_id} ` : "";
+  const name = helperVendorName(vendorObj);
+  return `${code}${name}`.trim() || "—";
+};
 
 const GRNComp: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { canRead, canCreate, canUpdate, canDelete } = usePermissions();
+
+  const [viewMode, setViewMode] = useState<"list" | "view" | "form">("list");
   const [isEdit, setIsEdit] = useState(false);
-  const [isOpen, setOpen] = useState(false);
   const [editId, setEditId] = useState<number | string | null>(null);
+  const [selectedGRN, setSelectedGRN] = useState<any>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [grnToDelete, setGrnToDelete] = useState<any>(null);
-  const [activeSection, setActiveSection] = useState<"lineItems" | "transport">("lineItems");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
 
-  const [selectedGrnForGl, setSelectedGrnForGl] = useState<any>(null);
-  const [glImpactOpen, setGlImpactOpen] = useState(false);
-  const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
-  const [grnToCancel, setGrnToCancel] = useState<any>(null);
-  const [viewOpen, setViewOpen] = useState(false);
-  const [hasOpenedForm, setHasOpenedForm] = useState(false);
+  // Eager Queries
+  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 100 });
+  const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 1000 });
+  const { data: subsidiariesData } = useGetSubsidiariesQuery(undefined);
+  const { data: classesData } = useGetClassesQuery(undefined);
+  const { data: departmentsData } = useGetDepartmentsQuery(undefined);
+  const { data: citiesData } = useGetCitiesQuery(undefined);
+  const { data: uomsData } = useGetUOMsQuery(undefined);
+  const { data: transportationModesData } = useGetTransportationModesQuery(undefined);
+  const { data: inventoryData } = useGetInventoryQuery({ limit: 1000 });
+  const { data: grnsData, refetch: refetchGRNs } = useGetGRNsQuery({ page: 1, limit: 50 });
 
-  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery(
-    { page: 1, limit: 50 },
-    { skip: !hasOpenedForm }
-  );
-  const { data: warehousesData } = useFetchWarehousesQuery(
-    { page: 1, limit: 100 },
-    { skip: !hasOpenedForm }
-  );
-  const { data: transportationModeData } = useGetTransportationModesQuery(
-    undefined,
-    { skip: !hasOpenedForm }
-  );
-  const { data: itemsData } = useGetItemsQuery(
-    { page: 1, limit: 100 },
-    { skip: !hasOpenedForm }
-  );
-  const { data: grnsData, refetch: refetchGRNs } = useGetGRNsQuery({ page: 1, limit: 10 });
+  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
+  const items = Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : Array.isArray(itemsData) ? itemsData : [];
+  const grns = Array.isArray(grnsData?.result) ? grnsData.result : Array.isArray(grnsData?.data) ? grnsData.data : Array.isArray(grnsData) ? grnsData : [];
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
+  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
+  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
+  const transportationModes = Array.isArray(transportationModesData?.result) ? transportationModesData.result : Array.isArray(transportationModesData?.data) ? transportationModesData.data : Array.isArray(transportationModesData) ? transportationModesData : [];
 
-  const {
-    data: journalEntriesData,
-    isLoading: isJournalLoading,
-    error: journalError,
-    refetch: refetchJournalEntries,
-  } = useGetJournalEntryByIdQuery(
-    {
-      id: selectedGrnForGl?.id as number,
-      source: "GRN",
-    },
-    {
-      skip: !selectedGrnForGl?.id,
-    }
-  );
+  const inventoryItems = useMemo(() => {
+    return Array.isArray(inventoryData?.result)
+      ? inventoryData.result
+      : Array.isArray(inventoryData?.data)
+        ? inventoryData.data
+        : Array.isArray(inventoryData)
+          ? inventoryData
+          : [];
+  }, [inventoryData]);
 
-  useEffect(() => {
-    if (glImpactOpen && selectedGrnForGl?.id && typeof refetchJournalEntries === "function") {
-      refetchJournalEntries().catch(() => {});
-    }
-  }, [glImpactOpen, selectedGrnForGl?.id, refetchJournalEntries]);
+  const onHandMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    inventoryItems.forEach((inv: any) => {
+      const itemId = String(inv.item_id || inv.itemId || inv.item?.id || "");
+      if (itemId) {
+        map[itemId] = (map[itemId] || 0) + Number(inv.qty || 0);
+      }
+    });
+    return map;
+  }, [inventoryItems]);
 
-  const purchaseOrders = useMemo(
-    () => (Array.isArray(purchaseOrdersData) ? purchaseOrdersData : purchaseOrdersData?.result ?? []),
-    [purchaseOrdersData]
-  );
-  const transportationModes = Array.isArray(transportationModeData)
-    ? transportationModeData
-    : transportationModeData?.result ?? [];
-  const warehouses = Array.isArray(warehousesData) ? warehousesData : warehousesData?.result ?? [];
-  const items = Array.isArray(itemsData) ? itemsData : itemsData?.result ?? [];
-  const grns = Array.isArray(grnsData) ? grnsData : grnsData?.result ?? [];
-  const journalHeader = journalEntriesData?.result;
-
-  const journalEntries = journalHeader?.lines ?? [];
-
-  const [createGRN] = useCreateGRNMutation();
-  const [updateGRN] = useUpdateGRNMutation();
-  const [updateGRNStatus] = useUpdateGRNStatusMutation();
+  const [createGRN, { isLoading: isCreating }] = useCreateGRNMutation();
+  const [updateGRN, { isLoading: isUpdating }] = useUpdateGRNMutation();
+  const [updateGRNStatus, { isLoading: isUpdatingStatus }] = useUpdateGRNStatusMutation();
   const [deleteGRN] = useDeleteGRNMutation();
+
+  const handleSubmitWithStatus = (status: string) => {
+    formik.setFieldValue("header.status", status);
+    setTimeout(() => {
+      formik.handleSubmit();
+    }, 0);
+  };
+
+  const handleReceiveStatusUpdate = async (grnId: number | string) => {
+    try {
+      await updateGRNStatus({ id: grnId, body: { status: "RECEIVED" } }).unwrap();
+      toast.success("GRN status updated to RECEIVED!");
+      refetchGRNs();
+    } catch (err: any) {
+      toast.error(err?.data?.message || "Failed to update GRN status to RECEIVED");
+    }
+  };
 
   const getPoLineItems = (record: any) => {
     const candidates = [
@@ -153,57 +148,35 @@ const GRNComp: React.FC = () => {
       record?.line_items,
       record?.purchaseOrderLines,
       record?.purchase_order_lines,
-      record?.purchaseOrderLineItems,
-      record?.purchase_order_line_items,
       record?.details,
-      record?.data?.lineItems,
-      record?.data?.purchaseOrderLines,
-      record?.data?.purchase_order_lines,
-      record?.header?.lineItems,
-      record?.header?.purchaseOrderLines,
-      record?.header?.purchase_order_lines,
     ];
-
-    const matchedArray = candidates.find((value) => Array.isArray(value));
-    return matchedArray ?? [];
+    return candidates.find((val) => Array.isArray(val)) ?? [];
   };
 
-  const mapPoLineToGrnLine = (line: any) => ({
-    purchaseOrderLineId: line?.purchaseOrderLineId ?? line?.purchase_order_line_id ?? line?.poLineId ?? line?.id ?? line?.lineId ?? "",
-    itemId: line?.itemId ?? line?.item_id ?? line?.item?.id ?? line?.item?.item_id ?? "",
-    orderedQty: Number(line?.orderedQty ?? line?.ordered_quantity ?? line?.quantity ?? line?.qty ?? line?.ordered_qty ?? 0),
-    receivedQty: 0,
-    acceptedQty: 0,
-    rejectedQty: 0,
-    batchNo: line?.batchNo ?? line?.batch_no ?? "",
-    serialNo: line?.serialNo ?? line?.serial_no ?? "",
-    manufacturingDate: line?.manufacturingDate ?? line?.manufacturing_date ?? "",
-    expiryDate: line?.expiryDate ?? line?.expiry_date ?? "",
-    qcRequired: line?.qcRequired ?? line?.qc_required ?? false,
-    status: line?.status ?? "PENDING",
-    remarks: line?.remarks ?? "",
-  });
+  const mapPoLineToGrnLine = (line: any) => {
+    const itemId = line?.itemId ?? line?.item_id ?? line?.item?.id ?? "";
+    const selectedItem = items.find((i: any) => String(i.id) === String(itemId));
+    const uomId = line?.uom_id ?? line?.uomId ?? selectedItem?.uom_id ?? "";
+    const orderedQty = Number(line?.orderedQty ?? line?.ordered_quantity ?? line?.quantity ?? line?.qty ?? 0);
+    const receivedQty = Number(line?.receivedQty ?? line?.quantity ?? line?.qty ?? 0);
+    const lineLocId = line?.locationId ?? line?.location_id ?? formik.values.header.location_id ?? "";
 
-  const handleStatusChange = async (id: number | string, newStatus: string) => {
-    try {
-      await updateGRNStatus({ id, body: { status: newStatus } }).unwrap();
-      toast.success(`GRN status updated to ${newStatus}`);
-      refetchGRNs();
-    } catch (error: any) {
-      toast.error(error?.data?.message || "Failed to update GRN status");
-    }
-  };
-
-  const handleGrnCancelRequest = (grn: any) => {
-    setGrnToCancel(grn);
-    setConfirmCancelOpen(true);
-  };
-
-  const handleConfirmCancelGrn = async () => {
-    if (!grnToCancel) return;
-    await handleStatusChange(grnToCancel.id, "CANCELLED");
-    setConfirmCancelOpen(false);
-    setGrnToCancel(null);
+    return {
+      purchaseOrderLineId: line?.purchaseOrderLineId ?? line?.purchase_order_line_id ?? line?.id ?? "",
+      itemId,
+      uom_id: uomId,
+      locationId: lineLocId,
+      onHand: onHandMap[String(itemId)] ?? 0,
+      orderedQty,
+      receivedQty,
+      acceptedQty: receivedQty,
+      rejectedQty: 0,
+      manufacturingDate: line?.manufacturingDate ?? "",
+      expiryDate: line?.expiryDate ?? "",
+      qcRequired: line?.qcRequired ?? false,
+      status: line?.status ?? "PENDING",
+      remarks: line?.remarks ?? "",
+    };
   };
 
   const formik = useFormik({
@@ -211,253 +184,242 @@ const GRNComp: React.FC = () => {
       header: {
         grnNo: "",
         purchaseOrderId: "",
-        warehouseId: "",
-        godownId: "",
-        stackId: "",
-        grnDate: new Date().toISOString().split("T")[0],
-        transportation_mode_id: "",
-        transporterName: "",
+        transportationModeId: "",
         driverName: "",
-        driverPhone: "",
+        driverPhoneNo: "",
         vehicleNo: "",
+        grnDate: new Date().toISOString().split("T")[0],
+        subsidiary_id: "",
+        class_id: "",
+        department_id: "",
+        location_id: "",
+        memo: "",
         status: "DRAFT",
         remarks: "",
       },
-      lineItems: [
-        {
-          purchaseOrderLineId: "",
-          itemId: "",
-          orderedQty: 0,
-          receivedQty: 0,
-          acceptedQty: 0,
-          rejectedQty: 0,
-          batchNo: "",
-          serialNo: "",
-          manufacturingDate: "",
-          expiryDate: "",
-          qcRequired: false,
-          status: "PENDING",
-          remarks: "",
-        },
-      ],
+      lineItems: [createDefaultLineItem()],
     },
     validationSchema: Yup.object({
       header: Yup.object({
         grnNo: Yup.string().nullable(),
         grnDate: Yup.date().required("GRN Date is required"),
-        warehouseId: Yup.string().required("Warehouse is required"),
+        location_id: Yup.string().required("Location / City is required"),
       }),
-      lineItems: Yup.array()
-        .of(
-          Yup.object({
-            itemId: Yup.string().required("Item is required"),
-            orderedQty: Yup.number().min(0.01, "Ordered qty must be > 0").required("Ordered qty is required"),
-            receivedQty: Yup.number().min(0, "Received qty must be >= 0"),
-            acceptedQty: Yup.number().min(0, "Accepted qty must be >= 0"),
-            rejectedQty: Yup.number().min(0, "Rejected qty must be >= 0"),
-          })
-        )
-        .min(1, "At least one line item is required"),
+      lineItems: Yup.array().of(
+        Yup.object({
+          itemId: Yup.string().required("Item is required"),
+          receivedQty: Yup.number().min(0.01, "Received Qty must be > 0").required("Received Qty is required"),
+        })
+      ).min(1, "At least one item line is required"),
     }),
     onSubmit: async (values) => {
       try {
+        // Enforce Received Qty <= Open PO Qty validation
+        for (let i = 0; i < values.lineItems.length; i++) {
+          const line = values.lineItems[i];
+          const uomObj = uoms.find((u: any) => String(u.id) === String(line.uom_id));
+          if (uomObj && !isDecimalAllowedForUOM(uomObj) && Number(line.receivedQty) % 1 !== 0) {
+            toast.error(`Received Quantity for line ${i + 1} (${uomObj.uom_name || uomObj.name}) must be a whole number.`);
+            return;
+          }
+          if (line.orderedQty > 0 && Number(line.receivedQty) > Number(line.orderedQty)) {
+            toast.error(`Line ${i + 1}: Received Quantity (${line.receivedQty}) cannot exceed Ordered Quantity (${line.orderedQty}).`);
+            return;
+          }
+        }
+
         const payload = {
           header: values.header,
           lineItems: values.lineItems,
         };
 
         if (isEdit && editId) {
-          await updateGRN({ id: editId, body: payload }).unwrap();
-          toast.success("GRN updated successfully");
+          const res = await updateGRN({ id: editId, body: payload }).unwrap();
+          toast.success(res?.message || "GRN updated successfully.");
         } else {
           await createGRN(payload).unwrap();
           toast.success("GRN created successfully");
         }
-
-        setOpen(false);
+        setViewMode("list");
         setIsEdit(false);
         setEditId(null);
+        setSearchParams({});
         formik.resetForm();
+        refetchGRNs();
       } catch (error: any) {
         toast.error(error?.data?.message || "Something went wrong");
       }
     },
   });
 
-  const selectedWarehouseId = formik.values.header.warehouseId;
-  const { data: godownsData } = useFetchGodownsQuery(
-    { warehouseId: Number(selectedWarehouseId), page: 1, limit: 50 },
-    { skip: !selectedWarehouseId }
-  );
+  const selectedSubsidiaryId = formik.values.header.subsidiary_id;
+  const filteredLocations = useMemo(() => {
+    if (!selectedSubsidiaryId) return citiesList;
+    const subFiltered = citiesList.filter(
+      (c: any) => String(c.subsidiary_id || c.subsidiaryId) === String(selectedSubsidiaryId)
+    );
+    return subFiltered.length > 0 ? subFiltered : citiesList;
+  }, [citiesList, selectedSubsidiaryId]);
 
-  const selectedGodownId = formik.values.header.godownId;
-  const { data: stacksData } = useFetchStacksQuery(
-    { godownId: Number(selectedGodownId), page: 1, limit: 50 },
-    { skip: !selectedGodownId }
-  );
+  const selectedPoId = formik.values.header.purchaseOrderId;
 
-  const godowns = Array.isArray(godownsData) ? godownsData : godownsData?.result ?? [];
-  const stacks = Array.isArray(stacksData) ? stacksData : stacksData?.result ?? [];
+  // Sync state with URL search params (PO receive link & GRN edit link support)
+  useEffect(() => {
+    const urlPoId = searchParams.get("poId") || searchParams.get("po_id");
+    const urlAction = searchParams.get("action");
+    const urlId = searchParams.get("id") || searchParams.get("grnId") || searchParams.get("grn_id");
+
+    if (urlId && (urlAction === "edit" || urlAction === "receive")) {
+      handleEdit(urlId);
+    } else if (urlId && urlAction === "view") {
+      const targetGRN = grns.find((g: any) => String(g.id) === String(urlId));
+      if (targetGRN) {
+        setSelectedGRN(targetGRN);
+        setViewMode("view");
+      }
+    } else if (urlPoId && !selectedPoId && !isEdit) {
+      formik.setFieldValue("header.purchaseOrderId", urlPoId);
+      setViewMode("form");
+      setIsEdit(false);
+    } else if (urlAction === "create") {
+      setViewMode("form");
+      setIsEdit(false);
+    }
+  }, [searchParams, grns]);
 
   useEffect(() => {
-    const selectedPoId = formik.values.header.purchaseOrderId;
+    if (isEdit || !selectedPoId) return;
     const selectedPo = purchaseOrders.find((po: any) => String(po.id) === String(selectedPoId));
+    if (!selectedPo) return;
 
-    if (!selectedPoId || !selectedPo || isEdit) {
-      return;
+    const poLines = getPoLineItems(selectedPo);
+    if (poLines.length > 0) {
+      const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line));
+      formik.setFieldValue("lineItems", mappedLines);
     }
 
-    const poLineItems = getPoLineItems(selectedPo);
-    const mappedLineItems = Array.isArray(poLineItems)
-      ? poLineItems.map(mapPoLineToGrnLine)
-      : [];
+    const subId = selectedPo.subsidiary_id || selectedPo.subsidiaryId;
+    if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
+    const classId = selectedPo.class_id || selectedPo.classId;
+    if (classId) formik.setFieldValue("header.class_id", String(classId));
+    const deptId = selectedPo.department_id || selectedPo.departmentId;
+    if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+    const cityId = selectedPo.city_id || selectedPo.cityId;
+    if (cityId) formik.setFieldValue("header.location_id", String(cityId));
+  }, [selectedPoId, purchaseOrders, isEdit]);
 
-    formik.setValues({
-      header: {
-        ...formik.values.header,
-        warehouseId: selectedPo.warehouse_id ?? selectedPo.warehouseId ?? selectedPo.header?.warehouse_id ?? selectedPo.header?.warehouseId ?? "",
-        godownId: selectedPo.godown_id ?? selectedPo.godownId ?? selectedPo.header?.godown_id ?? selectedPo.header?.godownId ?? "",
-        stackId: selectedPo.stack_id ?? selectedPo.stackId ?? selectedPo.header?.stack_id ?? selectedPo.header?.stackId ?? "",
-        transportation_mode_id: selectedPo.transportation_mode_id ?? selectedPo.header?.transportation_mode_id ?? "",
-        transporterName: selectedPo.transporterName ?? selectedPo.transporter_name ?? selectedPo.header?.transporterName ?? selectedPo.header?.transporter_name ?? "",
-        driverName: selectedPo.driverName ?? selectedPo.driver_name ?? selectedPo.header?.driverName ?? selectedPo.header?.driver_name ?? "",
-        driverPhone: selectedPo.driverPhone ?? selectedPo.driver_phone ?? selectedPo.header?.driverPhone ?? selectedPo.header?.driver_phone ?? "",
-        vehicleNo: selectedPo.vehicleNumber ?? selectedPo.vehicle_number ?? selectedPo.header?.vehicleNumber ?? selectedPo.header?.vehicle_number ?? formik.values.header.vehicleNo,
-      },
-      lineItems: mappedLineItems.length ? mappedLineItems : [createDefaultLineItem()],
-    });
-    setActiveSection("lineItems");
-  }, [formik.values.header.purchaseOrderId, purchaseOrders, isEdit]);
-
-  const updateLineItemField = (index: number, field: string, value: any) => {
+  const updateGrnLineField = (index: number, field: string, value: any) => {
     const lineItems = [...formik.values.lineItems];
-    let finalValue = value;
+    let newValue = value;
 
-    if (["receivedQty", "acceptedQty", "rejectedQty"].includes(field)) {
-      const numVal = Number(value || 0);
-      const ordered = Number(lineItems[index]?.orderedQty || 0);
-      if (numVal > ordered && ordered > 0) {
-        const fieldLabel =
-          field === "receivedQty"
-            ? "Received"
-            : field === "acceptedQty"
-              ? "Accepted"
-              : "Rejected";
-        toast.error(
-          `${fieldLabel} quantity cannot be greater than ordered quantity (${ordered})!`,
-          { id: `qty-warning-${index}-${field}` }
-        );
-        finalValue = ordered;
+    if (field === "receivedQty" && newValue !== "") {
+      const uomObj = uoms.find((u: any) => String(u.id) === String(lineItems[index].uom_id));
+      if (uomObj && !isDecimalAllowedForUOM(uomObj)) {
+        if (typeof newValue === "string" && (newValue.includes(".") || newValue.includes(","))) {
+          const intPart = newValue.split(".")[0].split(",")[0];
+          newValue = intPart === "" ? "" : Math.floor(Number(intPart)) || 0;
+          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+        } else if (Number(newValue) % 1 !== 0) {
+          newValue = Math.floor(Number(newValue)) || 0;
+          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+        }
       }
     }
 
-    lineItems[index] = { ...lineItems[index], [field]: finalValue };
+    const updatedLine = { ...lineItems[index], [field]: newValue };
+
+    if (field === "itemId") {
+      updatedLine.onHand = onHandMap[String(newValue)] ?? 0;
+    }
+
+    if (field === "receivedQty") {
+      updatedLine.acceptedQty = Number(newValue) || 0;
+    }
+
+    lineItems[index] = updatedLine;
     formik.setFieldValue("lineItems", lineItems);
   };
 
-  const handleAddLineItem = () => {
-    formik.setFieldValue("lineItems", [
-      ...formik.values.lineItems,
-      {
-        purchaseOrderLineId: "",
-        itemId: "",
-        orderedQty: 0,
-        receivedQty: 0,
-        acceptedQty: 0,
-        rejectedQty: 0,
-        // warehouseId: "",
-        // godownId: "",
-        // stackId: "",
-        batchNo: "",
-        serialNo: "",
-        manufacturingDate: "",
-        expiryDate: "",
-        qcRequired: true,
-        status: "PENDING",
-        remarks: "",
-      },
-    ]);
-  };
-
-  const handleRemoveLineItem = (index: number) => {
-    const newLineItems = [...formik.values.lineItems];
-    newLineItems.splice(index, 1);
-    formik.setFieldValue("lineItems", newLineItems);
-  };
-
-  const handleEdit = (record: any) => {
+  const handleEdit = (id: number | string) => {
     if (!canUpdate("grn")) {
       toast.error("No permission to edit GRN");
       return;
     }
+    const item = grns.find((x: any) => String(x.id) === String(id));
+    if (item) {
+      setIsEdit(true);
+      setEditId(id);
 
-    const header = record?.header ?? record;
-    const initialPoId = header?.purchaseOrderId ?? header?.purchase_order_id ?? record?.purchaseOrderId ?? record?.purchase_order_id ?? "";
+      const header = item.header ?? item;
+      const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
+      const poIdVal = String(header.purchaseOrderId ?? header.po_header_id ?? "");
+      const poObj = purchaseOrders.find((po: any) => String(po.id) === poIdVal);
+      const poLines = getPoLineItems(poObj);
+      const grnLines = item.grnDetails || item.lineItems || item.details || [];
 
-    setIsEdit(true);
-    setEditId(record?.id ?? null);
-    setSelectedGrnForGl(record);
-    setHasOpenedForm(true);
+      formik.setValues({
+        header: {
+          grnNo: header.grnNo ?? header.grn_number ?? "",
+          purchaseOrderId: poIdVal,
+          transportationModeId: String(header.transportationModeId ?? header.transportation_mode_id ?? ""),
+          driverName: header.driverName ?? header.driver_name ?? "",
+          driverPhoneNo: header.driverPhoneNo ?? header.driver_phone_no ?? header.driverPhone ?? "",
+          vehicleNo: header.vehicleNo ?? header.vehicle_number ?? "",
+          grnDate: formatDate(header.grnDate ?? header.receipt_date) || new Date().toISOString().split("T")[0],
+          subsidiary_id: String(header.subsidiary_id ?? poObj?.subsidiary_id ?? ""),
+          class_id: String(header.class_id ?? poObj?.class_id ?? ""),
+          department_id: String(header.department_id ?? poObj?.department_id ?? ""),
+          location_id: String(header.location_id ?? header.city_id ?? poObj?.city_id ?? ""),
+          memo: header.memo ?? "",
+          status: header.status ?? "DRAFT",
+          remarks: header.remarks ?? "",
+        },
+        lineItems: Array.isArray(grnLines) && grnLines.length > 0
+          ? grnLines.map((l: any) => {
+            const matchedPoLine = poLines.find((pol: any) => String(pol.id) === String(l.purchaseOrderLineId || l.po_line_id)) || poLines.find((pol: any) => String(pol.itemId || pol.item_id) === String(l.itemId || l.item_id));
+            const itemId = String(l.itemId ?? l.item_id ?? matchedPoLine?.itemId ?? matchedPoLine?.item_id ?? "");
+            const ordQty = Number(l.orderedQty ?? l.ordered_quantity ?? matchedPoLine?.quantity ?? matchedPoLine?.qty ?? 0);
+            const recQty = Number(l.receivedQty ?? l.received_quantity ?? ordQty);
 
-    const lineSource = record?.lineItems ?? record?.line_items ?? [];
-
-    formik.setValues({
-      header: {
-        grnNo: header?.grnNo ?? header?.grn_no ?? "",
-        purchaseOrderId: header?.purchaseOrderId ?? header?.purchase_order_id ?? "",
-        warehouseId: header?.warehouseId ?? header?.warehouse_id ?? "",
-        godownId: header?.godownId ?? header?.godown_id ?? "",
-        stackId: header?.stackId ?? header?.stack_id ?? "",
-        grnDate: header?.grnDate ?? header?.grn_date ? String(header?.grnDate ?? header?.grn_date).slice(0, 10) : new Date().toISOString().split("T")[0],
-        transportation_mode_id: header?.transportation_mode_id ?? "",
-        transporterName: header?.transporterName ?? header?.transporter_name ?? "",
-        driverName: header?.driverName ?? header?.driver_name ?? "",
-        driverPhone: header?.driverPhone ?? header?.driver_phone ?? "",
-        vehicleNo: header?.vehicleNo ?? header?.vehicle_number ?? "",
-        status: header?.status ?? "DRAFT",
-        remarks: header?.remarks ?? "",
-      },
-      lineItems: Array.isArray(lineSource) && lineSource.length
-        ? lineSource.map((line: any) => ({
-          purchaseOrderLineId: line?.purchaseOrderLineId ?? line?.purchase_order_line_id ?? "",
-          itemId: line?.itemId ?? line?.item_id ?? "",
-          orderedQty: Number(line?.orderedQty ?? line?.ordered_qty ?? 0),
-          receivedQty: Number(line?.receivedQty ?? line?.received_qty ?? 0),
-          acceptedQty: Number(line?.acceptedQty ?? line?.accepted_qty ?? 0),
-          rejectedQty: Number(line?.rejectedQty ?? line?.rejected_qty ?? 0),
-          batchNo: line?.batchNo ?? line?.batch_no ?? "",
-          serialNo: line?.serialNo ?? line?.serial_no ?? "",
-          manufacturingDate: line?.manufacturingDate ?? line?.manufacturing_date ?? "",
-          expiryDate: line?.expiryDate ?? line?.expiry_date ?? "",
-          qcRequired: line?.qcRequired ?? false,
-          status: line?.status ?? "PENDING",
-          remarks: line?.remarks ?? "",
-        }))
-        : [createDefaultLineItem()],
-    });
-
-    setOpen(true);
+            return {
+              purchaseOrderLineId: l.purchaseOrderLineId ?? l.po_line_id ?? matchedPoLine?.id ?? "",
+              itemId,
+              uom_id: String(l.uom_id ?? l.uomId ?? matchedPoLine?.uom_id ?? ""),
+              locationId: String(l.locationId ?? l.location_id ?? header.location_id ?? header.city_id ?? ""),
+              onHand: Number(l.onHand ?? onHandMap[itemId] ?? 0),
+              orderedQty: ordQty,
+              receivedQty: recQty,
+              acceptedQty: Number(l.acceptedQty ?? l.accepted_quantity ?? recQty),
+              rejectedQty: Number(l.rejectedQty ?? l.rejected_quantity ?? 0),
+              manufacturingDate: l.manufacturingDate ?? "",
+              expiryDate: l.expiryDate ?? "",
+              qcRequired: l.qcRequired ?? false,
+              status: l.status ?? "PENDING",
+              remarks: l.remarks ?? "",
+            };
+          })
+          : [createDefaultLineItem()],
+      });
+      setViewMode("form");
+      setSearchParams({ id: String(id), action: "edit" });
+    }
   };
 
-  const handleDeleteRequest = (record: any) => {
-    if (!canDelete("grn")) {
-      toast.error("No permission to delete GRN");
-      return;
+  const handleView = (id: number | string) => {
+    const item = grns.find((x: any) => String(x.id) === String(id));
+    if (item) {
+      setSelectedGRN(item);
+      setViewMode("view");
+      setSearchParams({ id: String(id), action: "view" });
     }
-    setGrnToDelete(record);
-    setDeleteDialogOpen(true);
   };
 
-  const handleDeleteConfirm = async () => {
-    if (!grnToDelete?.id) {
-      setDeleteDialogOpen(false);
-      setGrnToDelete(null);
-      return;
-    }
-
+  const confirmDelete = async () => {
+    if (!grnToDelete) return;
     try {
       await deleteGRN(grnToDelete.id).unwrap();
       toast.success("GRN deleted successfully");
+      refetchGRNs();
     } catch (error: any) {
       toast.error(error?.data?.message || "Failed to delete GRN");
     } finally {
@@ -466,835 +428,715 @@ const GRNComp: React.FC = () => {
     }
   };
 
-  const columns = [
-    {
-      key: "grnNo",
-      label: "GRN No",
-      render: (row: any) => (
-        <Button
-          size="small"
-          variant="text"
-          onClick={() => {
-            setSelectedGrnForGl(row);
-            setViewOpen(true);
-          }}
+  if (!canRead("grn")) {
+    return <div className="p-8 text-center text-red-600 font-bold">Access Denied: You do not have permission to view GRN.</div>;
+  }
+
+  // ── RENDER 1: FORM & VIEW MODE ──
+  if (viewMode === "form" || viewMode === "view") {
+    const isView = viewMode === "view";
+    const activeHeader = isView ? selectedGRN?.header || selectedGRN || {} : formik.values.header;
+    const activeLines = isView ? selectedGRN?.grnDetails || selectedGRN?.lineItems || [] : formik.values.lineItems;
+
+    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(activeHeader.purchaseOrderId || activeHeader.po_header_id));
+    const poNumber = activeHeader.purchaseOrder?.purchaseNo || poObj?.purchaseNo || (activeHeader.purchaseOrderId ? `PO-${activeHeader.purchaseOrderId}` : "—");
+
+    const rawSub = activeHeader.subsidiary || subsidiaries.find((s: any) => String(s.id) === String(activeHeader.subsidiary_id));
+    const subsidiaryName = typeof rawSub === "object" && rawSub !== null ? (rawSub.subsidiary_name || rawSub.name || "Ignitive Software Labs") : (typeof rawSub === "string" && rawSub ? rawSub : "Ignitive Software Labs");
+
+    const rawCurr = activeHeader.currency || poObj?.currency || poObj?.currency_code;
+    const currencyName = typeof rawCurr === "object" && rawCurr !== null ? (rawCurr.currency_code || rawCurr.currency_name || rawCurr.code || "INR") : (typeof rawCurr === "string" && rawCurr ? rawCurr : "INR");
+
+    const rawClass = activeHeader.class || classesList.find((c: any) => String(c.id) === String(activeHeader.class_id));
+    const classNameVal = typeof rawClass === "object" && rawClass !== null ? (rawClass.class_name || rawClass.name || "—") : (typeof rawClass === "string" && rawClass ? rawClass : "—");
+
+    const rawDept = activeHeader.department || departmentsList.find((d: any) => String(d.id) === String(activeHeader.department_id));
+    const deptNameVal = typeof rawDept === "object" && rawDept !== null ? (rawDept.department_name || rawDept.name || "—") : (typeof rawDept === "string" && rawDept ? rawDept : "—");
+
+    const rawLoc = activeHeader.location || citiesList.find((c: any) => String(c.id) === String(activeHeader.location_id));
+    const locNameVal = typeof rawLoc === "object" && rawLoc !== null ? (rawLoc.city_name || rawLoc.name || "—") : (typeof rawLoc === "string" && rawLoc ? rawLoc : "—");
+
+    const rawTrans = activeHeader.transportationMode || transportationModes.find((t: any) => String(t.id) === String(activeHeader.transportationModeId));
+    const transModeVal = typeof rawTrans === "object" && rawTrans !== null ? (rawTrans.mode_name || rawTrans.name || "—") : (typeof rawTrans === "string" && rawTrans ? rawTrans : "—");
+
+    const totalRecQty = activeLines.reduce((acc: number, l: any) => acc + Number(l.receivedQty || l.received_quantity || 0), 0);
+    const totalAccQty = activeLines.reduce((acc: number, l: any) => acc + Number(l.acceptedQty || l.accepted_quantity || 0), 0);
+
+    const grnValTotal = activeLines.reduce((acc: number, l: any) => {
+      const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
+      const rate = Number(itemObj?.purchase_price || itemObj?.cost_price || itemObj?.default_rate || 100);
+      const qty = Number(l.receivedQty || l.received_quantity || 0);
+      return acc + (qty * rate);
+    }, 0);
+
+    const grnNoStr = activeHeader.grnNo || activeHeader.grn_number || `GRN-${selectedGRN?.id || "NEW"}`;
+
+    return (
+      <form onSubmit={formik.handleSubmit}>
+        <RecordPageLayout
+          recordType="Goods Receipt Note (GRN)"
+          subtitle={isView ? `GRN #${grnNoStr}` : isEdit ? `Edit GRN #${formik.values.header.grnNo}` : "New Item Receipt"}
+          mode={isView ? "view" : "edit"}
+          saveButtonText="Receive"
+          onSave={() => handleSubmitWithStatus("RECEIVED")}
+          onSaveDraft={() => handleSubmitWithStatus("DRAFT")}
+          onEdit={() => { if (selectedGRN) handleEdit(selectedGRN.id); }}
+          onBack={() => { setViewMode("list"); setSearchParams({}); }}
+          onCancel={() => { setViewMode("list"); setSearchParams({}); }}
+          onListClick={() => { setViewMode("list"); setSearchParams({}); }}
+          onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
+          customActions={
+            isView && selectedGRN ? (
+              <div className="flex items-center space-x-1.5">
+                {String(selectedGRN.status || "").toUpperCase() === "DRAFT" && (
+                  <button
+                    type="button"
+                    onClick={() => handleReceiveStatusUpdate(selectedGRN.id)}
+                    disabled={isUpdatingStatus}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isUpdatingStatus ? "Updating..." : "Receive"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => navigate(`/purchase-invoice?grnId=${selectedGRN.id}`)}
+                  className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                >
+                  Bill
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/purchase-return?grnId=${selectedGRN.id}`)}
+                  className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                >
+                  Return
+                </button>
+              </div>
+            ) : undefined
+          }
+          isSaving={isCreating || isUpdating}
+          subTabs={[
+            {
+              id: "items",
+              label: `Items Received (${activeLines.length})`,
+              content: (
+                <div className="space-y-4">
+                  <div className="overflow-x-auto border border-slate-300 rounded-xs">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-[#244b5a] text-white font-bold uppercase text-[10px]">
+                        <tr>
+                          <th className="p-2 border-r border-slate-400 w-10 text-center">#</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[180px]">ITEM *</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[140px]">LOCATION</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">ON-HAND QTY</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">ORDERED QTY</th>
+                          <th className="p-2 border-r border-slate-400 w-28 text-right">REC QTY *</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">ACCEPTED QTY</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">REJECTED QTY</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[140px]">REMARKS</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 bg-white">
+                        {activeLines.map((line: any, idx: number) => {
+                          const itemObj = items.find((i: any) => String(i.id) === String(line.itemId || line.item_id));
+                          const selectedUom = uoms.find((u: any) => String(u.id) === String(line.uom_id || itemObj?.uom_id));
+                          const allowsDecimals = isDecimalAllowedForUOM(selectedUom);
+                          const lineOnHand = onHandMap[String(line.itemId || line.item_id)] ?? line.onHand ?? 0;
+                          const lineLocName = line.location?.city_name || citiesList.find((c: any) => String(c.id) === String(line.locationId || line.location_id))?.city_name || "—";
+
+                          if (isView) {
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50">
+                                <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
+                                <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">{line.item?.item_name || itemObj?.item_name || "—"}</td>
+                                <td className="p-2 border-r border-slate-200 font-medium text-slate-800">{lineLocName}</td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold text-slate-700">{lineOnHand}</td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono">{line.orderedQty ?? 0}</td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-sky-800">{line.receivedQty ?? line.received_quantity ?? 0}</td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono text-emerald-700">{line.acceptedQty ?? line.accepted_quantity ?? 0}</td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono text-red-600">{line.rejectedQty ?? line.rejected_quantity ?? 0}</td>
+                                <td className="p-2 border-r border-slate-200 text-slate-700">{line.remarks || "—"}</td>
+                              </tr>
+                            );
+                          }
+
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50">
+                              <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
+                              <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">
+                                {line.item?.item_name || itemObj?.item_name || (line.itemId ? `Item #${line.itemId}` : "—")}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <select
+                                  value={line.locationId || ""}
+                                  onChange={(e) => updateGrnLineField(idx, "locationId", e.target.value)}
+                                  className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs focus:outline-none focus:border-sky-500"
+                                >
+                                  <option value="">Select Location...</option>
+                                  {filteredLocations.map((c: any) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.city_name || c.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold text-slate-700 bg-slate-50">
+                                {lineOnHand}
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-500">{line.orderedQty || 0}</td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  disabled={true}
+                                  step={allowsDecimals ? "any" : "1"}
+                                  min={allowsDecimals ? "0.01" : "1"}
+                                  value={line.receivedQty}
+                                  onKeyDown={(e) => {
+                                    if (!allowsDecimals && (e.key === "." || e.key === "," || e.key === "e" || e.key === "E" || e.key === "-")) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                  onChange={(e) => updateGrnLineField(idx, "receivedQty", e.target.value)}
+                                  className="w-full h-7 bg-slate-100 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono text-slate-700 cursor-not-allowed font-semibold"
+                                />
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  disabled={true}
+                                  min="0"
+                                  value={line.acceptedQty}
+                                  onChange={(e) => updateGrnLineField(idx, "acceptedQty", Number(e.target.value) || 0)}
+                                  className="w-full h-7 bg-slate-100 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono text-slate-700 cursor-not-allowed font-semibold"
+                                />
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  disabled={true}
+                                  min="0"
+                                  value={line.rejectedQty}
+                                  onChange={(e) => updateGrnLineField(idx, "rejectedQty", Number(e.target.value) || 0)}
+                                  className="w-full h-7 bg-slate-100 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono text-slate-700 cursor-not-allowed"
+                                />
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="text"
+                                  placeholder="Remarks..."
+                                  value={line.remarks}
+                                  onChange={(e) => updateGrnLineField(idx, "remarks", e.target.value)}
+                                  className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs focus:outline-none focus:border-sky-500"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              id: "logistics",
+              label: "Logistics & Transportation",
+              content: (
+                <div className="p-4 bg-white border border-slate-300 rounded-xs">
+                  {isView ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="flex flex-col space-y-0.5">
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase">TRANSPORTATION MODE</span>
+                        <span className="text-xs font-semibold text-slate-800">{transModeVal}</span>
+                      </div>
+                      <div className="flex flex-col space-y-0.5">
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase">DRIVER NAME</span>
+                        <span className="text-xs font-semibold text-slate-800">{activeHeader.driverName || "—"}</span>
+                      </div>
+                      <div className="flex flex-col space-y-0.5">
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase">DRIVER PHONE NO</span>
+                        <span className="text-xs font-semibold text-slate-800">{activeHeader.driverPhoneNo || activeHeader.driverPhone || "—"}</span>
+                      </div>
+                      <div className="flex flex-col space-y-0.5">
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase">VEHICLE NO</span>
+                        <span className="text-xs font-semibold text-slate-800">{activeHeader.vehicleNo || "—"}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="flex flex-col space-y-1">
+                        <label className="text-[11px] font-semibold text-[#475569] uppercase">TRANSPORTATION MODE</label>
+                        <select
+                          name="header.transportationModeId"
+                          value={formik.values.header.transportationModeId || ""}
+                          onChange={formik.handleChange}
+                          className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                        >
+                          <option value="">Select Transportation Mode...</option>
+                          {transportationModes.map((t: any) => (
+                            <option key={t.id} value={t.id}>
+                              {t.mode_name || t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="flex flex-col space-y-1">
+                        <label className="text-[11px] font-semibold text-[#475569] uppercase">DRIVER NAME</label>
+                        <input
+                          type="text"
+                          name="header.driverName"
+                          placeholder="Enter driver name"
+                          value={formik.values.header.driverName}
+                          onChange={formik.handleChange}
+                          className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                        />
+                      </div>
+
+                      <div className="flex flex-col space-y-1">
+                        <label className="text-[11px] font-semibold text-[#475569] uppercase">DRIVER PHONE NO</label>
+                        <input
+                          type="text"
+                          name="header.driverPhoneNo"
+                          placeholder="Enter driver phone no"
+                          value={formik.values.header.driverPhoneNo}
+                          onChange={formik.handleChange}
+                          className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                        />
+                      </div>
+
+                      <div className="flex flex-col space-y-1">
+                        <label className="text-[11px] font-semibold text-[#475569] uppercase">VEHICLE NO</label>
+                        <input
+                          type="text"
+                          name="header.vehicleNo"
+                          placeholder="Enter vehicle number"
+                          value={formik.values.header.vehicleNo}
+                          onChange={formik.handleChange}
+                          className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            ...(isView
+              ? [
+                {
+                  id: "gl_impact",
+                  label: "GL Impact",
+                  content: (() => {
+                    const lines = activeHeader.lineItems || activeHeader.lines || activeHeader.grn_lines || [];
+                    const entries: any[] = [];
+                    let totalDebitSum = 0;
+
+                    lines.forEach((l: any) => {
+                      const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id || l.item?.id)) || l.item;
+                      const itemName = itemObj?.item_name || l.item_name || `Item #${l.itemId || l.id}`;
+                      const qty = Number(l.acceptedQty ?? l.accepted_quantity ?? l.receivedQty ?? l.received_quantity ?? l.quantity ?? 0);
+                      const rate = Number(l.unitPrice ?? l.unit_price ?? l.rate ?? l.purchaseOrderLine?.rate ?? 0);
+                      const lineAmt = Number((qty * rate).toFixed(2));
+
+                      if (lineAmt > 0) {
+                        totalDebitSum += lineAmt;
+                        entries.push({
+                          accountCode: itemObj?.asset_account?.account_number || "1100",
+                          accountName: itemObj?.asset_account?.account_name || `Inventory Asset - ${itemName}`,
+                          debit: lineAmt,
+                          credit: 0,
+                          memo: `Stock Inward: ${itemName} (Qty: ${qty} @ ₹${rate.toFixed(2)})`,
+                        });
+                      }
+                    });
+
+                    const finalTotal = totalDebitSum > 0 ? Number(totalDebitSum.toFixed(2)) : Number((grnValTotal || 0).toFixed(2));
+                    if (finalTotal > 0) {
+                      if (entries.length === 0) {
+                        entries.push({
+                          accountCode: "1100",
+                          accountName: "Inventory Asset / Received Goods",
+                          debit: finalTotal,
+                          credit: 0,
+                          memo: `Stock Inward GRN #${grnNoStr}`,
+                        });
+                      }
+                      entries.push({
+                        accountCode: "2200",
+                        accountName: "Accrued Purchases (GRNI Liability)",
+                        debit: 0,
+                        credit: finalTotal,
+                        memo: `Accrued Purchase Liability - GRN #${grnNoStr}`,
+                      });
+                    }
+
+                    return <GLImpactSubtab documentNumber={grnNoStr} entries={entries} />;
+                  })(),
+                },
+              ]
+              : []),
+          ]}
         >
-          {row.grnNo || row.grn_number || `#${row.id}`}
-        </Button>
-      ),
-    },
-    { key: "purchaseOrder", label: "Purchase Order", render: (row: any) => row.purchaseOrder?.purchaseNo || row.purchase_order?.purchaseNo || (row.purchaseOrderId ? `#${row.purchaseOrderId}` : "N/A") },
-    { key: "warehouse", label: "Warehouse", render: (row: any) => row.warehouse?.name || (row.warehouseId ? `ID: ${row.warehouseId}` : "N/A") },
-    {
-      key: "grnDate",
-      label: "GRN Date",
-      render: (row: any) => (row.grnDate ? new Date(row.grnDate).toLocaleDateString() : ""),
-    },
-    {
-      key: "status",
-      label: "Status",
-      render: (row: any) => {
-        let bg = "#f5f5f5";
-        let color = "#616161";
-        const status = row.status || "DRAFT";
-        if (status === "APPROVED" || status === "RECEIVED") { bg = "#e8f5e9"; color = "#2e7d32"; }
-        else if (status === "CANCELLED") { bg = "#ffebee"; color = "#c62828"; }
-        else if (status === "PENDING" || status === "DRAFT") { bg = "#fff8e1"; color = "#f57f17"; }
+          {/* PRIMARY INFORMATION + SUMMARY CARD */}
+          <div className="flex flex-col lg:flex-row gap-4">
+            <div className="flex-1 space-y-4">
+              <RecordSection title="Primary Information" defaultOpen={true}>
+                {isView ? (
+                  <>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">GRN #</span>
+                      <span className="text-xs font-bold text-slate-900">{activeHeader.grnNo || activeHeader.grn_number || `GRN-${selectedGRN?.id}`}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">PURCHASE ORDER</span>
+                      <span className="text-xs font-semibold text-sky-700">{poNumber}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">RECEIPT DATE</span>
+                      <span className="text-xs text-slate-800">{activeHeader.grnDate || activeHeader.receipt_date ? new Date(activeHeader.grnDate || activeHeader.receipt_date).toLocaleDateString() : "—"}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">MEMO</span>
+                      <span className="text-xs text-slate-800">{activeHeader.memo || "—"}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">GRN #</label>
+                      <input
+                        type="text"
+                        name="header.grnNo"
+                        placeholder="Auto-generated if empty"
+                        value={formik.values.header.grnNo}
+                        onChange={formik.handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
 
-        return (
-          <Box
-            sx={{
-              px: 1,
-              py: 0.5,
-              borderRadius: 1,
-              backgroundColor: bg,
-              color: color,
-              fontSize: "0.75rem",
-              fontWeight: "bold",
-              textAlign: "center"
-            }}
-          >
-            {status}
-          </Box>
-        );
-      }
-    },
-    {
-      key: "actions",
-      label: "Actions",
-      render: (row: any) => {
-        const isDraft = String(row.status || "DRAFT").toUpperCase() === "DRAFT";
-        const isApproved = row.status === "APPROVED" || row.status === "RECEIVED" || row.status === "COMPLETED";
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">PURCHASE ORDER REFERENCE</label>
+                      <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-sky-800 flex items-center select-none">
+                        {poNumber}
+                      </div>
+                    </div>
 
-        return (
-          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-            {isApproved && (
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                        RECEIPT DATE <span className="text-amber-600">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        name="header.grnDate"
+                        value={formik.values.header.grnDate}
+                        onChange={formik.handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">MEMO</label>
+                      <input
+                        type="text"
+                        name="header.memo"
+                        placeholder="Enter memo..."
+                        value={formik.values.header.memo || ""}
+                        onChange={formik.handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+                  </>
+                )}
+              </RecordSection>
+            </div>
+
+            {/* Summary Card */}
+            <div className="w-full lg:w-64 self-start">
+              <div className="border border-slate-300 rounded-xs overflow-hidden shadow-2xs">
+                <div className="bg-[#78a4b7] text-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider">
+                  Receipt Summary
+                </div>
+                <div className="p-3 space-y-2 text-xs font-mono">
+                  <div className="flex justify-between text-slate-600">
+                    <span className="font-semibold text-slate-700 uppercase text-[10px]">ITEMS</span>
+                    <span>{activeLines.length}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span className="font-semibold text-slate-700 uppercase text-[10px]">TOTAL REC QTY</span>
+                    <span>{totalRecQty}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1 text-sm">
+                    <span className="uppercase text-[11px]">ACCEPTED QTY</span>
+                    <span className="text-emerald-700">{totalAccQty}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* CLASSIFICATION SECTION */}
+          <RecordSection title="Classification" defaultOpen={true}>
+            {isView ? (
               <>
-                <IconButton
-                  size="small"
-                  color="secondary"
-                  onClick={() => navigate("/purchase-invoice")}
-                  aria-label="View Purchase Invoice"
-                  title="Go to Purchase Invoice"
-                >
-                  <ReceiptLong />
-                </IconButton>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">SUBSIDIARY</span>
+                  <span className="text-xs font-semibold text-slate-800">{subsidiaryName}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">CURRENCY</span>
+                  <span className="text-xs font-semibold text-slate-800">{currencyName}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>
+                  <span className="text-xs font-semibold text-slate-800">{classNameVal}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">DEPARTMENT</span>
+                  <span className="text-xs font-semibold text-slate-800">{deptNameVal}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">SUBSIDIARY</label>
+                  <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-slate-800 flex items-center select-none">
+                    {subsidiaryName}
+                  </div>
+                </div>
 
-                <IconButton
-                  size="small"
-                  color="info"
-                  onClick={() => {
-                    setSelectedGrnForGl(row);
-                    setGlImpactOpen(true);
-                  }}
-                  aria-label="GL impact"
-                >
-                  <Assessment />
-                </IconButton>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    LOCATION / CITY <span className="text-amber-600">*</span>
+                  </label>
+                  <select
+                    name="header.location_id"
+                    value={formik.values.header.location_id || ""}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Select Location...</option>
+                    {filteredLocations.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.city_name || c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">CLASS</label>
+                  <select
+                    name="header.class_id"
+                    value={formik.values.header.class_id || ""}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Select Class...</option>
+                    {classesList.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.class_name || c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">DEPARTMENT</label>
+                  <select
+                    name="header.department_id"
+                    value={formik.values.header.department_id || ""}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Select Department...</option>
+                    {departmentsList.map((d: any) => (
+                      <option key={d.id} value={d.id}>
+                        {d.department_name || d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </>
             )}
-
-            {isDraft && canUpdate("grn") && (
-              <IconButton
-                size="small"
-                color="success"
-                onClick={() => handleStatusChange(row.id, "RECEIVED")}
-                aria-label="Mark as Received"
-                title="Mark as Received"
-              >
-                <CheckCircleOutline />
-              </IconButton>
-            )}
-
-            {canUpdate("grn") && (
-              <IconButton
-                size="small"
-                color="primary"
-                disabled={!isDraft}
-                onClick={() => {
-                  if (!isDraft) {
-                    toast.error("Only DRAFT GRNs can be updated.");
-                    return;
-                  }
-                  handleEdit(row);
-                }}
-                aria-label="Edit GRN"
-                title="Edit GRN"
-              >
-                <Edit />
-              </IconButton>
-            )}
-
-            {canDelete("grn") && (
-              <IconButton
-                size="small"
-                color="error"
-                disabled={!isDraft}
-                onClick={() => {
-                  if (!isDraft) {
-                    toast.error("Only DRAFT GRNs can be deleted.");
-                    return;
-                  }
-                  handleDeleteRequest(row);
-                }}
-                aria-label="Delete GRN"
-                title="Delete GRN"
-              >
-                <Delete />
-              </IconButton>
-            )}
-
-            <IconButton
-              size="small"
-              color="warning"
-              disabled={!isDraft}
-              onClick={() => {
-                if (!isDraft) {
-                  toast.error("Only DRAFT GRNs can be cancelled.");
-                  return;
-                }
-                handleGrnCancelRequest(row);
-              }}
-              aria-label="Cancel GRN"
-              title="Cancel GRN"
-            >
-              <Cancel />
-            </IconButton>
-          </Box>
-        );
-      }
-    }
-  ];
-
-  if (!canRead("grn")) {
-    return (
-      <Box sx={{ width: "100%", maxWidth: { sm: "100%", md: "1810px" } }}>
-        <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "50vh" }}>
-          <Typography variant="h6" color="error">
-            Access Denied: You do not have permission to view GRNs.
-          </Typography>
-        </Box>
-      </Box>
+          </RecordSection>
+        </RecordPageLayout>
+      </form>
     );
   }
 
+  // ── RENDER 2: DATAGRID LIST VIEW MODE ──
+  const filteredGRNs = grns.filter((grn: any) => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase().trim();
+    const grnNoStr = String(grn.grnNo || grn.grn_number || `GRN-${grn.id}`).toLowerCase();
+    const poRef = String(grn.purchaseOrder?.purchaseNo || (grn.po_header_id ? `PO-${grn.po_header_id}` : "")).toLowerCase();
+    const driver = String(grn.driverName || "").toLowerCase();
+    const vehicle = String(grn.vehicleNo || "").toLowerCase();
+    return grnNoStr.includes(term) || poRef.includes(term) || driver.includes(term) || vehicle.includes(term);
+  });
+
   return (
-    <Box sx={{ width: "100%", maxWidth: { sm: "100%", md: "1810px" } }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
-        <Box>
-          <Typography variant="h3">GRN</Typography>
-          <NavbarBreadcrumbs />
-        </Box>
-        {canCreate("grn") && (
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => {
-              setHasOpenedForm(true);
-              setOpen(true);
-              setSelectedGrnForGl(null);
-              setIsEdit(false);
-              setEditId(null);
-              formik.resetForm();
-            }}
-          >
-            Add GRN
-          </Button>
+    <div className="flex flex-col space-y-3 p-4 bg-[#f3f6f9] min-h-screen font-sans text-slate-800">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-1 border-b border-slate-300">
+        <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">Goods Receipt Notes (GRN)</h1>
+        <div className="flex items-center space-x-2 text-xs font-semibold">
+          <button onClick={() => setViewMode("list")} className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1">
+            <ListIcon className="!w-3.5 !h-3.5" />
+            <span>List</span>
+          </button>
+          <span className="text-slate-300">|</span>
+          <button onClick={() => setViewMode("list")} className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1">
+            <Search className="!w-3.5 !h-3.5" />
+            <span>Search</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Button Bar */}
+      <div className="bg-white p-3 border border-slate-300 rounded-xs shadow-2xs flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center space-x-3 text-xs">
+          <span className="uppercase text-[10px] font-bold text-slate-500">VIEW</span>
+          <select className="h-7 px-3 text-xs bg-white border border-slate-300 rounded-xs font-medium focus:outline-none focus:border-sky-600">
+            <option>All Goods Receipt Notes</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Filters Panel */}
+      <div className="bg-white border border-slate-300 rounded-xs shadow-2xs overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setIsFilterOpen(!isFilterOpen)}
+          className="w-full bg-[#f8fafc] hover:bg-slate-100 px-3 py-1.5 border-b border-slate-300 text-xs font-bold text-slate-700 flex items-center justify-between transition-colors select-none cursor-pointer"
+        >
+          <div className="flex items-center space-x-1.5 text-[11px] text-[#244b5a]">
+            <span>= + FILTERS</span>
+          </div>
+          {isFilterOpen ? <KeyboardArrowUp className="!w-4 !h-4 text-slate-500" /> : <KeyboardArrowDown className="!w-4 !h-4 text-slate-500" />}
+        </button>
+
+        {isFilterOpen && (
+          <div className="p-3 bg-slate-50/50 border-b border-slate-200 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Search</label>
+              <input
+                type="text"
+                placeholder="Search GRN #, PO Reference, Driver, Vehicle..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-7 px-2 text-xs bg-white border border-slate-300 rounded-xs focus:outline-none focus:border-sky-600"
+              />
+            </div>
+          </div>
         )}
-      </Box>
+      </div>
 
-      <DynamicTable columns={columns} data={grns} getRowId={(row: any) => row.id} />
+      {/* DataGrid Table */}
+      <div className="bg-white border border-slate-300 rounded-xs shadow-2xs overflow-x-auto">
+        <table className="w-full text-left text-xs border-collapse">
+          <thead className="bg-[#e5eff5] border-b border-slate-300 text-[#244b5a] font-bold uppercase text-[10px] tracking-wider">
+            <tr>
+              <th className="p-2 border-r border-slate-300 w-28 text-center">ACTION</th>
+              <th className="p-2 border-r border-slate-300 w-24">INTERNAL ID</th>
+              <th className="p-2 border-r border-slate-300 min-w-[130px]">GRN NUMBER</th>
+              <th className="p-2 border-r border-slate-300 min-w-[150px]">PO REFERENCE</th>
+              <th className="p-2 border-r border-slate-300 w-28">RECEIPT DATE</th>
+              <th className="p-2 border-r border-slate-300 w-28 text-center">STATUS</th>
+              <th className="p-2 w-20 text-center">DELETE</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {filteredGRNs.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="p-8 text-center text-slate-500 font-medium italic">
+                  {searchTerm ? "No matching GRNs found." : "No Goods Receipt Notes found. To create a GRN, approve a Purchase Order and click 'Receive'."}
+                </td>
+              </tr>
+            ) : (
+              filteredGRNs.map((grn: any) => {
+                const poRef = grn.purchaseOrder?.purchaseNo || (grn.po_header_id || grn.purchaseOrderId ? `PO-${grn.po_header_id || grn.purchaseOrderId}` : "—");
+                const grnNoStr = grn.grnNo || grn.grn_number || `GRN-${grn.id}`;
+                const isGrnDraft = String(grn.status || "").toUpperCase() === "DRAFT";
 
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Confirm Delete</DialogTitle>
-        <DialogContent>
-          <Typography>Are you sure you want to delete this GRN?</Typography>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 2 }}>
-            <Button variant="outlined" onClick={() => setDeleteDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="contained" color="error" onClick={handleDeleteConfirm}>
-              Delete
-            </Button>
-          </Box>
-        </DialogContent>
-      </Dialog>
-
-      {/* View GRN Dialog (read-only) */}
-      <Dialog open={viewOpen} onClose={() => setViewOpen(false)} maxWidth="xl" fullWidth>
-        <DialogTitle>View GRN - {selectedGrnForGl?.grnNo || selectedGrnForGl?.id}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mb: 2 }}>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="subtitle2">GRN Number</Typography>
-                <Typography>{selectedGrnForGl?.grnNo || selectedGrnForGl?.grn_number || `#${selectedGrnForGl?.id}`}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="subtitle2">Purchase Order</Typography>
-                <Typography>{selectedGrnForGl?.purchaseOrder?.purchaseNo || selectedGrnForGl?.purchase_order?.purchaseNo || selectedGrnForGl?.purchaseOrderId}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="subtitle2">GRN Date</Typography>
-                <Typography>{selectedGrnForGl?.grnDate ? new Date(selectedGrnForGl.grnDate).toLocaleDateString() : ""}</Typography>
-              </Grid>
-            </Grid>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="h6">Line Items</Typography>
-            <TableContainer component={Paper} variant="outlined" sx={{ mt: 1 }}>
-              <Table size="small">
-                <TableHead sx={{ bgcolor: 'grey.100' }}>
-                  <TableRow>
-                    <TableCell>PO Line</TableCell>
-                    <TableCell>Item</TableCell>
-                    <TableCell align="right">Ordered</TableCell>
-                    <TableCell align="right">Received</TableCell>
-                    <TableCell align="right">Accepted</TableCell>
-                    <TableCell align="right">Rejected</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {selectedGrnForGl?.lineItems && selectedGrnForGl.lineItems.length ? (
-                    selectedGrnForGl.lineItems.map((li: any) => (
-                      <TableRow key={li.id || li.purchaseOrderLineId}>
-                        <TableCell>{li.purchaseOrderLineId || li.poLineId || "-"}</TableCell>
-                        <TableCell>{li.item?.item_name || li.itemName || li.itemId || "-"}</TableCell>
-                        <TableCell align="right">{Number(li.orderedQty ?? li.quantity ?? 0).toLocaleString()}</TableCell>
-                        <TableCell align="right">{Number(li.receivedQty ?? li.received_qty ?? 0).toLocaleString()}</TableCell>
-                        <TableCell align="right">{Number(li.acceptedQty ?? li.accepted_qty ?? 0).toLocaleString()}</TableCell>
-                        <TableCell align="right">{Number(li.rejectedQty ?? li.rejected_qty ?? 0).toLocaleString()}</TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={6} align="center">No line items available.</TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="h6">GL Impact</Typography>
-            <TableContainer component={Paper} variant="outlined" sx={{ mt: 1 }}>
-              <Table size="small">
-                <TableHead sx={{ bgcolor: 'grey.100' }}>
-                  <TableRow>
-                    <TableCell>Account</TableCell>
-                    <TableCell align="right">Debit (DR)</TableCell>
-                    <TableCell align="right">Credit (CR)</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {isJournalLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={3} align="center">Loading GL entries...</TableCell>
-                    </TableRow>
-                  ) : journalEntries.length ? (
-                    journalEntries.map((entry: any, idx: number) => (
-                      <TableRow key={idx}>
-                        <TableCell>{entry?.account?.account_name || entry?.account_name || entry?.accountId || `Acct ${idx + 1}`}</TableCell>
-                        <TableCell align="right" sx={{ color: Number(entry?.debit_amount ?? entry?.dr ?? 0) > 0 ? "success.main" : "text.secondary", fontWeight: Number(entry?.debit_amount ?? entry?.dr ?? 0) > 0 ? 600 : 400 }}>
-                          {Number(entry?.debit_amount ?? entry?.dr ?? 0) > 0
-                            ? `₹${Number(entry?.debit_amount ?? entry?.dr ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : "-"}
-                        </TableCell>
-                        <TableCell align="right" sx={{ color: Number(entry?.credit_amount ?? entry?.cr ?? 0) > 0 ? "error.main" : "text.secondary", fontWeight: Number(entry?.credit_amount ?? entry?.cr ?? 0) > 0 ? 600 : 400 }}>
-                          {Number(entry?.credit_amount ?? entry?.cr ?? 0) > 0
-                            ? `₹${Number(entry?.credit_amount ?? entry?.cr ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                            : "-"}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={3} align="center">No GL postings found for this GRN.</TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 2 }}>
-            <Button variant="outlined" onClick={() => setViewOpen(false)}>Close</Button>
-            {String(selectedGrnForGl?.status || "DRAFT").toUpperCase() === "DRAFT" && canUpdate("grn") && (
-              <Button
-                variant="contained"
-                color="success"
-                startIcon={<CheckCircleOutline />}
-                onClick={async () => {
-                  if (selectedGrnForGl?.id) {
-                    await handleStatusChange(selectedGrnForGl.id, "RECEIVED");
-                    setViewOpen(false);
-                  }
-                }}
-              >
-                Mark as Received
-              </Button>
-            )}
-            {String(selectedGrnForGl?.status || "DRAFT").toUpperCase() === "DRAFT" && canUpdate("grn") && (
-              <Button variant="contained" onClick={() => { setViewOpen(false); handleEdit(selectedGrnForGl); }}>Open Editor</Button>
-            )}
-          </Box>
-        </DialogContent>
-      </Dialog>
-
-      {/* GL Impact View Dialog */}
-      <Dialog open={glImpactOpen} onClose={() => setGlImpactOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>GL Journal Posting Impact - GRN #{selectedGrnForGl?.grnNo || selectedGrnForGl?.id}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ py: 1 }}>
-            <Typography variant="subtitle2" color="text.secondary" mb={2}>
-              Accrued Financial Ledger Impact generated upon goods receipt approval:
-            </Typography>
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead sx={{ bgcolor: "grey.100" }}>
-                  <TableRow>
-                    <TableCell>Account</TableCell>
-                    <TableCell>Narration</TableCell>
-                    <TableCell align="right">Debit (DR)</TableCell>
-                    <TableCell align="right">Credit (CR)</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {isJournalLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={4} align="center">
-                        Loading GL entries...
-                      </TableCell>
-                    </TableRow>
-                  ) : journalEntries.length > 0 ? (
-                    <>
-                      {journalEntries.map((line: any) => {
-                        const debit = parseFloat(line.debit_amount || 0);
-                        const credit = parseFloat(line.credit_amount || 0);
-
-                        return (
-                          <TableRow key={line.id}>
-                            <TableCell>
-                              {line.account?.account_number ? `${line.account.account_number} - ` : ""}
-                              {line.account?.account_name || line.account_name || `Account #${line.account_id}`}
-                            </TableCell>
-
-                            <TableCell>
-                              {line.narration || line.description || journalHeader?.narration || "-"}
-                            </TableCell>
-
-                            <TableCell align="right" sx={{ color: debit > 0 ? "success.main" : "text.secondary", fontWeight: debit > 0 ? 600 : 400 }}>
-                              {debit > 0
-                                ? `₹${debit.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                : "-"}
-                            </TableCell>
-
-                            <TableCell align="right" sx={{ color: credit > 0 ? "error.main" : "text.secondary", fontWeight: credit > 0 ? 600 : 400 }}>
-                              {credit > 0
-                                ? `₹${credit.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                : "-"}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-
-                      <TableRow sx={{ bgcolor: "grey.100" }}>
-                        <TableCell colSpan={2} align="right">
-                          <strong>Total</strong>
-                        </TableCell>
-
-                        <TableCell align="right" sx={{ color: "success.main" }}>
-                          <strong>
-                            ₹{Number(journalHeader?.total_debit ?? journalEntries.reduce((sum: number, l: any) => sum + Number(l.debit_amount || 0), 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </strong>
-                        </TableCell>
-
-                        <TableCell align="right" sx={{ color: "error.main" }}>
-                          <strong>
-                            ₹{Number(journalHeader?.total_credit ?? journalEntries.reduce((sum: number, l: any) => sum + Number(l.credit_amount || 0), 0)).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </strong>
-                        </TableCell>
-                      </TableRow>
-                    </>
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={4} align="center">
-                        {journalError
-                          ? "Unable to load GL entries."
-                          : "No GL postings found for this GRN."}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={confirmCancelOpen} onClose={() => setConfirmCancelOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Confirm Cancel GRN</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to cancel GRN #{grnToCancel?.grnNo || grnToCancel?.id}? This will prevent any further receipt or inventory posting.
-          </Typography>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2, mt: 2 }}>
-            <Button variant="outlined" onClick={() => setConfirmCancelOpen(false)}>
-              No
-            </Button>
-            <Button variant="contained" color="error" onClick={handleConfirmCancelGrn}>
-              Yes, Cancel
-            </Button>
-          </Box>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isOpen} onClose={() => setOpen(false)} maxWidth="xl" fullWidth>
-        <DialogTitle>{isEdit ? "Edit GRN" : "Create GRN"}</DialogTitle>
-        <DialogContent sx={{ p: 3 }}>
-          <Box component="form" onSubmit={formik.handleSubmit}>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Purchase Order</FormLabel>
-                  <Select
-                    size="small"
-                    name="header.purchaseOrderId"
-                    value={formik.values.header.purchaseOrderId}
-                    onChange={formik.handleChange}
-                    displayEmpty
-                    disabled={isEdit}
-                  >
-                    <MenuItem value="">Select Purchase Order</MenuItem>
-                    {purchaseOrders?.map((po: any) => (
-                      <MenuItem key={po?.id} value={po?.id}>
-                        {po?.purchaseNo || `#${po?.id}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={formik.touched.header?.grnDate && !!formik.errors.header?.grnDate}>
-                  <FormLabel>GRN Date</FormLabel>
-                  <TextField
-                    size="small"
-                    type="date"
-                    name="header.grnDate"
-                    value={formik.values.header.grnDate}
-                    onChange={formik.handleChange}
-                    onBlur={formik.handleBlur}
-                    InputLabelProps={{ shrink: true }}
-                    error={formik.touched.header?.grnDate && !!formik.errors.header?.grnDate}
-                    helperText={formik.touched.header?.grnDate && (formik.errors.header as any)?.grnDate}
-                  />
-                </FormControl>
-              </Grid>
-
-              {/* PO Read-Only Reference Details */}
-              {(() => {
-                const selectedPo = purchaseOrders.find(
-                  (po: any) => String(po.id) === String(formik.values.header.purchaseOrderId)
-                );
-                if (!selectedPo) return null;
-                const vendorName =
-                  selectedPo.vendor?.vendor_name || selectedPo.vendor?.name || selectedPo.vendor_name || "-";
-                const poDate = selectedPo.purchaseDate
-                  ? selectedPo.purchaseDate.slice(0, 10)
-                  : selectedPo.purchase_date
-                    ? selectedPo.purchase_date.slice(0, 10)
-                    : "-";
-                const locationName = selectedPo.city?.city_name || "-";
-                const subsidiaryName = selectedPo.subsidiary?.subsidiary_name || "-";
-                const shippedFrom = selectedPo.shipped_from || "-";
-                const shippedTo = selectedPo.shipped_to || "-";
                 return (
-                  <>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <FormControl fullWidth>
-                        <FormLabel>Vendor (PO Reference)</FormLabel>
-                        <TextField size="small" value={vendorName} disabled />
-                      </FormControl>
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <FormControl fullWidth>
-                        <FormLabel>PO Date</FormLabel>
-                        <TextField size="small" value={poDate} disabled />
-                      </FormControl>
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <FormControl fullWidth>
-                        <FormLabel>Location</FormLabel>
-                        <TextField size="small" value={locationName} disabled />
-                      </FormControl>
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <FormControl fullWidth>
-                        <FormLabel>Subsidiary</FormLabel>
-                        <TextField size="small" value={subsidiaryName} disabled />
-                      </FormControl>
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <FormControl fullWidth>
-                        <FormLabel>Shipped From</FormLabel>
-                        <TextField size="small" value={shippedFrom} disabled />
-                      </FormControl>
-                    </Grid>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                      <FormControl fullWidth>
-                        <FormLabel>Shipped To</FormLabel>
-                        <TextField size="small" value={shippedTo} disabled />
-                      </FormControl>
-                    </Grid>
-                  </>
+                  <tr key={grn.id} className="hover:bg-sky-50/50 transition-colors">
+                    <td className="p-2 border-r border-slate-200 text-center font-semibold space-x-1">
+                      {isGrnDraft ? (
+                        canUpdate("grn") ? (
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(grn.id)}
+                            className="bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold px-2.5 py-1 rounded-xs cursor-pointer shadow-2xs"
+                          >
+                            Receive
+                          </button>
+                        ) : (
+                          <span className="text-slate-400">Receive</span>
+                        )
+                      ) : (
+                        <div className="flex items-center justify-center space-x-2">
+                          <button onClick={() => handleView(grn.id)} className="text-sky-700 hover:underline cursor-pointer">
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/purchase-invoice?grnId=${grn.id}`)}
+                            className="text-sky-700 font-semibold hover:underline cursor-pointer"
+                          >
+                            Bill
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 font-mono text-slate-600">{grn.id}</td>
+                    <td className="p-2 border-r border-slate-200 font-mono font-bold text-sky-800">
+                      <button onClick={() => handleView(grn.id)} className="hover:underline text-left cursor-pointer">
+                        {grnNoStr}
+                      </button>
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-sky-800 font-medium">{poRef}</td>
+                    <td className="p-2 border-r border-slate-200 text-slate-700">
+                      {grn.grnDate || grn.receipt_date ? new Date(grn.grnDate || grn.receipt_date).toLocaleDateString() : "—"}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-center">
+                      <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${isGrnDraft
+                          ? "bg-amber-100 text-amber-800 border-amber-200"
+                          : "bg-emerald-100 text-emerald-800 border-emerald-200"
+                        }`}>
+                        {grn.status || "COMPLETED"}
+                      </span>
+                    </td>
+                    <td className="p-2 text-center">
+                      {canDelete("grn") && (
+                        <button
+                          onClick={() => {
+                            setGrnToDelete(grn);
+                            setDeleteDialogOpen(true);
+                          }}
+                          className="text-red-600 hover:underline font-semibold cursor-pointer"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  </tr>
                 );
-              })()}
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth error={formik.touched.header?.warehouseId && !!formik.errors.header?.warehouseId}>
-                  <FormLabel>Warehouse</FormLabel>
-                  <Select
-                    size="small"
-                    name="header.warehouseId"
-                    value={formik.values.header.warehouseId}
-                    onChange={formik.handleChange}
-                    displayEmpty
-                    disabled={true}
-                  >
-                    <MenuItem value="">Select Warehouse</MenuItem>
-                    {warehouses.map((w: any) => (
-                      <MenuItem key={w.id} value={w.id}>
-                        {w.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Godown</FormLabel>
-                  <Select
-                    size="small"
-                    name="header.godownId"
-                    value={formik.values.header.godownId}
-                    onChange={formik.handleChange}
-                    displayEmpty
-                    disabled={true}
-                  >
-                    <MenuItem value="">Select Godown</MenuItem>
-                    {godowns.map((g: any) => (
-                      <MenuItem key={g.id} value={g.id}>
-                        {g.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Stack</FormLabel>
-                  <Select
-                    size="small"
-                    name="header.stackId"
-                    value={formik.values.header.stackId}
-                    onChange={formik.handleChange}
-                    displayEmpty
-                    disabled={true}
-                  >
-                    <MenuItem value="">Select Stack</MenuItem>
-                    {stacks.map((s: any) => (
-                      <MenuItem key={s.id} value={s.id}>
-                        {s.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-            </Grid>
-
-            <Grid size={{ xs: 12, md: 4 }} sx={{ mt: 2 }}>
-              <FormControl fullWidth>
-                <FormLabel>Remarks</FormLabel>
-                <TextField
-                  size="small"
-                  multiline
-                  placeholder="Enter Remark"
-                  name="header.remarks"
-                  value={formik.values.header.remarks}
-                  onChange={formik.handleChange}
-                />
-              </FormControl>
-            </Grid>
-
-            <Grid size={{ xs: 12 }} my={4}>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  size="small"
-                  variant={activeSection === 'lineItems' ? 'contained' : 'outlined'}
-                  onClick={() => setActiveSection('lineItems')}
-                >
-                  Line Items
-                </Button>
-                <Button
-                  size="small"
-                  variant={activeSection === 'transport' ? 'contained' : 'outlined'}
-                  onClick={() => setActiveSection('transport')}
-                >
-                  Transport Details
-                </Button>
-              </Box>
-            </Grid>
-
-            <Divider sx={{ my: 1 }} />
-
-            {activeSection === 'transport' ? (
-              <>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} my={2}>
-                  <Typography variant="h6" color="primary">Transport Details</Typography>
-                </Box>
-                <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', width: '100%', mb: 2 }}>
-                  <Table size="small" sx={{ minWidth: 1200 }}>
-                    <TableHead sx={{ bgcolor: 'grey.100' }}>
-                      <TableRow>
-                        <TableCell width="20%">Transportation Mode</TableCell>
-                        <TableCell width="20%">Transporter Name</TableCell>
-                        <TableCell width="20%">Driver Name</TableCell>
-                        <TableCell width="20%">Driver Phone</TableCell>
-                        <TableCell width="20%">Vehicle Number</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      <TableRow>
-                        <TableCell>
-                          <FormControl fullWidth>
-                            <Select
-                              size="small"
-                              name="header.transportation_mode_id"
-                              value={formik.values.header.transportation_mode_id}
-                              onChange={formik.handleChange}
-                              displayEmpty
-                              disabled={true}
-                            >
-                              <MenuItem value="">Select Transportation Mode</MenuItem>
-                              {transportationModes?.map((t: any) => (
-                                <MenuItem key={t.id} value={t.id}>
-                                  {t.mode_name}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </FormControl>
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            fullWidth
-                            size="small"
-                            name="header.transporterName"
-                            value={formik.values.header.transporterName}
-                            onChange={formik.handleChange}
-                            placeholder="Transporter Name"
-                            disabled={true}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            fullWidth
-                            size="small"
-                            name="header.driverName"
-                            value={formik.values.header.driverName}
-                            onChange={formik.handleChange}
-                            placeholder="Driver Name"
-                            disabled={true}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            fullWidth
-                            size="small"
-                            name="header.driverPhone"
-                            value={formik.values.header.driverPhone}
-                            onChange={formik.handleChange}
-                            placeholder="Driver Phone"
-                            disabled={true}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            fullWidth
-                            size="small"
-                            name="header.vehicleNo"
-                            value={formik.values.header.vehicleNo}
-                            onChange={formik.handleChange}
-                            placeholder="Vehicle Number"
-                            disabled={true}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </>
-            ) : activeSection === "lineItems" ? (
-              <>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="h6" color="primary">Line Items</Typography>
-                </Box>
-
-                <TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto', width: '100%' }}>
-                  <Table size="small" sx={{ minWidth: 1000 }}>
-                    <TableHead sx={{ bgcolor: "grey.100" }}>
-                      <TableRow>
-                        <TableCell width="25%">Item</TableCell>
-                        <TableCell width="15%">Ordered Qty</TableCell>
-                        <TableCell width="15%">Received Qty</TableCell>
-                        <TableCell width="15%">Accepted Qty</TableCell>
-                        <TableCell width="15%">Rejected Qty</TableCell>
-                        <TableCell width="15%">Action</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {formik.values.lineItems.map((lineItem, index) => (
-                        <TableRow key={index}>
-                          <TableCell>
-                            <Select
-                              fullWidth
-                              size="small"
-                              value={lineItem.itemId}
-                              onChange={(e) => updateLineItemField(index, "itemId", e.target.value)}
-                              displayEmpty
-                              disabled={true}
-                            >
-                              <MenuItem value="">Select Item</MenuItem>
-                              {items.map((item: any) => (
-                                <MenuItem key={item.id} value={item.id}>
-                                  {item.item_name || item.name || `#${item.id}`}
-                                </MenuItem>
-                              ))}
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              size="small"
-                              type="number"
-                              disabled={true}
-                              inputProps={{ min: 0, step: 0.01 }}
-                              value={lineItem.orderedQty}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              size="small"
-                              type="number"
-                              inputProps={{ min: 0, max: lineItem.orderedQty, step: 0.01 }}
-                              value={lineItem.receivedQty}
-                              onChange={(e) => updateLineItemField(index, "receivedQty", Number(e.target.value))}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              size="small"
-                              type="number"
-                              inputProps={{ min: 0, max: lineItem.orderedQty, step: 0.01 }}
-                              value={lineItem.acceptedQty}
-                              onChange={(e) => updateLineItemField(index, "acceptedQty", Number(e.target.value))}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <TextField
-                              size="small"
-                              type="number"
-                              inputProps={{ min: 0, max: lineItem.orderedQty, step: 0.01 }}
-                              value={lineItem.rejectedQty}
-                              onChange={(e) => updateLineItemField(index, "rejectedQty", Number(e.target.value))}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <IconButton size="small" color="error" onClick={() => handleRemoveLineItem(index)}>
-                              <RemoveCircleOutline />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </>
-            ) : null}
-
-            <Box sx={{ display: "flex", justifyContent: "flex-end", gap: 2, mt: 3 }}>
-              <Button variant="outlined" onClick={() => setOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="contained">
-                {isEdit ? "Update GRN" : "Create GRN"}
-              </Button>
-            </Box>
-          </Box>
-        </DialogContent>
-      </Dialog>
-    </Box>
+      <ConfirmationDialog
+        open={deleteDialogOpen}
+        title="Delete Goods Receipt Note"
+        message="Are you sure you want to delete this GRN? This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
+    </div>
   );
 };
 

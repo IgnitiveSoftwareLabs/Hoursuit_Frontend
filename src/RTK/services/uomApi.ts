@@ -8,6 +8,7 @@ export interface UOMType {
   CompanyId?: number;
   user_id?: number;
   isActive?: boolean;
+  allow_decimals?: boolean;
   createdAt?: string;
   updatedAt?: string;
   subsidiary?: {

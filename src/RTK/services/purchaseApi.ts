@@ -4,7 +4,7 @@ import customBaseQuery from '../customBaseQuery';
 export const purchaseApi = createApi({
   reducerPath: 'purchaseApi',
   baseQuery: customBaseQuery,
-  tagTypes: ['PurchaseOrder', 'PurchaseInvoice', 'GRN', 'PurchaseReturn', 'QualityInspection', 'Inventory', 'GLBalance', 'Vendor', 'JournalEntry', 'PurchasePayment', 'ReturnFulfillment', 'VendorCredit'],
+  tagTypes: ['PurchaseOrder', 'PurchaseInvoice', 'GRN', 'PurchaseReturn', 'QualityInspection', 'Inventory', 'GLBalance', 'Vendor', 'JournalEntry', 'PurchasePayment', 'ReturnFulfillment', 'VendorCredit', 'DebitNote'],
   endpoints: (builder) => ({
     // Purchase Order
     getPurchaseOrders: builder.query<any, any>({
@@ -311,6 +311,38 @@ export const purchaseApi = createApi({
       }),
       invalidatesTags: ['VendorCredit', 'PurchaseReturn', 'GLBalance', 'JournalEntry'],
     }),
+
+    // Debit Note (Vendor Credit Aliases)
+    getDebitNotes: builder.query<any, any>({
+      query: (params) => ({
+        url: '/vendor-credit/get',
+        params,
+      }),
+      providesTags: ['DebitNote', 'VendorCredit'],
+    }),
+    createDebitNote: builder.mutation<any, any>({
+      query: (body) => ({
+        url: '/vendor-credit/create',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['DebitNote', 'VendorCredit', 'GLBalance'],
+    }),
+    updateDebitNote: builder.mutation<any, { id: number | string; body: any }>({
+      query: ({ id, body }) => ({
+        url: `/vendor-credit/${id}`,
+        method: 'PUT',
+        body,
+      }),
+      invalidatesTags: ['DebitNote', 'VendorCredit'],
+    }),
+    deleteDebitNote: builder.mutation<any, number | string>({
+      query: (id) => ({
+        url: `/vendor-credit/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['DebitNote', 'VendorCredit'],
+    }),
   }),
 });
 
@@ -355,4 +387,8 @@ export const {
   useCreateReturnFulfillmentMutation,
   useGetVendorCreditsQuery,
   useCreateVendorCreditMutation,
+  useGetDebitNotesQuery,
+  useCreateDebitNoteMutation,
+  useUpdateDebitNoteMutation,
+  useDeleteDebitNoteMutation,
 } = purchaseApi;

@@ -46,10 +46,12 @@ import PurchaseInvoicePage from "./Pages/PurchaseInvoicePage";
 import PurchasePaymentPage from "./Pages/PurchasePaymentPage";
 import PurchaseReturnPage from "./Pages/PurchaseReturnPage";
 import DebitNotePage from "./Pages/DebitNotePage";
+import ReturnFulfillmentPage from "./Pages/ReturnFulfillmentPage";
 import PanAvailibilityPage from "./Pages/PanAvailibityPage";
 import ChartOfAccountPage from "./Pages/ChartOfAccountPage";
 import PurchaseOrderPage from "./Pages/PurchaseOrderPage";
 import PaymentMethodPage from "./Pages/PaymentMethodPage";
+import TermPage from "./Pages/TermPage";
 import ServiceCategoryPage from "./Pages/ServiceCatPage";
 import CurrencyMasterPage from "./Pages/CurrencyMaster";
 import QualityCheckPage from "./Pages/QualityCheckPage";
@@ -69,8 +71,11 @@ import MisTypePage from "./Pages/MisTypePage";
 import VendorPage from "./Pages/VendorPage";
 import HSNSACPage from "./Pages/HSNSAC";
 import ItemPage from "./Pages/itemPage";
+import ClassMasterPage from "./Pages/ClassPage";
+import DepartmentMasterPage from "./Pages/DepartmentPage";
 import UOMPage from "./Pages/UOMPages";
 import GRNPage from "./Pages/GRNPages";
+import NetSuiteVendorDemo from "./components/Demo/NetSuiteVendorDemo";
 
 function App() {
   return (
@@ -112,6 +117,15 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route
+          path="/currencies"
+          element={
+            <PrivateRoute>
+              <CurrencyMasterPage />
+            </PrivateRoute>
+          }
+        />
+
 
         {/* State - Available to all authenticated users */}
         <Route
@@ -233,6 +247,26 @@ function App() {
           }
         />
 
+        {/* Class - Available to all authenticated users */}
+        <Route
+          path="/class"
+          element={
+            <PrivateRoute>
+              <ClassMasterPage />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Department - Available to all authenticated users */}
+        <Route
+          path="/department"
+          element={
+            <PrivateRoute>
+              <DepartmentMasterPage />
+            </PrivateRoute>
+          }
+        />
+
         {/* Item Type - Available to all authenticated users */}
         <Route
           path="/item-type"
@@ -298,6 +332,14 @@ function App() {
             </PrivateRoute>
           }
         />
+        <Route
+          path="/netsuite-vendor-demo"
+          element={
+            <PrivateRoute>
+              <NetSuiteVendorDemo />
+            </PrivateRoute>
+          }
+        />
 
         {/* Warehouse Management - Requires warehouse permissions */}
         <Route
@@ -348,6 +390,17 @@ function App() {
             <PrivateRoute>
               <ProtectedRoute module="paymentMethod" action="read">
                 <PaymentMethodPage />
+              </ProtectedRoute>
+            </PrivateRoute>
+          }
+        />
+
+        <Route
+          path="/terms"
+          element={
+            <PrivateRoute>
+              <ProtectedRoute module="vendor" action="read">
+                <TermPage />
               </ProtectedRoute>
             </PrivateRoute>
           }
@@ -628,12 +681,34 @@ function App() {
           }
         />
 
+        {/* Item Return Fulfillment */}
+        <Route
+          path="/return-fulfillment"
+          element={
+            <PrivateRoute>
+              <ProtectedRoute module="purchase_return" action="read">
+                <ReturnFulfillmentPage />
+              </ProtectedRoute>
+            </PrivateRoute>
+          }
+        />
+
         {/* Finance Debit Note Management */}
         <Route
           path="/finance/debit-notes"
           element={
             <PrivateRoute>
-              <ProtectedRoute module="purchase_return" action="read">
+              <ProtectedRoute module="debit_note" action="read">
+                <DebitNotePage />
+              </ProtectedRoute>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/debit-note"
+          element={
+            <PrivateRoute>
+              <ProtectedRoute module="debit_note" action="read">
                 <DebitNotePage />
               </ProtectedRoute>
             </PrivateRoute>

@@ -1,40 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Paper,
-  Card,
-  CardContent,
-  FormControl,
-  FormLabel,
-  TextField,
-  MenuItem,
-  Alert,
-  CircularProgress,
-  Chip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  IconButton,
-} from '@mui/material';
-import { Formik, Form, Field } from 'formik';
-import * as Yup from 'yup';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
-import { 
-  Add, 
-  Search, 
-  Visibility,
-  Close,
-} from '@mui/icons-material';
-import dayjs from 'dayjs';
-import Layout from '../../components/Layout';
-import InfiniteScrollAutocomplete from '../../Common/InfiniteScroll';
-import { DataGrid } from '@mui/x-data-grid';
-import { useAppDispatch, useAppSelector } from '../../Hooks/Reduxhook/hooks';
+import React, { useState, useEffect, useCallback } from "react";
+import { CircularProgress } from "@mui/material";
+import { Add, Search, List as ListIcon, GetApp, Print } from "@mui/icons-material";
+import { Formik, Form, Field } from "formik";
+import * as Yup from "yup";
+import dayjs from "dayjs";
+import toast from "react-hot-toast";
+import { useSearchParams } from "react-router-dom";
+
+import Layout from "../../components/Layout";
+import InfiniteScrollAutocomplete from "../../Common/InfiniteScroll";
+import { useAppDispatch, useAppSelector } from "../../Hooks/Reduxhook/hooks";
 import {
   setLoading,
   setCreating,
@@ -45,864 +20,616 @@ import {
   setPagination,
   updateFilters,
   clearError,
-} from '../../Redux/VoucherSlice';
+} from "../../Redux/VoucherSlice";
 import {
   createVoucherApi,
   getVouchersApi,
   getVoucherByIdApi,
-} from '../../Services/Admin/VoucherApiservice';
-import { useLazyGetCustomersQuery } from '../../RTK/services/customerApi';
-import toast from 'react-hot-toast';
-import { usePermissions } from '../../Hooks/usePermissions';
+} from "../../Services/Admin/VoucherApiservice";
+import { useLazyGetCustomersQuery } from "../../RTK/services/customerApi";
+import { usePermissions } from "../../Hooks/usePermissions";
+import RecordPageLayout, { RecordSection } from "../../components/Layout/RecordPageLayout";
+import ConfirmationDialog from "../../components/Dialog/ConfirmationDialog";
 
 const VoucherPage: React.FC = () => {
   const dispatch = useAppDispatch();
   const { canCreate, canRead } = usePermissions();
-
-  // Check read permission for vouchers
-  if (!canRead('voucher')) {
-    return (
-      <Layout>
-        <Box sx={{ width: '100%', maxWidth: { sm: '100%', md: '1700px' } }}>
-          <Typography variant="h4" sx={{ textAlign: 'center', mt: 4, color: 'error.main' }}>
-            Access Denied: Insufficient permissions to view vouchers
-          </Typography>
-        </Box>
-      </Layout>
-    );
-  }
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { vouchers, isLoading, isCreating, error, pagination, filters, selectedVoucher } = useAppSelector((state) => state.voucher);
-  
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showViewDialog, setShowViewDialog] = useState(false);
+
+  // View Modes: 'list' | 'view' | 'form'
+  const [viewMode, setViewMode] = useState<"list" | "view" | "form">("list");
+  const [selectedVoucherId, setSelectedVoucherId] = useState<number | null>(null);
+  const [singleVoucherDetails, setSingleVoucherDetails] = useState<any | null>(null);
+  const [isSingleLoading, setIsSingleLoading] = useState(false);
+
   const [customerOptions, setCustomerOptions] = useState<any[]>([]);
   const [customerPagination, setCustomerPagination] = useState({ page: 1, hasMore: true });
-  
+
   const [getCustomers] = useLazyGetCustomersQuery();
 
-  // Payment modes
   const paymentModes = [
-    { value: 'cash', label: 'Cash' },
-    { value: 'cheque', label: 'Cheque' },
-    { value: 'neft', label: 'NEFT' },
-    { value: 'imps', label: 'IMPS' },
-    { value: 'upi', label: 'UPI' },
+    { value: "cash", label: "Cash" },
+    { value: "cheque", label: "Cheque" },
+    { value: "neft", label: "NEFT" },
+    { value: "imps", label: "IMPS" },
+    { value: "upi", label: "UPI" },
   ];
 
-  // Validation schema for voucher creation
   const voucherValidationSchema = Yup.object({
-    customerId: Yup.number().required('Customer is required'),
+    customerId: Yup.number().required("Customer is required"),
     transactionAmount: Yup.number()
-      .required('Transaction amount is required')
-      .positive('Amount must be greater than 0'),
-    paymentMode: Yup.string().required('Payment mode is required'),
-    voucherDate: Yup.date().required('Voucher date is required'),
-    chequeNumber: Yup.string().when('paymentMode', {
-      is: 'cheque',
-      then: (schema) => schema.required('Cheque number is required for cheque payments'),
+      .required("Transaction amount is required")
+      .positive("Amount must be greater than 0"),
+    paymentMode: Yup.string().required("Payment mode is required"),
+    voucherDate: Yup.date().required("Voucher date is required"),
+    chequeNumber: Yup.string().when("paymentMode", {
+      is: "cheque",
+      then: (schema) => schema.required("Cheque number is required for cheque payments"),
       otherwise: (schema) => schema.notRequired(),
     }),
-    chequeDate: Yup.date().when('paymentMode', {
-      is: 'cheque',
-      then: (schema) => schema.required('Cheque date is required for cheque payments'),
+    chequeDate: Yup.date().when("paymentMode", {
+      is: "cheque",
+      then: (schema) => schema.required("Cheque date is required for cheque payments"),
       otherwise: (schema) => schema.notRequired(),
     }),
-    bankName: Yup.string().when('paymentMode', {
-      is: 'cheque',
-      then: (schema) => schema.required('Bank name is required for cheque payments'),
+    bankName: Yup.string().when("paymentMode", {
+      is: "cheque",
+      then: (schema) => schema.required("Bank name is required for cheque payments"),
       otherwise: (schema) => schema.notRequired(),
     }),
-    upiId: Yup.string().when('paymentMode', {
-      is: 'upi',
-      then: (schema) => schema.required('UPI ID is required for UPI payments'),
+    upiId: Yup.string().when("paymentMode", {
+      is: "upi",
+      then: (schema) => schema.required("UPI ID is required for UPI payments"),
       otherwise: (schema) => schema.notRequired(),
     }),
     remarks: Yup.string(),
   });
 
-  // Filter validation schema
-  const filterValidationSchema = Yup.object({
-    customerId: Yup.number().nullable(),
-    paymentMode: Yup.string(),
-    fromDate: Yup.date().nullable(),
-    toDate: Yup.date().nullable().min(Yup.ref('fromDate'), 'To date must be after from date'),
-    search: Yup.string(),
-  });
-
-  // Initial values for voucher form
   const voucherInitialValues = {
     customerId: null,
-    transactionAmount: '',
-    paymentMode: '',
-    voucherDate: dayjs().toDate(),
-    chequeNumber: '',
-    chequeDate: dayjs().toDate(),
-    bankName: '',
-    upiId: '',
-    remarks: '',
+    transactionAmount: "",
+    paymentMode: "cash",
+    voucherDate: dayjs().format("YYYY-MM-DD"),
+    chequeNumber: "",
+    chequeDate: dayjs().format("YYYY-MM-DD"),
+    bankName: "",
+    upiId: "",
+    remarks: "",
   };
 
-  // Initial values for filter form
-  const filterInitialValues = {
-    customerId: filters.customer_id || null,
-    paymentMode: filters.payment_mode || '',
-    fromDate: filters.from_date ? dayjs(filters.from_date).toDate() : null,
-    toDate: filters.to_date ? dayjs(filters.to_date).toDate() : null,
-    search: filters.search || '',
-  };
-
-  // Fetch customers for autocomplete
-  const fetchCustomers = useCallback(async (page: number, _limit: number, search: string, append: boolean) => {
-    try {
-      const result = await getCustomers({ page, search: search || '' });
-      const data = result.data;
-      
-      const newOptions = data?.result || [];
-      
-      if (append) {
-        setCustomerOptions(prev => [...prev, ...newOptions]);
-      } else {
-        setCustomerOptions(newOptions);
+  const fetchCustomers = useCallback(
+    async (page: number, _limit: number, search: string, append: boolean) => {
+      try {
+        const result = await getCustomers({ page, search: search || "" });
+        const data = result.data;
+        const newOptions = data?.result || [];
+        if (append) {
+          setCustomerOptions((prev) => [...prev, ...newOptions]);
+        } else {
+          setCustomerOptions(newOptions);
+        }
+        setCustomerPagination({
+          page,
+          hasMore: page < (data?.pagination?.totalPages || 1),
+        });
+      } catch (error) {
+        toast.error("Failed to fetch customers");
       }
-      
-      setCustomerPagination({
-        page,
-        hasMore: page < (data?.pagination?.totalPages || 1),
-      });
-    } catch (error) {
-      console.error('Error fetching customers:', error);
-      toast.error('Failed to fetch customers');
-    }
-  }, [getCustomers]);
+    },
+    [getCustomers]
+  );
 
-  // Fetch vouchers
-  const fetchVouchers = useCallback(async (params: any = {}) => {
-    if (!canRead('voucher')) {
-      toast.error('Access denied: Insufficient permissions to fetch vouchers');
-      return;
-    }
+  const fetchVouchers = useCallback(
+    async (params: any = {}) => {
+      if (!canRead("voucher")) return;
+      try {
+        dispatch(setLoading(true));
+        dispatch(clearError());
+        const response = await getVouchersApi({
+          page: pagination.page,
+          limit: pagination.limit,
+          ...filters,
+          ...params,
+        });
 
+        if (response.success) {
+          dispatch(setVouchers(response.result));
+          dispatch(setPagination(response.pagination));
+        } else {
+          dispatch(setError(response.message || "Failed to fetch vouchers"));
+        }
+      } catch (error: any) {
+        dispatch(setError(error.message || "An error occurred while fetching vouchers"));
+      } finally {
+        dispatch(setLoading(false));
+      }
+    },
+    [dispatch, pagination.page, pagination.limit, filters, canRead]
+  );
+
+  useEffect(() => {
+    fetchVouchers();
+    fetchCustomers(1, 20, "", false);
+  }, []);
+
+  // Fetch single voucher details by ID
+  const fetchSingleVoucher = async (id: number) => {
     try {
-      dispatch(setLoading(true));
-      dispatch(clearError());
-
-      const response = await getVouchersApi({
-        page: pagination.page,
-        limit: pagination.limit,
-        ...filters,
-        ...params,
-      });
-
+      setIsSingleLoading(true);
+      const response = await getVoucherByIdApi(id);
       if (response.success) {
-        dispatch(setVouchers(response.result));
-        dispatch(setPagination(response.pagination));
+        setSingleVoucherDetails(response.result);
       } else {
-        throw new Error(response.message || 'Failed to fetch vouchers');
+        toast.error(response.message || "Failed to load voucher details");
       }
-    } catch (error: any) {
-      console.error('Error fetching vouchers:', error);
-      dispatch(setError(error.message || 'Failed to fetch vouchers'));
-      toast.error(error.message || 'Failed to fetch vouchers');
+    } catch (err: any) {
+      toast.error("Error loading voucher record");
     } finally {
-      dispatch(setLoading(false));
+      setIsSingleLoading(false);
     }
-  }, [dispatch, pagination.page, pagination.limit, filters, canRead]);
+  };
 
-  // Handle voucher creation
-  const handleCreateVoucher = async (values: any) => {
-    if (!canCreate('voucher')) {
-      toast.error('Access denied: Insufficient permissions to create vouchers');
+  // URL search parameter page routing
+  useEffect(() => {
+    const urlId = searchParams.get("id");
+    const urlAction = searchParams.get("action");
+
+    if (urlId) {
+      const idNum = Number(urlId);
+      setSelectedVoucherId(idNum);
+
+      if (urlAction === "view") {
+        fetchSingleVoucher(idNum);
+        setViewMode("view");
+      } else {
+        setViewMode("view");
+      }
+    } else if (urlAction === "new" || urlAction === "form") {
+      setViewMode("form");
+    } else {
+      setViewMode("list");
+      setSelectedVoucherId(null);
+    }
+  }, [searchParams]);
+
+  const handleView = (id: number) => {
+    setSelectedVoucherId(id);
+    fetchSingleVoucher(id);
+    setViewMode("view");
+    setSearchParams({ id: String(id), action: "view" });
+  };
+
+  const handleCreateSubmit = async (values: any, { resetForm }: any) => {
+    if (!canCreate("voucher")) {
+      toast.error("You do not have permission to create vouchers");
       return;
     }
-
     try {
       dispatch(setCreating(true));
-      dispatch(clearError());
-
       const voucherData = {
         customer_id: values.customerId,
         transaction_amount: Number(values.transactionAmount),
         payment_mode: values.paymentMode,
-        voucher_date: dayjs(values.voucherDate).format('YYYY-MM-DD'),
-        ...(values.paymentMode === 'cheque' && {
-          cheque_number: values.chequeNumber,
-          cheque_date: dayjs(values.chequeDate).format('YYYY-MM-DD'),
-          bank_name: values.bankName,
-        }),
-        ...(values.paymentMode === 'upi' && {
-          upi_id: values.upiId,
-        }),
-        ...(values.remarks && { remarks: values.remarks }),
+        voucher_date: dayjs(values.voucherDate).format("YYYY-MM-DD"),
+        cheque_number: values.paymentMode === "cheque" ? values.chequeNumber : undefined,
+        cheque_date: values.paymentMode === "cheque" ? dayjs(values.chequeDate).format("YYYY-MM-DD") : undefined,
+        bank_name: values.paymentMode === "cheque" ? values.bankName : undefined,
+        upi_id: values.paymentMode === "upi" ? values.upiId : undefined,
+        remarks: values.remarks || undefined,
       };
 
       const response = await createVoucherApi(voucherData);
-
       if (response.success) {
+        toast.success("Voucher created successfully!");
         dispatch(addVoucher(response.result));
-        toast.success('Voucher created successfully');
-        setShowCreateForm(false);
-        // Refresh vouchers to get updated list
-        await fetchVouchers();
+        resetForm();
+        setViewMode("list");
+        setSearchParams({});
+        fetchVouchers();
       } else {
-        throw new Error(response.message || 'Failed to create voucher');
+        toast.error(response.message || "Failed to create voucher");
       }
     } catch (error: any) {
-      console.error('Error creating voucher:', error);
-      dispatch(setError(error.message || 'Failed to create voucher'));
-      toast.error(error.message || 'Failed to create voucher');
+      toast.error(error.message || "An error occurred while creating voucher");
     } finally {
       dispatch(setCreating(false));
     }
   };
 
-  // Handle filter application
-  const handleApplyFilters = async (values: any) => {
-    const newFilters = {
-      ...(values.customerId && { customer_id: values.customerId }),
-      ...(values.paymentMode && { payment_mode: values.paymentMode }),
-      ...(values.fromDate && { from_date: dayjs(values.fromDate).format('YYYY-MM-DD') }),
-      ...(values.toDate && { to_date: dayjs(values.toDate).format('YYYY-MM-DD') }),
-      ...(values.search && { search: values.search }),
-    };
-
-    dispatch(updateFilters(newFilters));
-    await fetchVouchers(newFilters);
-  };
-
-  // Handle voucher view
-  const handleViewVoucher = async (voucherId: number) => {
-    if (!canRead('voucher')) {
-      toast.error('Access denied: Insufficient permissions to view voucher details');
+  const handleExportCSV = () => {
+    if (vouchers.length === 0) {
+      toast.error("No vouchers to export");
       return;
     }
-
-    try {
-      const response = await getVoucherByIdApi(voucherId);
-      if (response.success) {
-        dispatch(setSelectedVoucher(response.result));
-        setShowViewDialog(true);
-      }
-    } catch (error: any) {
-      toast.error('Failed to fetch voucher details');
-    }
+    const headers = ["Voucher No", "Customer", "Amount", "Payment Mode", "Voucher Date"];
+    const rows = vouchers.map((v: any) => [
+      `"${v.voucher_number || `VCH-${v.id}`}"`,
+      `"${v.customer?.customer_name || v.customer?.name || "N/A"}"`,
+      v.transaction_amount || 0,
+      `"${v.payment_mode || ""}"`,
+      v.voucher_date ? new Date(v.voucher_date).toLocaleDateString() : "",
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `General_Ledger_Vouchers_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Vouchers exported as CSV");
   };
 
-  // Format currency
-  const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(amount);
+  if (!canRead("voucher")) {
+    return (
+      <Layout>
+        <div className="p-8 text-center text-red-600 text-xs font-semibold">
+          Access Denied: Insufficient permissions to view vouchers.
+        </div>
+      </Layout>
+    );
+  }
 
-  // Get payment mode color
-  const getPaymentModeColor = (mode: string) => {
-    switch (mode) {
-      case 'cash':
-        return 'success';
-      case 'cheque':
-        return 'primary';
-      case 'upi':
-        return 'secondary';
-      case 'neft':
-      case 'imps':
-        return 'info';
-      default:
-        return 'default';
+  // ── RENDER 1: NETSUITE READ-ONLY VIEW MODE (CALLS GET VOUCHER BY ID API) ──
+  if (viewMode === "view") {
+    const activeVoucher = singleVoucherDetails || vouchers.find((v: any) => v.id === selectedVoucherId);
+
+    if (isSingleLoading && !activeVoucher) {
+      return (
+        <Layout>
+          <div className="p-12 text-center text-xs text-slate-500 font-medium">
+            <CircularProgress size={24} className="mb-2" />
+            <div>Loading voucher record from API...</div>
+          </div>
+        </Layout>
+      );
     }
-  };
 
-  // DataGrid columns
-  const columns = [
-    {
-      field: 'voucher_number',
-      headerName: 'Voucher No.',
-      flex: 1,
-      minWidth: 150,
-      sortable: true,
-    },
-    {
-      field: 'voucher_date',
-      headerName: 'Date',
-      width: 120,
-      renderCell: (params: any) => dayjs(params.value).format('DD MMM YYYY'),
-    },
-    {
-      field: 'debitCustomer',
-      headerName: 'Customer',
-      flex: 1.5,
-      minWidth: 200,
-      renderCell: (params: any) => params.value?.name || 'N/A',
-    },
-    {
-      field: 'transaction_amount',
-      headerName: 'Amount',
-      width: 130,
-      renderCell: (params: any) => formatCurrency(params.value),
-      align: 'right' as const,
-    },
-    {
-      field: 'payment_mode',
-      headerName: 'Payment Mode',
-      width: 140,
-      renderCell: (params: any) => (
-        <Chip
-          label={params.value.toUpperCase()}
-          size="small"
-          color={getPaymentModeColor(params.value) as any}
-          variant="outlined"
-        />
-      ),
-    },
-    {
-      field: 'remarks',
-      headerName: 'Remarks',
-      flex: 2,
-      minWidth: 200,
-      renderCell: (params: any) => params.value || '-',
-    },
-    {
-      field: 'actions',
-      headerName: 'Actions',
-      width: 100,
-      sortable: false,
-      renderCell: (params: any) => (
-        canRead('voucher') ? (
-          <IconButton
-            size="small"
-            onClick={() => handleViewVoucher(params.row.id)}
-            color="primary"
-          >
-            <Visibility />
-          </IconButton>
-        ) : null
-      ),
-    },
-  ];
+    if (!activeVoucher) {
+      return (
+        <Layout>
+          <div className="p-8 bg-white border border-slate-200 rounded text-center text-xs text-slate-600">
+            <div>Voucher record unavailable.</div>
+            <button onClick={() => { setViewMode("list"); setSearchParams({}); }} className="mt-2 px-3 py-1 bg-sky-600 text-white rounded text-xs">
+              Back to Vouchers List
+            </button>
+          </div>
+        </Layout>
+      );
+    }
 
-  // Load vouchers on component mount
-  useEffect(() => {
-    fetchVouchers();
-  }, []);
+    const customerName = activeVoucher.customer?.customer_name || activeVoucher.customer?.name || "N/A";
 
+    return (
+      <Layout>
+        <RecordPageLayout
+          recordType="General Ledger Voucher"
+          subtitle={`${activeVoucher.voucher_number || `VCH-${activeVoucher.id}`}`}
+          mode="view"
+          onBack={() => { setViewMode("list"); setSearchParams({}); }}
+          onListClick={() => { setViewMode("list"); setSearchParams({}); }}
+        >
+          <RecordSection title="Primary Information" defaultOpen={true}>
+            <div className="flex flex-col space-y-0.5">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">VOUCHER NUMBER</span>
+              <span className="text-xs font-mono font-bold text-slate-900">{activeVoucher.voucher_number || `VCH-${activeVoucher.id}`}</span>
+            </div>
+            <div className="flex flex-col space-y-0.5">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">CUSTOMER</span>
+              <span className="text-xs font-bold text-slate-900">{customerName}</span>
+            </div>
+            <div className="flex flex-col space-y-0.5">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">TRANSACTION AMOUNT</span>
+              <span className="text-xs font-mono font-bold text-emerald-700">₹{activeVoucher.transaction_amount}</span>
+            </div>
+            <div className="flex flex-col space-y-0.5">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">PAYMENT MODE</span>
+              <span className="text-xs font-semibold text-sky-800 uppercase">{activeVoucher.payment_mode}</span>
+            </div>
+            <div className="flex flex-col space-y-0.5">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">VOUCHER DATE</span>
+              <span className="text-xs font-mono text-slate-800">
+                {activeVoucher.voucher_date ? new Date(activeVoucher.voucher_date).toLocaleDateString() : "N/A"}
+              </span>
+            </div>
+          </RecordSection>
+
+          {(activeVoucher.cheque_number || activeVoucher.bank_name || activeVoucher.upi_id || activeVoucher.remarks) && (
+            <RecordSection title="Transaction Details & Remarks" defaultOpen={true}>
+              {activeVoucher.cheque_number && (
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">CHEQUE NUMBER</span>
+                  <span className="text-xs font-mono text-slate-800">{activeVoucher.cheque_number}</span>
+                </div>
+              )}
+              {activeVoucher.bank_name && (
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">BANK NAME</span>
+                  <span className="text-xs text-slate-800">{activeVoucher.bank_name}</span>
+                </div>
+              )}
+              {activeVoucher.upi_id && (
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">UPI ID</span>
+                  <span className="text-xs font-mono text-slate-800">{activeVoucher.upi_id}</span>
+                </div>
+              )}
+              {activeVoucher.remarks && (
+                <div className="flex flex-col space-y-0.5 md:col-span-2">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">REMARKS</span>
+                  <span className="text-xs text-slate-800">{activeVoucher.remarks}</span>
+                </div>
+              )}
+            </RecordSection>
+          )}
+        </RecordPageLayout>
+      </Layout>
+    );
+  }
+
+  // ── RENDER 2: NETSUITE EDITABLE FORM MODE ──
+  if (viewMode === "form") {
+    return (
+      <Layout>
+        <Formik
+          initialValues={voucherInitialValues}
+          validationSchema={voucherValidationSchema}
+          onSubmit={handleCreateSubmit}
+        >
+          {({ values, errors, touched, handleChange, handleBlur, handleSubmit, setFieldValue }) => (
+            <form onSubmit={handleSubmit}>
+              <RecordPageLayout
+                recordType="General Ledger Voucher"
+                recordTitle="New Payment Voucher"
+                mode="edit"
+                onSave={() => handleSubmit()}
+                onCancel={() => { setViewMode("list"); setSearchParams({}); }}
+                onListClick={() => { setViewMode("list"); setSearchParams({}); }}
+                isSaving={isCreating}
+              >
+                <RecordSection title="Primary Voucher Information" defaultOpen={true}>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      CUSTOMER <span className="text-amber-600">*</span>
+                    </label>
+                    <InfiniteScrollAutocomplete
+                      options={customerOptions}
+                      labelKey="customer_name"
+                      valueKey="id"
+                      value={values.customerId}
+                      onChange={(selected: any) => setFieldValue("customerId", selected?.id || null)}
+                      onSearch={(search) => fetchCustomers(1, 20, search, false)}
+                      onLoadMore={() => {
+                        if (customerPagination.hasMore) {
+                          fetchCustomers(customerPagination.page + 1, 20, "", true);
+                        }
+                      }}
+                      hasMore={customerPagination.hasMore}
+                      placeholder="Search Customer..."
+                    />
+                    {touched.customerId && errors.customerId && (
+                      <span className="text-[10px] text-red-600 font-semibold">{errors.customerId as string}</span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      TRANSACTION AMOUNT <span className="text-amber-600">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      name="transactionAmount"
+                      value={values.transactionAmount}
+                      onChange={handleChange}
+                      onBlur={handleBlur}
+                      placeholder="0.00"
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 font-mono focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      PAYMENT MODE <span className="text-amber-600">*</span>
+                    </label>
+                    <select
+                      name="paymentMode"
+                      value={values.paymentMode}
+                      onChange={handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    >
+                      {paymentModes.map((pm) => (
+                        <option key={pm.value} value={pm.value}>
+                          {pm.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      VOUCHER DATE <span className="text-amber-600">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      name="voucherDate"
+                      value={values.voucherDate}
+                      onChange={handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                </RecordSection>
+
+                {values.paymentMode === "cheque" && (
+                  <RecordSection title="Cheque Details" defaultOpen={true}>
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">CHEQUE NUMBER</label>
+                      <input
+                        type="text"
+                        name="chequeNumber"
+                        value={values.chequeNumber}
+                        onChange={handleChange}
+                        placeholder="Cheque No"
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 font-mono"
+                      />
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">BANK NAME</label>
+                      <input
+                        type="text"
+                        name="bankName"
+                        value={values.bankName}
+                        onChange={handleChange}
+                        placeholder="Bank Name"
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2"
+                      />
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">CHEQUE DATE</label>
+                      <input
+                        type="date"
+                        name="chequeDate"
+                        value={values.chequeDate}
+                        onChange={handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2"
+                      />
+                    </div>
+                  </RecordSection>
+                )}
+
+                {values.paymentMode === "upi" && (
+                  <RecordSection title="UPI Details" defaultOpen={true}>
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">UPI ID</label>
+                      <input
+                        type="text"
+                        name="upiId"
+                        value={values.upiId}
+                        onChange={handleChange}
+                        placeholder="user@upi"
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 font-mono"
+                      />
+                    </div>
+                  </RecordSection>
+                )}
+
+                <RecordSection title="Remarks" defaultOpen={true}>
+                  <div className="flex flex-col space-y-1 md:col-span-3">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">REMARKS</label>
+                    <input
+                      type="text"
+                      name="remarks"
+                      value={values.remarks}
+                      onChange={handleChange}
+                      placeholder="Additional notes"
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2"
+                    />
+                  </div>
+                </RecordSection>
+              </RecordPageLayout>
+            </form>
+          )}
+        </Formik>
+      </Layout>
+    );
+  }
+
+  // ── RENDER 3: NETSUITE LIST VIEW ──
   return (
     <Layout>
-      <LocalizationProvider dateAdapter={AdapterDayjs}>
-        <Box sx={{ width: '100%', maxWidth: { sm: '100%', md: '1700px' } }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-            <Typography variant="h3">
-              Payment Vouchers
-            </Typography>
-            {canCreate('voucher') && (
-              <Button
-                variant="contained"
-                startIcon={<Add />}
-                onClick={() => {
-                  if (!canCreate('voucher')) {
-                    toast.error('Access denied: Insufficient permissions to create vouchers');
-                    return;
-                  }
-                  setShowCreateForm(true);
-                }}
-              >
-                Create Voucher
-              </Button>
-            )}
-          </Box>
+      <div className="flex flex-col space-y-3 max-w-full font-sans text-slate-800">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-300 pb-2">
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 bg-sky-600 rounded-xs"></div>
+            <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">General Ledger Vouchers</h1>
+          </div>
+          <div className="flex items-center space-x-3 text-xs font-semibold text-sky-700">
+            <button onClick={() => setViewMode("list")} className="hover:underline flex items-center space-x-1">
+              <ListIcon className="!w-3.5 !h-3.5" />
+              <span>List</span>
+            </button>
+          </div>
+        </div>
 
-          {/* Filters */}
-          <Card sx={{ mb: 3 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Filters
-              </Typography>
-              <Formik
-                initialValues={filterInitialValues}
-                validationSchema={filterValidationSchema}
-                onSubmit={handleApplyFilters}
-                enableReinitialize
-              >
-                {(formik) => (
-                  <Form>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'end' }}>
-                      <Box sx={{ minWidth: 300, flex: '1 1 300px' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Customer</FormLabel>
-                          <InfiniteScrollAutocomplete
-                            id="customerId"
-                            label=""
-                            placeholder="Select Customer"
-                            options={customerOptions}
-                            getOptionLabel={(option) => option?.name || ''}
-                            fetchData={fetchCustomers}
-                            formikField="customerId"
-                            formik={formik}
-                            setOptions={setCustomerOptions}
-                            setPagination={setCustomerPagination}
-                            pagination={customerPagination}
-                          />
-                        </FormControl>
-                      </Box>
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-300 p-2 rounded-xs">
+          <div className="flex items-center space-x-3">
+            <span className="font-semibold text-slate-600 uppercase text-[10px]">VIEW</span>
+            <select className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 font-medium">
+              <option value="All">All Vouchers</option>
+            </select>
+          </div>
 
-                      <Box sx={{ minWidth: 150, flex: '1 1 150px' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Payment Mode</FormLabel>
-                          <Field
-                            as={TextField}
-                            name="paymentMode"
-                            select
-                            fullWidth
-                            variant="outlined"
-                          >
-                            <MenuItem value="">All</MenuItem>
-                            {paymentModes.map((mode) => (
-                              <MenuItem key={mode.value} value={mode.value}>
-                                {mode.label}
-                              </MenuItem>
-                            ))}
-                          </Field>
-                        </FormControl>
-                      </Box>
-
-                      <Box sx={{ minWidth: 150, flex: '1 1 150px' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>From Date</FormLabel>
-                          <DatePicker
-                            value={formik.values.fromDate ? dayjs(formik.values.fromDate) : null}
-                            onChange={(date) => formik.setFieldValue('fromDate', date?.toDate())}
-                            slotProps={{
-                              textField: {
-                                fullWidth: true,
-                                variant: 'outlined',
-                              },
-                            }}
-                          />
-                        </FormControl>
-                      </Box>
-
-                      <Box sx={{ minWidth: 150, flex: '1 1 150px' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>To Date</FormLabel>
-                          <DatePicker
-                            value={formik.values.toDate ? dayjs(formik.values.toDate) : null}
-                            onChange={(date) => formik.setFieldValue('toDate', date?.toDate())}
-                            slotProps={{
-                              textField: {
-                                fullWidth: true,
-                                variant: 'outlined',
-                              },
-                            }}
-                          />
-                        </FormControl>
-                      </Box>
-
-                      <Box sx={{ minWidth: 200, flex: '1 1 200px' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Search</FormLabel>
-                          <Field
-                            as={TextField}
-                            name="search"
-                            placeholder="Voucher number, remarks..."
-                            fullWidth
-                            variant="outlined"
-                          />
-                        </FormControl>
-                      </Box>
-
-                      <Box sx={{ minWidth: 120 }}>
-                        <Button
-                          type="submit"
-                          variant="contained"
-                          startIcon={<Search />}
-                          disabled={isLoading}
-                          fullWidth
-                        >
-                          Search
-                        </Button>
-                      </Box>
-                    </Box>
-                  </Form>
-                )}
-              </Formik>
-            </CardContent>
-          </Card>
-
-          {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
-            </Alert>
+          {canCreate("voucher") && (
+            <button
+              onClick={() => {
+                setViewMode("form");
+                setSearchParams({ action: "new" });
+              }}
+              className="h-7 px-3 bg-[#0070d2] hover:bg-blue-700 text-white text-xs font-semibold rounded-xs shadow-2xs flex items-center space-x-1"
+            >
+              <Add className="!w-4 !h-4" />
+              <span>New Voucher</span>
+            </button>
           )}
+        </div>
 
-          {/* Vouchers Table */}
-          <Paper sx={{ height: 600 }}>
-            <DataGrid
-              rows={vouchers}
-              columns={columns}
-              loading={isLoading}
-              paginationModel={{
-                page: pagination.page - 1, // MUI DataGrid uses 0-based indexing
-                pageSize: pagination.limit,
-              }}
-              rowCount={pagination.total}
-              onPaginationModelChange={(model) => {
-                dispatch(setPagination({ ...pagination, page: model.page + 1, limit: model.pageSize }));
-                fetchVouchers({ page: model.page + 1, limit: model.pageSize });
-              }}
-              pageSizeOptions={[10, 25, 50, 100]}
-              paginationMode="server"
-              disableColumnResize
-              density="compact"
-              getRowClassName={(params) =>
-                params.indexRelativeToCurrentPage % 2 === 0 ? 'even' : 'odd'
-              }
-            />
-          </Paper>
+        <div className="bg-slate-100 border border-slate-300 px-3 py-1.5 flex items-center justify-between gap-2 text-xs">
+          <div className="flex items-center space-x-3">
+            <button onClick={handleExportCSV} className="p-1 text-slate-600 hover:text-sky-700 flex items-center space-x-1 font-semibold text-[11px]">
+              <GetApp className="!w-4 !h-4" />
+              <span>CSV</span>
+            </button>
+            <button onClick={() => window.print()} className="p-1 text-slate-600 hover:text-sky-700 flex items-center space-x-1 font-semibold text-[11px]">
+              <Print className="!w-4 !h-4" />
+              <span>Print</span>
+            </button>
+          </div>
+          <span className="font-bold text-slate-700 uppercase text-[11px]">TOTAL: {vouchers.length}</span>
+        </div>
 
-          {/* Create Voucher Dialog */}
-          <Dialog
-            open={showCreateForm}
-            onClose={() => setShowCreateForm(false)}
-            maxWidth="md"
-            fullWidth
-          >
-            <DialogTitle>
-              Create Payment Voucher
-              <IconButton
-                onClick={() => setShowCreateForm(false)}
-                sx={{ position: 'absolute', right: 8, top: 8 }}
-              >
-                <Close />
-              </IconButton>
-            </DialogTitle>
-            <DialogContent>
-              <Formik
-                initialValues={voucherInitialValues}
-                validationSchema={voucherValidationSchema}
-                onSubmit={handleCreateVoucher}
-              >
-                {(formik) => (
-                  <Form>
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, mt: 1 }}>
-                      <Box sx={{ minWidth: 300, flex: '1 1 45%' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Customer *</FormLabel>
-                          <InfiniteScrollAutocomplete
-                            id="customerId"
-                            label=""
-                            placeholder="Select Customer"
-                            options={customerOptions}
-                            getOptionLabel={(option) => option?.name || ''}
-                            fetchData={fetchCustomers}
-                            formikField="customerId"
-                            formik={formik}
-                            setOptions={setCustomerOptions}
-                            setPagination={setCustomerPagination}
-                            pagination={customerPagination}
-                          />
-                        </FormControl>
-                      </Box>
-
-                      <Box sx={{ minWidth: 200, flex: '1 1 45%' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Transaction Amount *</FormLabel>
-                          <Field
-                            as={TextField}
-                            name="transactionAmount"
-                            type="number"
-                            placeholder="Enter amount"
-                            fullWidth
-                            variant="outlined"
-                            error={formik.touched.transactionAmount && Boolean(formik.errors.transactionAmount)}
-                            helperText={formik.touched.transactionAmount && formik.errors.transactionAmount}
-                          />
-                        </FormControl>
-                      </Box>
-
-                      <Box sx={{ minWidth: 200, flex: '1 1 45%' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Payment Mode *</FormLabel>
-                          <Field
-                            as={TextField}
-                            name="paymentMode"
-                            select
-                            fullWidth
-                            variant="outlined"
-                            error={formik.touched.paymentMode && Boolean(formik.errors.paymentMode)}
-                            helperText={formik.touched.paymentMode && formik.errors.paymentMode}
-                          >
-                            {paymentModes.map((mode) => (
-                              <MenuItem key={mode.value} value={mode.value}>
-                                {mode.label}
-                              </MenuItem>
-                            ))}
-                          </Field>
-                        </FormControl>
-                      </Box>
-
-                      <Box sx={{ minWidth: 200, flex: '1 1 45%' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Voucher Date *</FormLabel>
-                          <DatePicker
-                            value={formik.values.voucherDate ? dayjs(formik.values.voucherDate) : null}
-                            onChange={(date) => formik.setFieldValue('voucherDate', date?.toDate())}
-                            slotProps={{
-                              textField: {
-                                fullWidth: true,
-                                variant: 'outlined',
-                                error: formik.touched.voucherDate && Boolean(formik.errors.voucherDate),
-                                helperText: formik.touched.voucherDate && typeof formik.errors.voucherDate === 'string' ? formik.errors.voucherDate : '',
-                              },
-                            }}
-                          />
-                        </FormControl>
-                      </Box>
-
-                      {/* Cheque specific fields */}
-                      {formik.values.paymentMode === 'cheque' && (
-                        <>
-                          <Box sx={{ minWidth: 200, flex: '1 1 30%' }}>
-                            <FormControl fullWidth>
-                              <FormLabel>Cheque Number *</FormLabel>
-                              <Field
-                                as={TextField}
-                                name="chequeNumber"
-                                placeholder="Enter cheque number"
-                                fullWidth
-                                variant="outlined"
-                                error={formik.touched.chequeNumber && Boolean(formik.errors.chequeNumber)}
-                                helperText={formik.touched.chequeNumber && formik.errors.chequeNumber}
-                              />
-                            </FormControl>
-                          </Box>
-
-                          <Box sx={{ minWidth: 200, flex: '1 1 30%' }}>
-                            <FormControl fullWidth>
-                              <FormLabel>Cheque Date *</FormLabel>
-                              <DatePicker
-                                value={formik.values.chequeDate ? dayjs(formik.values.chequeDate) : null}
-                                onChange={(date) => formik.setFieldValue('chequeDate', date?.toDate())}
-                                slotProps={{
-                                  textField: {
-                                    fullWidth: true,
-                                    variant: 'outlined',
-                                    error: formik.touched.chequeDate && Boolean(formik.errors.chequeDate),
-                                    helperText: formik.touched.chequeDate && typeof formik.errors.chequeDate === 'string' ? formik.errors.chequeDate : '',
-                                  },
-                                }}
-                              />
-                            </FormControl>
-                          </Box>
-
-                          <Box sx={{ minWidth: 200, flex: '1 1 30%' }}>
-                            <FormControl fullWidth>
-                              <FormLabel>Bank Name *</FormLabel>
-                              <Field
-                                as={TextField}
-                                name="bankName"
-                                placeholder="Enter bank name"
-                                fullWidth
-                                variant="outlined"
-                                error={formik.touched.bankName && Boolean(formik.errors.bankName)}
-                                helperText={formik.touched.bankName && formik.errors.bankName}
-                              />
-                            </FormControl>
-                          </Box>
-                        </>
-                      )}
-
-                      {/* UPI specific field */}
-                      {formik.values.paymentMode === 'upi' && (
-                        <Box sx={{ minWidth: 300, flex: '1 1 45%' }}>
-                          <FormControl fullWidth>
-                            <FormLabel>UPI ID *</FormLabel>
-                            <Field
-                              as={TextField}
-                              name="upiId"
-                              placeholder="Enter UPI ID"
-                              fullWidth
-                              variant="outlined"
-                              error={formik.touched.upiId && Boolean(formik.errors.upiId)}
-                              helperText={formik.touched.upiId && formik.errors.upiId}
-                            />
-                          </FormControl>
-                        </Box>
-                      )}
-
-                      <Box sx={{ width: '100%' }}>
-                        <FormControl fullWidth>
-                          <FormLabel>Remarks</FormLabel>
-                          <Field
-                            as={TextField}
-                            name="remarks"
-                            placeholder="Enter remarks (optional)"
-                            fullWidth
-                            variant="outlined"
-                           
-                            rows={3}
-                          />
-                        </FormControl>
-                      </Box>
-                    </Box>
-
-                    <DialogActions sx={{ px: 0, pt: 3 }}>
-                      <Button
-                        onClick={() => setShowCreateForm(false)}
-                        disabled={isCreating}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="submit"
-                        variant="contained"
-                        disabled={isCreating}
-                        startIcon={isCreating ? <CircularProgress size={20} /> : undefined}
-                      >
-                        {isCreating ? 'Creating...' : 'Create Voucher'}
-                      </Button>
-                    </DialogActions>
-                  </Form>
-                )}
-              </Formik>
-            </DialogContent>
-          </Dialog>
-
-          {/* View Voucher Dialog */}
-          <Dialog
-            open={showViewDialog}
-            onClose={() => setShowViewDialog(false)}
-            maxWidth="md"
-            fullWidth
-          >
-            <DialogTitle>
-              Voucher Details
-              <IconButton
-                onClick={() => setShowViewDialog(false)}
-                sx={{ position: 'absolute', right: 8, top: 8 }}
-              >
-                <Close />
-              </IconButton>
-            </DialogTitle>
-            <DialogContent>
-              {selectedVoucher && (
-                <Box sx={{ mt: 2 }}>
-                  <>
-                    {/* Voucher Header */}
-                    <Paper sx={{ p: 3, mb: 3, bgcolor: 'grey.50' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                        <Typography variant="h5">
-                          {selectedVoucher.voucher_number}
-                        </Typography>
-                        <Chip
-                          label={selectedVoucher.payment_mode.toUpperCase()}
-                          color={getPaymentModeColor(selectedVoucher.payment_mode) as any}
-                          variant="filled"
-                        />
-                      </Box>
-                      <Typography variant="body2" color="text.secondary">
-                        Date: {dayjs(selectedVoucher.voucher_date).format('DD MMM YYYY')}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Type: {selectedVoucher.voucher_type.toUpperCase()}
-                      </Typography>
-                    </Paper>
-
-                    {/* Customer Details */}
-                    <Paper sx={{ p: 3, mb: 3 }}>
-                      <Typography variant="h6" gutterBottom>
-                        Customer Information
-                      </Typography>
-                      <Typography variant="body1">
-                        <strong>Name:</strong> {selectedVoucher.debitCustomer?.name || 'N/A'}
-                      </Typography>
-                      <Typography variant="body1">
-                        <strong>Customer ID:</strong> {selectedVoucher.debit_ledger_id}
-                      </Typography>
-                    </Paper>
-
-                    {/* Transaction Details */}
-                    <Paper sx={{ p: 3, mb: 3 }}>
-                      <Typography variant="h6" gutterBottom>
-                        Transaction Details
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                        <Box>
-                          <Typography variant="body2" color="text.secondary">
-                            Amount
-                          </Typography>
-                          <Typography variant="h6" color="success.main">
-                            {formatCurrency(selectedVoucher.transaction_amount)}
-                          </Typography>
-                        </Box>
-                        <Box>
-                          <Typography variant="body2" color="text.secondary">
-                            Payment Mode
-                          </Typography>
-                          <Typography variant="body1">
-                            {selectedVoucher.payment_mode.toUpperCase()}
-                          </Typography>
-                        </Box>
-                      </Box>
-
-                      {/* Payment mode specific details */}
-                      {selectedVoucher.payment_mode === 'cheque' && (
-                        <Box sx={{ mt: 2 }}>
-                          <Typography variant="subtitle2" gutterBottom>
-                            Cheque Details
-                          </Typography>
-                          <Typography variant="body2">
-                            <strong>Cheque Number:</strong> {selectedVoucher.cheque_number}
-                          </Typography>
-                          <Typography variant="body2">
-                            <strong>Cheque Date:</strong> {selectedVoucher.cheque_date ? dayjs(selectedVoucher.cheque_date).format('DD MMM YYYY') : 'N/A'}
-                          </Typography>
-                          <Typography variant="body2">
-                            <strong>Bank Name:</strong> {selectedVoucher.bank_name}
-                          </Typography>
-                        </Box>
-                      )}
-
-                      {selectedVoucher.payment_mode === 'upi' && selectedVoucher.upi_id && (
-                        <Box sx={{ mt: 2 }}>
-                          <Typography variant="subtitle2" gutterBottom>
-                            UPI Details
-                          </Typography>
-                          <Typography variant="body2">
-                            <strong>UPI ID:</strong> {selectedVoucher.upi_id}
-                          </Typography>
-                        </Box>
-                      )}
-
-                      {selectedVoucher.remarks && (
-                        <Box sx={{ mt: 2 }}>
-                          <Typography variant="subtitle2" gutterBottom>
-                            Remarks
-                          </Typography>
-                          <Typography variant="body2">
-                            {selectedVoucher.remarks}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Paper>
-
-                    {/* Company Details */}
-                    <Paper sx={{ p: 3 }}>
-                      <Typography variant="h6" gutterBottom>
-                        Company Information
-                      </Typography>
-                      <Typography variant="body1">
-                        <strong>Company:</strong> {selectedVoucher.company?.name || 'N/A'}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Created: {dayjs(selectedVoucher.createdAt).format('DD MMM YYYY HH:mm')}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Updated: {dayjs(selectedVoucher.updatedAt).format('DD MMM YYYY HH:mm')}
-                      </Typography>
-                    </Paper>
-                  </>
-                </Box>
+        <div className="border border-slate-300 rounded-xs overflow-x-auto bg-white shadow-2xs">
+          <table className="w-full text-xs text-left border-collapse">
+            <thead className="bg-slate-200 text-slate-700 uppercase text-[10px] tracking-wider font-bold border-b border-slate-300 select-none">
+              <tr>
+                <th className="px-3 py-2 border-r border-slate-300 w-24">VIEW</th>
+                <th className="px-3 py-2 border-r border-slate-300">VOUCHER NO</th>
+                <th className="px-3 py-2 border-r border-slate-300">CUSTOMER</th>
+                <th className="px-3 py-2 border-r border-slate-300">AMOUNT</th>
+                <th className="px-3 py-2 border-r border-slate-300">PAYMENT MODE</th>
+                <th className="px-3 py-2 border-r border-slate-300">VOUCHER DATE</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 text-slate-700">
+              {isLoading ? (
+                <tr><td colSpan={6} className="py-8 text-center text-slate-400 italic">Loading vouchers...</td></tr>
+              ) : vouchers.length === 0 ? (
+                <tr><td colSpan={6} className="py-8 text-center text-slate-400 italic">No vouchers found.</td></tr>
+              ) : (
+                vouchers.map((row: any, idx: number) => {
+                  const custName = row.customer?.customer_name || row.customer?.name || "N/A";
+                  return (
+                    <tr key={row.id || idx} className={`hover:bg-amber-50/70 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"}`}>
+                      <td className="px-3 py-1.5 border-r border-slate-200 whitespace-nowrap text-sky-700 font-semibold">
+                        <button onClick={() => handleView(row.id)} className="hover:underline">View</button>
+                      </td>
+                      <td className="px-3 py-1.5 border-r border-slate-200 font-mono font-bold text-slate-900">{row.voucher_number || `VCH-${row.id}`}</td>
+                      <td className="px-3 py-1.5 border-r border-slate-200 font-bold text-slate-900">{custName}</td>
+                      <td className="px-3 py-1.5 border-r border-slate-200 font-mono font-bold text-emerald-700">₹{row.transaction_amount}</td>
+                      <td className="px-3 py-1.5 border-r border-slate-200 font-semibold text-sky-800 uppercase">{row.payment_mode}</td>
+                      <td className="px-3 py-1.5 border-r border-slate-200 font-mono text-slate-600">
+                        {row.voucher_date ? new Date(row.voucher_date).toLocaleDateString() : "N/A"}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
-            </DialogContent>
-          </Dialog>
-        </Box>
-      </LocalizationProvider>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </Layout>
   );
 };

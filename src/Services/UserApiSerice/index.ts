@@ -60,3 +60,8 @@ export const getAllUsersApi = async () => {
   const response = await apiInstance.get("/user/get-all-users");
   return response.data;
 };
+
+export const getSingleUserApi = async (userId: string | number) => {
+  const response = await apiInstance.get(`/user/get-user/${userId}`);
+  return response.data;
+};

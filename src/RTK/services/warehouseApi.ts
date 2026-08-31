@@ -12,6 +12,10 @@ export const warehouseApi = createApi({
         `/warehouse/get?page=${page}&limit=${limit}&search=${search}`,
       providesTags: ['Warehouse'],
     }),
+    fetchWarehouseById: builder.query<any, number | string>({
+      query: (id) => `/warehouse/${id}`,
+      providesTags: (_result, _error, id) => [{ type: 'Warehouse', id }],
+    }),
     createWarehouse: builder.mutation<any, any>({
       query: (payload) => ({
         url: `/warehouse/create`,
@@ -41,7 +45,10 @@ export const warehouseApi = createApi({
 export const {
   useFetchWarehousesQuery,
   useLazyFetchWarehousesQuery,
+  useFetchWarehouseByIdQuery,
   useCreateWarehouseMutation,
   useUpdateWarehouseMutation,
   useDeleteWarehouseMutation,
 } = warehouseApi;
+
+export const useGetWarehousesQuery = useFetchWarehousesQuery;

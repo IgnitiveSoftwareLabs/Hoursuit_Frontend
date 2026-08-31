@@ -151,6 +151,12 @@ const setupItems = [
     permission: null,
   },
   {
+    text: "Payment Terms",
+    icon: <PaymentIcon />,
+    path: "/terms",
+    permission: null,
+  },
+  {
     text: "Transportation Mode",
     icon: <LocalShippingRounded />,
     path: "/transportation-mode",
@@ -221,6 +227,18 @@ const masterItems = [
     text: "Item Type",
     icon: <InventoryRounded />,
     path: "/item-type",
+    permission: null,
+  },
+  {
+    text: "Class Master",
+    icon: <CategoryRoundedIcon />,
+    path: "/class",
+    permission: null,
+  },
+  {
+    text: "Department Master",
+    icon: <CategoryRoundedIcon />,
+    path: "/department",
     permission: null,
   },
   {

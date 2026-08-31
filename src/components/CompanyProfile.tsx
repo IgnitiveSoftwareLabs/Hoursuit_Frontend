@@ -1,36 +1,18 @@
-import React, { useMemo, useState } from "react";
+import React, { useState, useMemo } from "react";
 import toast from "react-hot-toast";
 import { Formik, Form, Field } from "formik";
 import * as Yup from "yup";
-import {
-  Button,
-  Card,
-  CardContent,
-  Checkbox,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  FormControlLabel,
-  FormLabel,
-  TextField,
-  Avatar,
-  CircularProgress,
-} from "@mui/material";
-import Grid from "@mui/material/Grid";
-import Box from "@mui/material/Box";
-import Typography from "@mui/material/Typography";
+import { CircularProgress, Avatar } from "@mui/material";
+import { useSearchParams } from "react-router-dom";
+
 import {
   useFetchCompanyQuery,
   useUpdateCompanyMutation,
 } from "../RTK/services/companyApi";
-import { Create } from "@mui/icons-material";
 import CustomFileUpload from "../Common/CustomFileUpload";
-import Spinner from "../Common/Spinner";
 import { BASE_URL } from "../utils/Base_Url";
+import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
 
-// Define interface for form values
 interface CompanyFormValues {
   name: string;
   gstNumber: string;
@@ -46,7 +28,6 @@ interface CompanyFormValues {
   Fssai_Certificate?: File | null;
 }
 
-// Validation schema using Yup
 const validationSchema = Yup.object({
   name: Yup.string()
     .required("Company name is required")
@@ -70,85 +51,27 @@ const validationSchema = Yup.object({
 });
 
 const CompanyProfile: React.FC = () => {
-  // const companyData = useAppSelector((state: any) => state.company.values) as CompanyData | null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const isEditModeParam = searchParams.get("action") === "edit";
+  const [isEditing, setIsEditing] = useState(isEditModeParam);
+
   const {
     data: companyData,
     isLoading: iscompload,
     isError,
   } = useFetchCompanyQuery();
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editId, setEditId] = useState<number | null>(null);
-  const [updateCompany, { isLoading }] = useUpdateCompanyMutation();
+  const [updateCompany, { isLoading: isUpdating }] = useUpdateCompanyMutation();
 
-  const handleUpdateSubmit = async (
-    values: CompanyFormValues,
-    { setSubmitting }: { setSubmitting: (isSubmitting: boolean) => void }
-  ) => {
-    try {
-      const formData = new FormData();
+  const company = companyData?.result;
 
-      // Append standard fields
-      formData.append("name", values.name);
-      formData.append("gstNumber", values.gstNumber);
-      formData.append("contactPerson", values.contactPerson);
-      formData.append("phone", values.phone);
-      formData.append("address", values.address);
-      formData.append("gstEnabled", String(values.gstEnabled));
-
-      // Append file fields if selected
-      if (values.License_Number) {
-        formData.append("License_Number", values.License_Number);
-        formData.append(
-          "License_Number_validTill",
-          values.License_Number_validTill || ""
-        );
-      }
-
-      if (values.Utility_Certificate) {
-        formData.append("Utility_Certificate", values.Utility_Certificate);
-        formData.append(
-          "Utility_Certificate_validTill",
-          values.Utility_Certificate_validTill || ""
-        );
-      }
-
-      if (values.Fssai_Certificate) {
-        formData.append("Fssai_Certificate", values.Fssai_Certificate);
-        formData.append(
-          "Fssai_Certificate_validTill",
-          values.Fssai_Certificate_validTill || ""
-        );
-      }
-
-      // Call API
-      const response: any = await updateCompany({
-        id: editId?.toString() || "",
-        payload: formData, // should be FormData
-      }).unwrap();
-
-      if (response.success) {
-        toast.success("Company profile updated successfully");
-        setIsModalOpen(false);
-      } else {
-        toast.error(response.message || "Failed to update company profile");
-      }
-    } catch (error: any) {
-      console.error("Error updating company profile:", error);
-      toast.error(error?.data?.message || "Failed to update company profile");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  console.log("Company Data:", companyData);
-  const initialFormValues = useMemo(
+  const initialFormValues: CompanyFormValues = useMemo(
     () => ({
-      name: companyData?.result.name || "",
-      gstNumber: companyData?.result.gstNumber || "",
-      contactPerson: companyData?.result.contactPerson || "",
-      phone: companyData?.result.phone || "",
-      address: companyData?.result.address || "",
-      gstEnabled: companyData?.result.gstEnabled || false,
+      name: company?.name || "",
+      gstNumber: company?.gstNumber || "",
+      contactPerson: company?.contactPerson || "",
+      phone: company?.phone || "",
+      address: company?.address || "",
+      gstEnabled: company?.gstEnabled || false,
       License_Number_validTill: "",
       Utility_Certificate_validTill: "",
       Fssai_Certificate_validTill: "",
@@ -156,501 +79,364 @@ const CompanyProfile: React.FC = () => {
       Utility_Certificate: null,
       Fssai_Certificate: null,
     }),
-    [companyData]
+    [company]
   );
-  if (iscompload || isLoading) {
+
+  const handleUpdateSubmit = async (values: CompanyFormValues) => {
+    try {
+      const formData = new FormData();
+
+      formData.append("name", values.name);
+      formData.append("gstNumber", values.gstNumber);
+      formData.append("contactPerson", values.contactPerson);
+      formData.append("phone", values.phone);
+      formData.append("address", values.address);
+      formData.append("gstEnabled", String(values.gstEnabled));
+
+      if (values.License_Number) {
+        formData.append("License_Number", values.License_Number);
+        if (values.License_Number_validTill) {
+          formData.append("License_Number_validTill", values.License_Number_validTill);
+        }
+      }
+      if (values.Utility_Certificate) {
+        formData.append("Utility_Certificate", values.Utility_Certificate);
+        if (values.Utility_Certificate_validTill) {
+          formData.append("Utility_Certificate_validTill", values.Utility_Certificate_validTill);
+        }
+      }
+      if (values.Fssai_Certificate) {
+        formData.append("Fssai_Certificate", values.Fssai_Certificate);
+        if (values.Fssai_Certificate_validTill) {
+          formData.append("Fssai_Certificate_validTill", values.Fssai_Certificate_validTill);
+        }
+      }
+
+      await updateCompany({ id: company?.id, data: formData }).unwrap();
+      toast.success("Company profile updated successfully!");
+      setIsEditing(false);
+      setSearchParams({});
+    } catch (err: any) {
+      toast.error(err?.data?.message || err?.message || "Failed to update company profile");
+    }
+  };
+
+  if (iscompload) {
     return (
-      <div style={{ height: "100vh" }}>
-        <Spinner centered size={60} color="secondary" />
+      <div className="p-12 text-center text-xs text-slate-500 font-medium">
+        <CircularProgress size={28} className="mb-2" />
+        <div>Loading company profile...</div>
       </div>
     );
   }
-  if (!companyData?.result || Object.keys(companyData?.result).length === 0) {
+
+  if (isError || !company) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          minHeight: "100vh",
-        }}
-      >
-        <CircularProgress />
-        <Typography variant="body1" sx={{ ml: 2 }}>
-          Loading company profile...
-        </Typography>
-      </Box>
+      <div className="p-8 bg-white border border-slate-200 rounded text-center text-xs text-slate-600">
+        <div>Failed to load company profile.</div>
+      </div>
     );
   }
 
-  if (isError) {
+  // ── EDIT MODE ──
+  if (isEditing) {
     return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          minHeight: "100vh",
-        }}
+      <Formik
+        initialValues={initialFormValues}
+        validationSchema={validationSchema}
+        onSubmit={handleUpdateSubmit}
+        enableReinitialize
       >
-        <Typography variant="body1" color="error">
-          Failed to load company profile.
-        </Typography>
-      </Box>
+        {({ values, errors, touched, handleChange, handleBlur, handleSubmit, setFieldValue }) => (
+          <form onSubmit={handleSubmit}>
+            <RecordPageLayout
+              recordType="Company Information"
+              recordTitle={values.name || "Edit Company Profile"}
+              mode="edit"
+              onSave={() => handleSubmit()}
+              onCancel={() => {
+                setIsEditing(false);
+                setSearchParams({});
+              }}
+              onListClick={() => {
+                setIsEditing(false);
+                setSearchParams({});
+              }}
+              isSaving={isUpdating}
+            >
+              <RecordSection title="Primary Company Information" defaultOpen={true}>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    COMPANY NAME <span className="text-amber-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={values.name}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    placeholder="Company Name"
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  />
+                  {touched.name && errors.name && (
+                    <span className="text-[10px] text-red-600 font-semibold">{errors.name}</span>
+                  )}
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    GST NUMBER <span className="text-amber-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="gstNumber"
+                    value={values.gstNumber}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    placeholder="22AAAAA0000A1Z5"
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 uppercase font-mono focus:outline-none focus:border-sky-500"
+                  />
+                  {touched.gstNumber && errors.gstNumber && (
+                    <span className="text-[10px] text-red-600 font-semibold">{errors.gstNumber}</span>
+                  )}
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    CONTACT PERSON <span className="text-amber-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="contactPerson"
+                    value={values.contactPerson}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    placeholder="Contact Person Name"
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  />
+                  {touched.contactPerson && errors.contactPerson && (
+                    <span className="text-[10px] text-red-600 font-semibold">{errors.contactPerson}</span>
+                  )}
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    PHONE NUMBER <span className="text-amber-600">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={values.phone}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    placeholder="Phone Number"
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 font-mono focus:outline-none focus:border-sky-500"
+                  />
+                  {touched.phone && errors.phone && (
+                    <span className="text-[10px] text-red-600 font-semibold">{errors.phone}</span>
+                  )}
+                </div>
+
+                <div className="flex flex-col space-y-1 md:col-span-2">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    ADDRESS <span className="text-amber-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    name="address"
+                    value={values.address}
+                    onChange={handleChange}
+                    onBlur={handleBlur}
+                    placeholder="Full Business Address"
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  />
+                  {touched.address && errors.address && (
+                    <span className="text-[10px] text-red-600 font-semibold">{errors.address}</span>
+                  )}
+                </div>
+
+                <div className="flex flex-col space-y-1 justify-center">
+                  <label className="inline-flex items-center space-x-2 text-xs font-semibold text-slate-700 cursor-pointer pt-3">
+                    <input
+                      type="checkbox"
+                      name="gstEnabled"
+                      checked={values.gstEnabled}
+                      onChange={handleChange}
+                      className="w-4 h-4 text-sky-600 rounded-xs focus:ring-sky-500"
+                    />
+                    <span>GST ENABLED</span>
+                  </label>
+                </div>
+              </RecordSection>
+
+              <RecordSection title="Compliance Certificates & Documents" defaultOpen={true}>
+                <div className="flex flex-col space-y-2">
+                  <CustomFileUpload
+                    name="License_Number"
+                    label="License Certificate"
+                    accept="application/pdf,image/*"
+                    maxSize={10}
+                    onFileSelect={(files) => setFieldValue("License_Number", files[0] || null)}
+                    value={values.License_Number}
+                    showPreview
+                  />
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase">Valid Till</label>
+                    <input
+                      type="date"
+                      name="License_Number_validTill"
+                      value={values.License_Number_validTill}
+                      onChange={handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col space-y-2">
+                  <CustomFileUpload
+                    name="Utility_Certificate"
+                    label="Utility Certificate"
+                    accept="application/pdf,image/*"
+                    maxSize={10}
+                    onFileSelect={(files) => setFieldValue("Utility_Certificate", files[0] || null)}
+                    value={values.Utility_Certificate}
+                    showPreview
+                  />
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase">Valid Till</label>
+                    <input
+                      type="date"
+                      name="Utility_Certificate_validTill"
+                      value={values.Utility_Certificate_validTill}
+                      onChange={handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col space-y-2">
+                  <CustomFileUpload
+                    name="Fssai_Certificate"
+                    label="FSSAI Certificate"
+                    accept="application/pdf,image/*"
+                    maxSize={10}
+                    onFileSelect={(files) => setFieldValue("Fssai_Certificate", files[0] || null)}
+                    value={values.Fssai_Certificate}
+                    showPreview
+                  />
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[10px] font-semibold text-slate-500 uppercase">Valid Till</label>
+                    <input
+                      type="date"
+                      name="Fssai_Certificate_validTill"
+                      value={values.Fssai_Certificate_validTill}
+                      onChange={handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2"
+                    />
+                  </div>
+                </div>
+              </RecordSection>
+            </RecordPageLayout>
+          </form>
+        )}
+      </Formik>
     );
   }
+
+  // ── READ-ONLY VIEW MODE ──
   return (
-    <Box sx={{ width: "100%", maxWidth: { sm: "100%", md: "1700px" } }}>
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          mb: 2,
-        }}
-      >
-        <Typography variant="h3" sx={{ mb: 2 }}>
-          Company Profile
-        </Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() => {
-            setIsModalOpen(true);
-            setEditId(companyData?.result.id);
-          }}
-          sx={{ textTransform: "none", px: 3 }}
-        >
-          <Create sx={{ mr: 1 }} />
-          Update Details
-        </Button>
-      </Box>
+    <RecordPageLayout
+      recordType="Company Information"
+      subtitle={company.name}
+      mode="view"
+      onEdit={() => {
+        setIsEditing(true);
+        setSearchParams({ action: "edit" });
+      }}
+      onBack={() => {
+        setIsEditing(false);
+        setSearchParams({});
+      }}
+      onListClick={() => {
+        setIsEditing(false);
+        setSearchParams({});
+      }}
+    >
+      <RecordSection title="Primary Information" defaultOpen={true}>
+        <div className="flex flex-col space-y-0.5">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase">COMPANY NAME</span>
+          <span className="text-xs font-bold text-slate-900">{company.name}</span>
+        </div>
 
-      <Grid
-        container
-        spacing={2}
-        columns={12}
-        sx={{ mb: (theme) => theme.spacing(2) }}
-      >
-        {/* Company Information */}
-        <Grid size={{ xs: 12, sm: 12, lg: 12 }}>
-          <Card
-            variant="outlined"
-            sx={{
-              p: 3,
-              borderRadius: 2,
-              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.1)",
-              backgroundColor: (theme) => theme.palette.background.paper,
-            }}
-          >
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Company Details
-              </Typography>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Name:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result?.name}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    GST Number:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result?.gstNumber}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Contact Person:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result?.contactPerson}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Phone:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result?.phone}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Address:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result?.address}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    GST Enabled:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result?.gstEnabled ? "Yes" : "No"}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Created At:
-                  </Typography>
-                  <Typography variant="body1">
-                    {new Date(
-                      companyData?.result?.createdAt
-                    ).toLocaleDateString()}
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, sm: 12, lg: 12 }}>
-          <Card
-            variant="outlined"
-            sx={{
-              p: 3,
-              borderRadius: 2,
-              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.1)",
-              backgroundColor: (theme) => theme.palette.background.paper,
-            }}
-          >
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Attachments
-              </Typography>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {companyData?.result?.attachments?.length > 0 ? (
-                  companyData.result.attachments.map((attachment: any) => (
-                    <Box
-                      key={attachment.id}
-                      sx={{ display: "flex", flexDirection: "column", gap: 1 }}
-                    >
-                      <Typography variant="body2" color="text.secondary">
-                        Type: {attachment.type.replace(/_/g, " ")}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        File Name: {attachment.fileName}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Valid Till:{" "}
-                        {new Date(attachment.validTill).toLocaleDateString()}
-                      </Typography>
-                      <a
-                        href={`${BASE_URL}/${attachment.filePath}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "#1976d2", textDecoration: "none" }}
-                      >
-                        View/Download
-                      </a>
-                    </Box>
-                  ))
-                ) : (
-                  <Typography variant="body2" color="text.secondary">
-                    No attachments available.
-                  </Typography>
-                )}
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        {/* User Information */}
-        <Grid size={{ xs: 12, sm: 12, lg: 12 }}>
-          <Card
-            variant="outlined"
-            sx={{
-              p: 3,
-              borderRadius: 2,
-              boxShadow: "0 4px 20px rgba(0, 0, 0, 0.1)",
-              backgroundColor: (theme) => theme.palette.background.paper,
-            }}
-          >
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                User Details
-              </Typography>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                  <Avatar
-                    src={companyData?.result.user.ProfileImage}
-                    alt="Profile"
-                    sx={{ width: 64, height: 64 }}
-                  />
-                  <Box>
-                    <Typography variant="body2" color="text.secondary">
-                      Name:
-                    </Typography>
-                    <Typography variant="body1">
-                      {companyData?.result.user.FirstName}{" "}
-                      {companyData?.result.user.LastName}
-                    </Typography>
-                  </Box>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Email:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result.user.Email}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Phone:
-                  </Typography>
-                  <Typography variant="body1">
-                    {companyData?.result.user.Phone || "Not provided"}
-                  </Typography>
-                </Box>
-                <Box>
-                  <Typography variant="body2" color="text.secondary">
-                    Type:
-                  </Typography>
-                  <Typography
-                    variant="body1"
-                    sx={{ textTransform: "capitalize" }}
-                  >
-                    {companyData?.result.user.Type}
-                  </Typography>
-                </Box>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+        <div className="flex flex-col space-y-0.5">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase">GST NUMBER</span>
+          <span className="text-xs font-mono font-bold text-slate-900">{company.gstNumber || "N/A"}</span>
+        </div>
 
-      {/* Update Company Dialog */}
-      <Dialog
-        open={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Update Company Details</DialogTitle>
-        <DialogContent>
-          <Formik
-            initialValues={initialFormValues}
-            validationSchema={validationSchema}
-            onSubmit={handleUpdateSubmit}
-          >
-            {({
-              isSubmitting,
-              errors,
-              touched,
-              handleChange,
-              handleBlur,
-              values,
-              setFieldValue,
-            }) => (
-              <Form>
-                <Box
-                  sx={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 2,
-                    mt: 2,
-                  }}
-                >
-                  <FormControl>
-                    <FormLabel htmlFor="name">Company Name</FormLabel>
-                    <Field
-                      name="name"
-                      as={TextField}
-                      id="name"
-                      placeholder="Company Name"
-                      fullWidth
-                      variant="outlined"
-                      value={values.name}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.name && !!errors.name}
-                      helperText={touched.name && errors.name}
-                    />
-                  </FormControl>
-                  <FormControl>
-                    <FormLabel htmlFor="gstNumber">GST Number</FormLabel>
-                    <Field
-                      name="gstNumber"
-                      as={TextField}
-                      id="gstNumber"
-                      placeholder="GST Number"
-                      fullWidth
-                      variant="outlined"
-                      value={values.gstNumber}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.gstNumber && !!errors.gstNumber}
-                      helperText={touched.gstNumber && errors.gstNumber}
-                    />
-                  </FormControl>
-                  <FormControl>
-                    <FormLabel htmlFor="contactPerson">
-                      Contact Person
-                    </FormLabel>
-                    <Field
-                      name="contactPerson"
-                      as={TextField}
-                      id="contactPerson"
-                      placeholder="Contact Person"
-                      fullWidth
-                      variant="outlined"
-                      value={values.contactPerson}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.contactPerson && !!errors.contactPerson}
-                      helperText={touched.contactPerson && errors.contactPerson}
-                    />
-                  </FormControl>
-                  <FormControl>
-                    <FormLabel htmlFor="phone">Phone Number</FormLabel>
-                    <Field
-                      name="phone"
-                      as={TextField}
-                      id="phone"
-                      placeholder="Phone Number"
-                      type="tel"
-                      fullWidth
-                      variant="outlined"
-                      value={values.phone}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.phone && !!errors.phone}
-                      helperText={touched.phone && errors.phone}
-                    />
-                  </FormControl>
-                  <FormControl>
-                    <FormLabel htmlFor="address">Address</FormLabel>
-                    <Field
-                      name="address"
-                      as={TextField}
-                      id="address"
-                      placeholder="Address"
-                      fullWidth
-                      variant="outlined"
-                      value={values.address}
-                      onChange={handleChange}
-                      onBlur={handleBlur}
-                      error={touched.address && !!errors.address}
-                      helperText={touched.address && errors.address}
-                    />
-                  </FormControl>
-                  <FormControlLabel
-                    control={
-                      <Field
-                        name="gstEnabled"
-                        as={Checkbox}
-                        color="primary"
-                        checked={values.gstEnabled} // Ensure the checkbox reflects the current value
-                      />
-                    }
-                    label="GST Enabled"
-                  />
-                  {/* Add inside the <Form> element, below address & gstEnabled */}
+        <div className="flex flex-col space-y-0.5">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase">CONTACT PERSON</span>
+          <span className="text-xs font-semibold text-slate-800">{company.contactPerson}</span>
+        </div>
 
-                  <Grid container spacing={2}>
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                      <CustomFileUpload
-                        name="License_Number"
-                        label="License Number"
-                        accept="application/pdf,image/*"
-                        maxSize={10}
-                        onFileSelect={(files) =>
-                          setFieldValue("License_Number", files[0] || null)
-                        }
-                        value={values.License_Number}
-                        showPreview
-                      />
-                      <TextField
-                        fullWidth
-                        name="License_Number_validTill"
-                        label="Valid Till"
-                        type="date"
-                        value={values.License_Number_validTill}
-                        onChange={handleChange}
-                        InputLabelProps={{ shrink: true }}
-                        sx={{ mt: 2 }}
-                      />
-                    </Grid>
+        <div className="flex flex-col space-y-0.5">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase">PHONE</span>
+          <span className="text-xs font-mono text-slate-800">{company.phone}</span>
+        </div>
 
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                      <CustomFileUpload
-                        name="Utility_Certificate"
-                        label="Utility Certificate"
-                        accept="application/pdf,image/*"
-                        maxSize={10}
-                        onFileSelect={(files) =>
-                          setFieldValue("Utility_Certificate", files[0] || null)
-                        }
-                        value={values.Utility_Certificate}
-                        showPreview
-                      />
-                      <TextField
-                        fullWidth
-                        name="Utility_Certificate_validTill"
-                        label="Valid Till"
-                        type="date"
-                        value={values.Utility_Certificate_validTill}
-                        onChange={handleChange}
-                        InputLabelProps={{ shrink: true }}
-                        sx={{ mt: 2 }}
-                      />
-                    </Grid>
+        <div className="flex flex-col space-y-0.5 md:col-span-2">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase">ADDRESS</span>
+          <span className="text-xs text-slate-800">{company.address}</span>
+        </div>
 
-                    <Grid size={{ xs: 12, sm: 6 }}>
-                      <CustomFileUpload
-                        name="Fssai_Certificate"
-                        label="FSSAI Certificate"
-                        accept="application/pdf,image/*"
-                        maxSize={10}
-                        onFileSelect={(files) =>
-                          setFieldValue("Fssai_Certificate", files[0] || null)
-                        }
-                        value={values.Fssai_Certificate}
-                        showPreview
-                      />
-                      <TextField
-                        fullWidth
-                        name="Fssai_Certificate_validTill"
-                        label="Valid Till"
-                        type="date"
-                        value={values.Fssai_Certificate_validTill}
-                        onChange={handleChange}
-                        InputLabelProps={{ shrink: true }}
-                        sx={{ mt: 2 }}
-                      />
-                    </Grid>
-                  </Grid>
-                </Box>
-                <DialogActions>
-                  <Button
-                    onClick={() => setIsModalOpen(false)}
-                    color="inherit"
-                    sx={{ textTransform: "none" }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    color="primary"
-                    disabled={isSubmitting}
-                    sx={{ textTransform: "none" }}
-                  >
-                    {isSubmitting ? "Updating..." : "Update"}
-                  </Button>
-                </DialogActions>
-              </Form>
-            )}
-          </Formik>
-        </DialogContent>
-      </Dialog>
-    </Box>
+        <div className="flex flex-col space-y-0.5">
+          <span className="text-[10px] font-semibold text-slate-500 uppercase">GST ENABLED</span>
+          <span className="text-xs font-semibold text-slate-800">{company.gstEnabled ? "Yes" : "No"}</span>
+        </div>
+      </RecordSection>
+
+      {company.user && (
+        <RecordSection title="Primary Administrator Account" defaultOpen={true}>
+          <div className="flex items-center space-x-3 md:col-span-3">
+            <Avatar src={company.user.ProfileImage} alt="Profile" className="!w-10 !h-10 border border-slate-300" />
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-slate-900">
+                {company.user.FirstName} {company.user.LastName}
+              </span>
+              <span className="text-xs text-slate-500">{company.user.Email}</span>
+              <span className="text-[10px] font-semibold text-sky-700 capitalize">{company.user.Type} Account</span>
+            </div>
+          </div>
+        </RecordSection>
+      )}
+
+      <RecordSection title="Compliance Attachments" defaultOpen={true}>
+        {company.attachments && company.attachments.length > 0 ? (
+          company.attachments.map((attachment: any) => (
+            <div key={attachment.id} className="flex flex-col space-y-1 bg-slate-50 p-2 border border-slate-200 rounded-xs">
+              <span className="text-[10px] font-bold text-slate-600 uppercase">
+                {attachment.type?.replace(/_/g, " ")}
+              </span>
+              <span className="text-xs text-slate-800">{attachment.fileName}</span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                Valid Till: {new Date(attachment.validTill).toLocaleDateString()}
+              </span>
+              <a
+                href={`${BASE_URL}/${attachment.filePath}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-semibold text-sky-700 hover:underline pt-1"
+              >
+                View / Download Document
+              </a>
+            </div>
+          ))
+        ) : (
+          <div className="text-xs text-slate-500 italic md:col-span-3">
+            No compliance attachments uploaded yet.
+          </div>
+        )}
+      </RecordSection>
+    </RecordPageLayout>
   );
 };
 

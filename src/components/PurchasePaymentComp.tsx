@@ -1,1422 +1,1033 @@
-import { useMemo, useState } from "react";
-import {
-  Add,
-  Assessment,
-  CheckCircleOutline,
-  Cancel,
-  Delete,
-  Edit,
-  Visibility,
-} from "@mui/icons-material";
+import React, { useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Add, Delete, Edit, Payments, Print, Search, List as ListIcon } from "@mui/icons-material";
 import { useFormik } from "formik";
 import toast from "react-hot-toast";
 import * as Yup from "yup";
 
-import {
-  Box,
-  Button,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  FormControl,
-  FormHelperText,
-  FormLabel,
-  Grid,
-  IconButton,
-  MenuItem,
-  Paper,
-  Select,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Typography,
-} from "@mui/material";
 import { useGetVendorsQuery } from "../RTK/services/vendorApi";
 import { useGetChartOfAccountsQuery } from "../RTK/services/chartOfAccountApi";
 import { useGetCurrenciesQuery } from "../RTK/services/currencyApi";
+import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
+import { useGetClassesQuery } from "../RTK/services/classApi";
+import { useGetDepartmentsQuery } from "../RTK/services/departmentApi";
+import { useGetCitiesQuery } from "../RTK/services/cityApi";
+import { useGetPaymentMethodsQuery } from "../RTK/services/paymentMethodApi";
 import { useAppSelector } from "../Hooks/Reduxhook/hooks";
 import { usePermissions } from "../Hooks/usePermissions";
-import NavbarBreadcrumbs from "./NavbarBreadcrumbs";
-import DynamicTable from "./Tables";
+
 import {
   useCreatePurchasePaymentMutation,
   useDeletePurchasePaymentMutation,
+  useGetGRNsQuery,
   useGetPurchaseInvoicesQuery,
+  useGetPurchaseOrdersQuery,
   useGetPurchasePaymentsQuery,
+  useGetPurchasePaymentByIdQuery,
   useUpdatePurchasePaymentMutation,
-  useUpdatePurchasePaymentStatusMutation,
 } from "../RTK/services/purchaseApi";
-import { useGetPaymentMethodsQuery } from "../RTK/services/paymentMethodApi";
-import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 
-const STATUS_OPTIONS = ["DRAFT", "POSTED", "CANCELLED"] as const;
-
-type PaymentStatus = (typeof STATUS_OPTIONS)[number];
-
-interface PurchasePaymentLine {
-  purchaseInvoiceLineId: string | number;
-  invoiceNumber?: string;
-  invoiceDate?: string;
-  invoiceTotal?: number;
-  invoiceBalance?: number;
-  amountPaid: number;
-  remarks?: string;
-}
-
-interface PurchasePaymentForm {
-  paymentNumber: string;
-  paymentDate: string;
-  purchaseInvoiceHeaderId: string | number;
-  invoiceNumber: string;
-  invoiceDate: string;
-  vendorInvoiceNumber: string;
-  vendorId: string | number;
-  vendorName: string;
-  invoiceTotalAmount: number;
-  invoicePaidAmount: number;
-  invoiceBalanceAmount: number;
-  invoiceStatus: string;
-  currency: string;
-  exchangeRate: number;
-  purchaseOrderNumber: string;
-  paymentMethodId: string | number;
-  bankAccountId: string | number;
-  referenceNo: string;
-  totalAmount: number;
-  remarks: string;
-  status: PaymentStatus;
-  lines: PurchasePaymentLine[];
-}
+import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
+import ConfirmationDialog from "./Dialog/ConfirmationDialog";
+import { GLImpactSubtab } from "./Layout/GLImpactSubtab";
 
 export default function PurchasePaymentComp() {
-  const { canCreate, canUpdate, canDelete } = usePermissions();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { canRead, canCreate, canUpdate, canDelete } = usePermissions();
   const currentUser = useAppSelector((state) => state.currentUser.user);
   const userId = currentUser?.id ?? "";
 
   const [isOpen, setOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"list" | "view" | "form">("list");
   const [isEdit, setIsEdit] = useState(false);
   const [editId, setEditId] = useState<number | string | null>(null);
-  const [viewModalOpen, setViewModalOpen] = useState(false);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<number | string | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [paymentToDelete, setPaymentToDelete] = useState<any>(null);
-  const [selectedPaymentForGl, setSelectedPaymentForGl] = useState<any>(null);
-  const [glImpactOpen, setGlImpactOpen] = useState(false);
+  const [selectedPoId, setSelectedPoId] = useState<string>("");
 
-  const { data: paymentMethodsData } = useGetPaymentMethodsQuery({ page: 1, limit: 100 }, { skip: !isOpen });
-  const { data: paymentsData } = useGetPurchasePaymentsQuery({ page: 1, limit: 50 });
-  const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 }, { skip: !isOpen });
-  const { data: vendorsData } = useGetVendorsQuery({ option: true }, { skip: !isOpen });
-  const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined, { skip: !isOpen });
-  const { data: currenciesData } = useGetCurrenciesQuery(undefined, { skip: !isOpen });
+  // Eager Queries
+  const { data: paymentsData, refetch: refetchPayments } = useGetPurchasePaymentsQuery({ page: 1, limit: 50 });
+  const { data: singlePaymentData } = useGetPurchasePaymentByIdQuery(selectedPaymentId!, { skip: !selectedPaymentId });
+  const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 });
+  const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 100 });
+  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery({ page: 1, limit: 100 });
+  const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
+  const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
+  const { data: currenciesData } = useGetCurrenciesQuery(undefined);
+  const { data: subsidiariesData } = useGetSubsidiariesQuery(undefined);
+  const { data: classesData } = useGetClassesQuery(undefined);
+  const { data: departmentsData } = useGetDepartmentsQuery(undefined);
+  const { data: citiesData } = useGetCitiesQuery(undefined);
 
-  const { data: journalEntriesData, isLoading: isJournalLoading } = useGetJournalEntryByIdQuery(
-    {
-      id: Number(selectedPaymentForGl?.id ?? 0),
-      source: "PURCHASE_PAYMENT",
-    },
-    {
-      skip: !glImpactOpen || !selectedPaymentForGl?.id,
-    }
-  );
-
-  const [updatePurchasePaymentStatus] = useUpdatePurchasePaymentStatusMutation();
-  const [createPurchasePayment] = useCreatePurchasePaymentMutation();
-  const [updatePurchasePayment] = useUpdatePurchasePaymentMutation();
+  const [createPurchasePayment, { isLoading: isCreating }] = useCreatePurchasePaymentMutation();
+  const [updatePurchasePayment, { isLoading: isUpdating }] = useUpdatePurchasePaymentMutation();
   const [deletePurchasePayment] = useDeletePurchasePaymentMutation();
 
-  const payments = useMemo(() => {
-    if (!paymentsData) return [];
+  const payments = useMemo(() => (Array.isArray(paymentsData?.result) ? paymentsData.result : Array.isArray(paymentsData?.data) ? paymentsData.data : Array.isArray(paymentsData) ? paymentsData : []), [paymentsData]);
+  const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : []), [invoicesData]);
+  const grns = useMemo(() => (Array.isArray(grnsData?.result) ? grnsData.result : Array.isArray(grnsData?.data) ? grnsData.data : Array.isArray(grnsData) ? grnsData : []), [grnsData]);
+  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
+  const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
+  const bankAccounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : [];
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
+  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
 
-    return Array.isArray(paymentsData) ? paymentsData : paymentsData?.result ?? [];
-  }, [paymentsData]);
-
-  const vendors = useMemo(() => {
-    if (!vendorsData) return [];
-
-    return Array.isArray(vendorsData) ? vendorsData : vendorsData?.result ?? [];
-  }, [vendorsData]);
-
-  const glVendorName = useMemo(() => {
-    if (!selectedPaymentForGl) return "Vendor";
-    if (selectedPaymentForGl.vendor?.vendor_name) return selectedPaymentForGl.vendor.vendor_name;
-    if (selectedPaymentForGl.vendor?.vendorName) return selectedPaymentForGl.vendor.vendorName;
-    const foundVendor = vendors.find((v: any) => String(v.id) === String(selectedPaymentForGl.vendorId || selectedPaymentForGl.vendor_id));
-    return foundVendor?.vendor_name || foundVendor?.vendorName || "Vendor";
-  }, [selectedPaymentForGl, vendors]);
-
-  const currencies = useMemo(() => {
-    if (!currenciesData) return [];
-
-    return Array.isArray(currenciesData) ? currenciesData : currenciesData?.result ?? [];
-  }, [currenciesData]);
-
-  const allInvoices = useMemo(() => {
-    if (!invoicesData) return [];
-
-    return Array.isArray(invoicesData) ? invoicesData : invoicesData?.result ?? [];
-  }, [invoicesData]);
-
-  // const bankAccounts = useMemo(() => {
-  //   const coaList = Array.isArray(chartOfAccountsData?.result)
-  //     ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData)
-  //       ? chartOfAccountsData : [];
-
-  //   return coaList.filter((acc: any) => {
-  //     const accountType = acc?.account_name?.toLowerCase() || "";
-  //     const typeGroup = acc.accountType?.account_type_name?.toLowerCase() || "";
-
-  //     return (
-  //       accountType.includes("bank") ||
-  //       accountType.includes("cash") ||
-  //       accountType.includes("asset") ||
-  //       typeGroup === "asset"
-  //     );
-  //   });
-  // }, [chartOfAccountsData]);
-
-  const bankAccounts = chartOfAccountsData?.result ?? [];
-  const paymentMethods = paymentMethodsData?.result ?? [];
-
-  // console.log(bankAccounts)
-
-  const initialValues: PurchasePaymentForm = {
-    paymentNumber: "",
-    paymentDate: new Date().toISOString().slice(0, 10),
-    purchaseInvoiceHeaderId: "",
-    invoiceNumber: "",
-    invoiceDate: "",
-    vendorInvoiceNumber: "",
-    vendorId: "",
-    vendorName: "",
-    invoiceTotalAmount: 0,
-    invoicePaidAmount: 0,
-    invoiceBalanceAmount: 0,
-    invoiceStatus: "",
-    currency: "INR",
-    exchangeRate: 1,
-    purchaseOrderNumber: "",
-    paymentMethodId: null,
-    bankAccountId: "",
-    referenceNo: "",
-    totalAmount: 0,
-    remarks: "",
-    status: "DRAFT",
-    lines: [],
+  const getVendorDisplayName = (vObj: any) => {
+    if (!vObj) return "";
+    const code = vObj.entity_id ? `${vObj.entity_id} ` : "";
+    const name = vObj.company_name || [vObj.salutation, vObj.first_name, vObj.last_name].filter(Boolean).join(" ");
+    return `${code}${name}`.trim();
   };
 
-  const validationSchema = Yup.object().shape({
-    purchaseInvoiceHeaderId: Yup.string().required("Purchase Invoice is required"),
-    paymentNumber: Yup.string().required("Payment No. is required"),
-    paymentDate: Yup.string().required("Payment Date is required"),
-    totalAmount: Yup.number().positive("Payment amount must be greater than zero").required("Payment amount is required"),
-    paymentMethodId: Yup.string().required("Payment method is required"),
-    bankAccountId: Yup.string().required("Paying account is required"),
-  });
-
-  const formik = useFormik<PurchasePaymentForm>({
-    initialValues,
-    validationSchema,
-    onSubmit: async (values, { resetForm }) => {
+  const formik = useFormik({
+    initialValues: {
+      paymentNumber: "",
+      paymentDate: new Date().toISOString().slice(0, 10),
+      purchaseInvoiceHeaderId: "",
+      invoiceNumber: "",
+      invoiceDate: "",
+      vendorId: "",
+      vendorName: "",
+      currency: "INR",
+      exchangeRate: 1,
+      paymentMethodId: "",
+      bankAccountId: "",
+      referenceNo: "",
+      subsidiary_id: "",
+      class_id: "",
+      department_id: "",
+      location_id: "",
+      totalAmount: 0,
+      remarks: "",
+      status: "DRAFT",
+    },
+    validationSchema: Yup.object().shape({
+      vendorId: Yup.string().required("Payee / Vendor is required"),
+      paymentDate: Yup.string().required("Payment Date is required"),
+      totalAmount: Yup.number().positive("Payment amount must be > 0").required("Payment amount is required"),
+      bankAccountId: Yup.string().required("Account is required"),
+    }),
+    onSubmit: async (values) => {
       try {
-        if (!values.purchaseInvoiceHeaderId) {
-          toast.error("Please select a Purchase Invoice");
-          return;
+        let targetInv = invoices.find((inv: any) => String(inv.id) === String(values.purchaseInvoiceHeaderId));
+        if (!targetInv && selectedPoId) {
+          targetInv = invoices.find((inv: any) => String(inv.poHeaderId || inv.purchase_order_id || inv.header?.poHeaderId) === String(selectedPoId));
+        }
+        if (!targetInv && values.vendorId) {
+          targetInv = invoices.find((inv: any) => String(inv.vendorId || inv.vendor_id || inv.header?.vendorId) === String(values.vendorId));
         }
 
-        const paymentAmount = Number(values.totalAmount || 0);
-        const invoiceBalance = Number(values.invoiceBalanceAmount || 0);
+        const invHeaderId = targetInv ? Number(targetInv.id) : (values.purchaseInvoiceHeaderId ? Number(values.purchaseInvoiceHeaderId) : null);
+        const payAmount = Number(values.totalAmount || 0);
 
-        if (paymentAmount <= 0) {
-          toast.error("Payment amount must be greater than zero");
-          return;
+        let linesPayload: any[] = [];
+        const invLines = targetInv?.lines || targetInv?.lineItems || targetInv?.purchaseInvoiceLines || [];
+        
+        if (invLines.length > 0) {
+          const invTotal = invLines.reduce((sum: number, l: any) => sum + (Number(l.lineTotal || l.line_total || (Number(l.quantity || 1) * Number(l.unitPrice || l.unit_price || 0))) || 0), 0);
+
+          let allocatedSum = 0;
+          linesPayload = invLines.map((l: any, idx: number) => {
+            let lineAmt = 0;
+            if (idx === invLines.length - 1) {
+              lineAmt = Number((payAmount - allocatedSum).toFixed(2));
+            } else {
+              const rawAmt = invTotal > 0 ? (Number(l.lineTotal || l.line_total || 0) / invTotal) * payAmount : payAmount / invLines.length;
+              lineAmt = Number(rawAmt.toFixed(2));
+              allocatedSum += lineAmt;
+            }
+            return {
+              purchaseInvoiceLineId: Number(l.id || (idx + 1)),
+              amountPaid: lineAmt > 0 ? lineAmt : payAmount,
+              remarks: l.remarks || "Invoice payment line allocation",
+            };
+          });
         }
 
-        if (paymentAmount > invoiceBalance) {
-          toast.error("Payment amount cannot exceed invoice balance");
-          return;
+        if (linesPayload.length === 0) {
+          const lineId = invLines?.[0]?.id || targetInv?.id || 1;
+          linesPayload = [
+            {
+              purchaseInvoiceLineId: Number(lineId),
+              amountPaid: Number(payAmount.toFixed(2)),
+              remarks: "Invoice payment allocation line",
+            },
+          ];
         }
 
-        const paymentLines = [
-          {
-            purchaseInvoiceHeaderId: values.purchaseInvoiceHeaderId,
-            purchaseInvoiceLineId: values.purchaseInvoiceHeaderId,
-            amountPaid: paymentAmount,
-            remarks: values.remarks || "",
-          },
-        ];
+        const payNum = values.paymentNumber || `PAY-${Date.now().toString().slice(-6)}`;
+        const vObj = vendors.find((v: any) => String(v.id) === String(values.vendorId));
+        const pmId = values.paymentMethodId || vObj?.payment_method_id || vObj?.paymentMethodId || vObj?.default_payment_method_id || vObj?.paymentMethod?.id || targetInv?.paymentMethodId || targetInv?.payment_method_id || targetInv?.header?.paymentMethodId || targetInv?.header?.payment_method_id || null;
+
+        const linesWithHeader = linesPayload.map((l: any) => ({
+          ...l,
+          purchaseInvoiceHeaderId: invHeaderId || l.purchaseInvoiceHeaderId || 1,
+          purchaseInvoiceLineId: l.purchaseInvoiceLineId || l.id || 1,
+        }));
 
         const payload = {
-          paymentNumber: values.paymentNumber || undefined,
-          paymentDate: values.paymentDate,
-          purchaseInvoiceHeaderId: values.purchaseInvoiceHeaderId,
-          vendorId: values.vendorId,
-          paymentMethodId: values.paymentMethodId,
-          bankAccountId: values.bankAccountId,
-          totalAmount: paymentAmount,
-          currency: values.currency,
-          exchangeRate: Number(values.exchangeRate || 1),
-          referenceNo: values.referenceNo,
-          status: values.status,
-          remarks: values.remarks,
+          ...values,
+          paymentMethodId: pmId ? Number(pmId) : null,
+          currency: extractCurrencyString(values.currency),
+          paymentNumber: payNum,
+          purchaseInvoiceHeaderId: invHeaderId,
           user_id: userId,
-          lines: paymentLines,
+          lines: linesWithHeader,
+          details: linesWithHeader,
+          paymentLines: linesWithHeader,
         };
 
         if (isEdit && editId) {
-          await updatePurchasePayment({ id: editId, body: payload }).unwrap();
-
-          toast.success("Purchase Payment updated successfully");
+          await updatePurchasePayment({
+            id: editId,
+            body: {
+              ...payload,
+              header: payload,
+              paymentLines: linesWithHeader,
+              lines: linesWithHeader,
+            },
+          }).unwrap();
+          toast.success("Vendor Payment updated successfully.");
+          setOpen(false);
+          setViewMode("list");
+          setIsEdit(false);
+          setEditId(null);
+          setSelectedPoId("");
+          formik.resetForm();
+          refetchPayments();
         } else {
           await createPurchasePayment(payload).unwrap();
-
-          toast.success("Purchase Payment created successfully");
+          toast.success("Vendor Payment recorded successfully.");
+          const poParam = selectedPoId ? `?poId=${selectedPoId}` : "";
+          setOpen(false);
+          setViewMode("list");
+          setIsEdit(false);
+          setEditId(null);
+          formik.resetForm();
+          refetchPayments();
+          navigate(`/purchase-return${poParam}`);
         }
-
-        setOpen(false);
-        setIsEdit(false);
-        setEditId(null);
-        resetForm();
       } catch (error: any) {
-        toast.error(error?.data?.message || "Failed to save purchase payment");
+        toast.error(error?.data?.message || "Something went wrong.");
       }
     },
   });
 
-  const getPurchaseOrderNumber = (invoice: any) => {
-    return (
-      invoice?.purchaseOrder?.purchaseNo ||
-      invoice?.purchaseOrder?.orderNumber ||
-      invoice?.purchaseOrderNumber ||
-      invoice?.poNumber ||
-      invoice?.purchaseOrder?.number || ""
-    );
-  };
+  React.useEffect(() => {
+    const urlPoId = searchParams.get("poId") || searchParams.get("po_id");
+    const urlId = searchParams.get("id");
+    const urlAction = searchParams.get("action");
 
-  const handleInvoiceSelect = (invoiceId: string | number) => {
-    const invoice = allInvoices.find((inv: any) => String(inv.id) === String(invoiceId));
-
-    if (!invoice) {
-      formik.setValues({ ...initialValues, paymentDate: new Date().toISOString().slice(0, 10) });
-      return;
+    if (urlPoId && purchaseOrders.length > 0) {
+      setViewMode("form");
+      setOpen(true);
+      handlePoChange(urlPoId);
+    } else if (urlId && urlAction === "view") {
+      handleView(urlId);
+    } else if (!urlPoId && !urlId) {
+      // Header or direct menu navigation -> Showcase list of all purchase payments
+      setOpen(false);
+      setViewMode("list");
+      setSelectedPaymentId(null);
+      setSelectedPoId("");
     }
+  }, [searchParams, purchaseOrders]);
 
-    const invoiceTotal = Number(invoice.totalAmount || 0);
-    const invoicePaid = Number(invoice.paidAmount || invoice.amountPaid || 0);
-    const invoiceBalance = Number(invoice.balanceAmount ?? invoiceTotal - invoicePaid);
-    const vendor = invoice.vendor || vendors.find((v: any) => String(v.id) === String(invoice.vendorId));
+  const vendorPOs = useMemo(() => {
+    if (!formik.values.vendorId) return [];
 
-    const vendorName = vendor?.vendorName || vendor?.name || vendor?.vendor_name || "";
-    const poNumber = invoice?.purchaseOrder?.purchaseNo;
+    return purchaseOrders.filter((po: any) => {
+      // 1. Must match selected Vendor
+      const poVendorId = String(po.vendor_id || po.vendorId || po.vendor?.id || "");
+      if (poVendorId !== String(formik.values.vendorId)) return false;
 
-    formik.setValues({
-      ...formik.values,
-      purchaseInvoiceHeaderId: invoice.id,
-      invoiceNumber: invoice.invoiceNumber || "",
-      invoiceDate: invoice.invoiceDate ? invoice.invoiceDate.slice(0, 10) : "",
-      vendorInvoiceNumber: invoice.vendorInvoiceNumber || "",
-      vendorId: invoice.vendorId || "",
-      vendorName,
-      invoiceTotalAmount: invoiceTotal,
-      invoicePaidAmount: invoicePaid,
-      invoiceBalanceAmount: invoiceBalance,
-      invoiceStatus: invoice.status || "",
-      currency: invoice.currency || invoice.currencyCode || "INR",
-      exchangeRate: Number(invoice.exchangeRate || 1),
-      purchaseOrderNumber: poNumber || "",
-      totalAmount: 0,
-      lines: [
-        {
-          purchaseInvoiceLineId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          invoiceDate: invoice.invoiceDate,
-          invoiceTotalAmount: invoiceTotal,
-          invoiceBalanceAmount: invoiceBalance,
-          amountPaid: 0,
-          remarks: "",
-        } as any,
-      ],
+      // 2. Must have a GRN created/received for this PO
+      const matchingGrn = grns.find((g: any) => {
+        const gPoId = String(g.purchaseOrderId || g.purchase_order_id || g.poHeaderId || g.purchaseOrder?.id || "");
+        return gPoId === String(po.id);
+      });
+      if (!matchingGrn) return false;
+
+      // 3. Must have a Vendor Bill / Purchase Invoice completed for this PO or GRN
+      const hasBill = invoices.some((inv: any) => {
+        const invPoId = String(inv.poHeaderId || inv.purchase_order_id || inv.header?.poHeaderId || "");
+        const invGrnId = String(inv.grnHeaderId || inv.header?.grnHeaderId || "");
+        return invPoId === String(po.id) || (matchingGrn && invGrnId === String(matchingGrn.id));
+      });
+
+      return hasBill;
     });
+  }, [purchaseOrders, grns, invoices, formik.values.vendorId]);
+
+  const extractCurrencyString = (c: any) => {
+    if (!c) return "INR";
+    if (typeof c === "string" || typeof c === "number") return String(c);
+    return String(c.currency_code || c.code || c.currency_symbol || c.id || "INR");
   };
 
-  const handlePaymentAmountChange = (value: string) => {
-    const balance = Number(formik.values.invoiceBalanceAmount || 0);
+  const handleVendorChange = (vId: string) => {
+    formik.setFieldValue("vendorId", vId);
+    setSelectedPoId("");
+    const vObj = vendors.find((v: any) => String(v.id) === String(vId));
+    if (vObj) {
+      formik.setFieldValue("vendorName", getVendorDisplayName(vObj));
+      const subId = vObj.subsidiary_id || vObj.subsidiaryId || vObj.primary_subsidiary_id;
+      if (subId) formik.setFieldValue("subsidiary_id", String(subId));
+      const curr = extractCurrencyString(vObj.currency || vObj.currency_code || vObj.currency_id || "INR");
+      formik.setFieldValue("currency", curr);
+      const accId = vObj.default_payables_account_id || vObj.account_id;
+      if (accId) formik.setFieldValue("bankAccountId", String(accId));
+      const pmId = vObj.payment_method_id || vObj.paymentMethodId || vObj.default_payment_method_id || vObj.paymentMethod?.id;
+      if (pmId) formik.setFieldValue("paymentMethodId", String(pmId));
+    }
+  };
 
-    formik.setFieldValue("totalAmount", value);
+  const handlePoChange = (poId: string) => {
+    setSelectedPoId(poId);
+    if (!poId) return;
 
-    const parsed = parseFloat(value);
-    if (!isNaN(parsed) && balance > 0 && parsed > balance) {
-      toast.error("Payment amount cannot exceed invoice balance");
-      formik.setFieldValue("totalAmount", balance);
-      const updatedLines = formik.values.lines.map((line) => ({
-        ...line,
-        amountPaid: balance,
-      }));
-      formik.setFieldValue("lines", updatedLines);
+    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    if (!poObj) return;
+
+    const vId = poObj.vendor_id || poObj.vendorId || poObj.vendor?.id;
+    if (vId && String(formik.values.vendorId) !== String(vId)) {
+      handleVendorChange(String(vId));
+    }
+
+    const subId = poObj.subsidiary_id || poObj.subsidiaryId;
+    if (subId) formik.setFieldValue("subsidiary_id", String(subId));
+
+    const classId = poObj.class_id || poObj.classId;
+    if (classId) formik.setFieldValue("class_id", String(classId));
+
+    const deptId = poObj.department_id || poObj.departmentId;
+    if (deptId) formik.setFieldValue("department_id", String(deptId));
+
+    const locId = poObj.city_id || poObj.cityId || poObj.location_id || poObj.locationId;
+    if (locId) formik.setFieldValue("location_id", String(locId));
+
+    const curr = extractCurrencyString(poObj.currency || poObj.currency_code || poObj.currency_id || "INR");
+    formik.setFieldValue("currency", curr);
+
+    const pmId = poObj.payment_method_id || poObj.paymentMethodId || poObj.paymentMethod?.id;
+    if (pmId) formik.setFieldValue("paymentMethodId", String(pmId));
+
+    const matchedInv = invoices.find((inv: any) => String(inv.poHeaderId || inv.purchase_order_id || inv.header?.poHeaderId) === String(poObj.id));
+    if (matchedInv) {
+      const h = matchedInv.header ?? matchedInv;
+      formik.setFieldValue("purchaseInvoiceHeaderId", String(matchedInv.id));
+      formik.setFieldValue("invoiceNumber", h.invoiceNumber || h.invoice_number || `BILL-${matchedInv.id}`);
+      formik.setFieldValue("totalAmount", Number(h.totalAmount || h.total_amount || 0));
+      const invPmId = h.paymentMethodId || h.payment_method_id;
+      if (invPmId) formik.setFieldValue("paymentMethodId", String(invPmId));
+    } else {
+      const poLines = poObj.purchaseOrderLines || poObj.lineItems || poObj.line_items || [];
+      const poTotal = poLines.reduce((acc: number, l: any) => acc + Number(l.line_total || (Number(l.quantity || 1) * Number(l.rate || 0)) || 0), 0);
+      formik.setFieldValue("totalAmount", poTotal > 0 ? poTotal : Number(poObj.total_amount || 0));
+      formik.setFieldValue("referenceNo", poObj.purchaseNo || `PO-${poObj.id}`);
+    }
+  };
+
+  const handleInvoiceChange = (invId: string) => {
+    formik.setFieldValue("purchaseInvoiceHeaderId", invId);
+    const inv = invoices.find((x: any) => String(x.id) === String(invId));
+    if (inv) {
+      const header = inv.header ?? inv;
+      const vId = header.vendorId ?? header.vendor_id ?? "";
+      formik.setFieldValue("invoiceNumber", header.invoiceNumber ?? header.invoice_number ?? "");
+      formik.setFieldValue("invoiceDate", header.invoiceDate ?? header.invoice_date ?? "");
+      formik.setFieldValue("vendorId", vId);
+      const v = vendors.find((v: any) => String(v.id) === String(vId));
+      formik.setFieldValue("vendorName", header.vendor?.vendor_name || v?.vendor_name || "");
+
+      const lines = inv.lines || inv.lineItems || [];
+      const lineSubtotal = lines.reduce((acc: number, l: any) => acc + (Number(l.quantity || 1) * Number(l.unitPrice || l.unit_price || 0)), 0);
+      const lineTax = lines.reduce((acc: number, l: any) => acc + Number(l.taxAmount || l.tax_amount || 0), 0);
+      const billTotal = Number(header.totalAmount || header.total_amount || (lineSubtotal + lineTax));
+      formik.setFieldValue("totalAmount", billTotal);
+
+      // Auto-fill classification & currency from Vendor primary fields if header lacks them
+      const subId = header.subsidiary_id || v?.primary_subsidiary_id || v?.primarySubsidiary?.id || v?.subsidiary_id;
+      if (subId) formik.setFieldValue("subsidiary_id", String(subId));
+      if (header.class_id) formik.setFieldValue("class_id", String(header.class_id));
+      if (header.department_id) formik.setFieldValue("department_id", String(header.department_id));
+
+      const primaryAddr = v?.addressBook?.find((a: any) => a.default_billing) || v?.addressBook?.[0];
+      const cityId = header.location_id || primaryAddr?.city_id || primaryAddr?.city?.id || v?.city_id;
+      if (cityId) formik.setFieldValue("location_id", String(cityId));
+
+      const curr = header.currency || v?.currency?.currency_code || "INR";
+      if (curr) formik.setFieldValue("currency", curr);
+    }
+  };
+
+  const handleEdit = (id: number | string) => {
+    if (!canUpdate("purchase_payment")) {
+      toast.error("No permission to edit Vendor Payment");
       return;
     }
+    const item = payments.find((x: any) => String(x.id) === String(id)) || singlePaymentData?.result || singlePaymentData?.data;
+    if (item) {
+      const header = item.header ?? item;
+      const statusVal = String(header.status || item.status || "DRAFT").toUpperCase();
+      if (statusVal !== "DRAFT") {
+        toast.error("Only DRAFT Purchase Payments can be edited.");
+        return;
+      }
 
-    const numericAmount = isNaN(parsed) ? 0 : parsed;
-    const updatedLines = formik.values.lines.map((line) => ({
-      ...line,
-      amountPaid: numericAmount,
-    }));
+      const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
 
-    formik.setFieldValue("lines", updatedLines);
-  };
-
-  const handleStatusChange = async (id: number | string, newStatus: PaymentStatus) => {
-    try {
-      await updatePurchasePaymentStatus({ id, body: { status: newStatus, } }).unwrap();
-
-      toast.success(`Payment status updated to ${newStatus}`);
-    } catch (error: any) {
-      toast.error(error?.data?.message || "Failed to update payment status");
+      formik.setValues({
+        paymentNumber: header.paymentNumber ?? header.payment_number ?? "",
+        paymentDate: formatDate(header.paymentDate ?? header.payment_date) || new Date().toISOString().slice(0, 10),
+        purchaseInvoiceHeaderId: header.purchaseInvoiceHeaderId ?? header.purchase_invoice_header_id ?? "",
+        invoiceNumber: header.invoiceNumber ?? "",
+        invoiceDate: formatDate(header.invoiceDate),
+        vendorId: header.vendorId ?? header.vendor_id ?? "",
+        vendorName: header.vendorName ?? header.vendor?.vendor_name ?? "",
+        currency: header.currency ?? "INR",
+        exchangeRate: Number(header.exchangeRate ?? 1),
+        paymentMethodId: header.paymentMethodId ?? header.payment_method_id ?? "",
+        bankAccountId: header.bankAccountId ?? header.bank_account_id ?? "",
+        referenceNo: header.referenceNo ?? header.reference_number ?? "",
+        subsidiary_id: header.subsidiary_id ?? "",
+        class_id: header.class_id ?? "",
+        department_id: header.department_id ?? "",
+        location_id: header.location_id ?? "",
+        totalAmount: Number(header.totalAmount ?? header.amount ?? 0),
+        remarks: header.remarks ?? "",
+        status: statusVal,
+      });
+      setEditId(id);
+      setIsEdit(true);
+      setViewMode("form");
+      setOpen(true);
     }
   };
 
-  const handleDelete = async () => {
+  const handleView = (id: number | string) => {
+    setSelectedPaymentId(id);
+    const item = payments.find((x: any) => String(x.id) === String(id));
+    if (item) {
+      setSelectedPayment(item);
+    }
+    setViewMode("view");
+    setOpen(true);
+    setSearchParams({ id: String(id), action: "view" });
+  };
+
+  const confirmDelete = async () => {
     if (!paymentToDelete) return;
-
-    if (String(paymentToDelete.status || "").toUpperCase() !== "DRAFT") {
-      toast.error("Only draft purchase payments can be deleted");
-      return;
-    }
-
     try {
       await deletePurchasePayment(paymentToDelete.id).unwrap();
-
-      toast.success("Purchase Payment deleted");
-
+      toast.success("Vendor Payment deleted successfully");
+      refetchPayments();
+    } catch (error: any) {
+      toast.error(error?.data?.message || "Failed to delete Vendor Payment");
+    } finally {
       setDeleteDialogOpen(false);
       setPaymentToDelete(null);
-    } catch (error: any) {
-      toast.error(error?.data?.message || "Failed to delete payment");
     }
   };
 
-  const handleEdit = (row: any) => {
-    if (String(row.status || "").toUpperCase() !== "DRAFT") {
-      toast.error("Only draft purchase payments can be edited");
-      return;
-    }
+  if (!canRead("purchase_payment")) {
+    return <div className="p-8 text-center text-red-600 font-bold">Access Denied: You do not have permission to view Purchase Payments.</div>;
+  }
 
-    setIsEdit(true);
-    setEditId(row.id);
-    const invoice = row.purchaseInvoice || row.invoice ||
-      allInvoices.find((inv: any) => String(inv.id) === String(row.lines?.[0]?.purchaseInvoiceHeaderId));
+  // ── RENDER 1: CREATE / EDIT FORM OR READ-ONLY VIEW MODE ──
+  if (isOpen || viewMode === "form" || viewMode === "view") {
+    const isView = viewMode === "view";
+    const singlePayment = singlePaymentData?.result || singlePaymentData?.data || singlePaymentData;
+    const activePayment = isView ? singlePayment || selectedPayment || {} : {};
+    const activeHeader = isView ? activePayment.header ?? activePayment : formik.values;
+    const activeLines = isView ? activePayment.paymentLines || activePayment.lines || activePayment.details || [] : [];
 
-    const paymentLine = row.lines?.[0];
-    formik.setValues({
-      paymentNumber: row.paymentNumber || "",
-      paymentDate: row.paymentDate ? row.paymentDate.slice(0, 10) : "",
-      purchaseInvoiceHeaderId: paymentLine?.purchaseInvoiceLineId || invoice?.id || "",
-      invoiceNumber: invoice?.invoiceNumber || paymentLine?.purchaseInvoice?.invoiceNumber || "",
-      invoiceDate: invoice?.invoiceDate ? invoice.invoiceDate.slice(0, 10)
-        : paymentLine?.purchaseInvoice?.invoiceDate
-          ? paymentLine.purchaseInvoice.invoiceDate.slice(0, 10) : "",
-      vendorInvoiceNumber: invoice?.vendorInvoiceNumber || "",
-      vendorId: row.vendorId || invoice?.vendorId || "",
-      vendorName: row.vendor?.vendorName || row.vendor?.name || invoice?.vendor?.vendorName ||
-        invoice?.vendor?.name || "",
-      invoiceTotalAmount: Number(invoice?.totalAmount || 0),
-      invoicePaidAmount: Number(invoice?.paidAmount || invoice?.amountPaid || 0),
-      invoiceBalanceAmount: Number(invoice?.balanceAmount ?? invoice?.totalAmount ?? 0),
-      invoiceStatus: invoice?.status || "",
-      currency: row.currency || invoice?.currency || "INR",
-      exchangeRate: Number(row.exchangeRate || invoice?.exchangeRate || 1),
-      purchaseOrderNumber: getPurchaseOrderNumber(invoice),
-      paymentMethodId: row.paymentMethodId || null,
-      bankAccountId: row.bankAccountId || "",
-      referenceNo: row.referenceNo || "",
-      totalAmount: Number(row.totalAmount || 0),
-      remarks: row.remarks || "",
-      status: row.status || "DRAFT",
-      lines: row.lines || [],
-    });
-    setOpen(true);
-  };
+    const vendorObj = activeHeader.vendor || vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id));
+    const vendorName = getVendorDisplayName(vendorObj) || activeHeader.vendorName || "—";
 
-  const columns = [
-    {
-      key: "paymentNumber",
-      label: "Payment No.",
-      render: (row: any) => row.paymentNumber ? row.paymentNumber : "-",
-    },
-    {
-      key: "paymentDate",
-      label: "Date",
-      render: (row: any) => row.paymentDate ? row.paymentDate.slice(0, 10) : "-",
-    },
-    {
-      key: "invoiceNumber",
-      label: "Purchase Invoice",
-      render: (row: any) => row.lines?.[0]?.purchaseInvoice?.invoiceNumber ||
-        row.purchaseInvoice?.invoiceNumber ||
-        row.invoiceNumber || row.lines?.[0]?.purchaseInvoiceHeaderId || "-",
-    },
-    {
-      key: "vendor",
-      label: "Vendor",
-      render: (row: any) => row.vendor?.vendorName || row.vendor?.name || row.vendor?.vendor_name || "-",
-    },
-    {
-      key: "paymentMethodId",
-      label: "Mode",
-    },
-    {
-      key: "totalAmount",
-      label: "Total Amount",
-      render: (row: any) => `₹${Number(row.totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
-    },
-    {
-      key: "referenceNo",
-      label: "Ref / UTR #",
-    },
-    {
-      key: "status",
-      label: "Status",
-      render: (row: any) => {
-        const val = row.status;
-        let color:
-          | "default"
-          | "info"
-          | "success"
-          | "error" =
-          "default";
-        if (val === "DRAFT") color = "info";
-        if (val === "POSTED") color = "success";
-        if (val === "CANCELLED") color = "error";
-        return (
-          <Chip
-            label={val}
-            color={color}
-            size="small"
-            variant="outlined"
-          />
-        );
-      },
-    },
-    {
-      key: "actions",
-      label: "Actions",
-      render: (row: any) => (
-        <Box
-          sx={{
-            display: "flex",
-            gap: 1,
-            flexWrap: "wrap",
-          }}
-        >
-          <IconButton
-            size="small"
-            color="info"
-            title="View Details"
-            onClick={() => {
-              setSelectedPayment(row);
-              setViewModalOpen(true);
-            }}
-          >
-            <Visibility fontSize="small" />
-          </IconButton>
-          {row.status !== "DRAFT" && row.status !== "CANCELLED" && (
-            <IconButton
-              size="small"
-              color="secondary"
-              title="GL Impact"
-              onClick={() => {
-                setSelectedPaymentForGl(row);
-                setGlImpactOpen(true);
-              }}
-            >
-              <Assessment fontSize="small" />
-            </IconButton>
-          )}
-          {row.status === "DRAFT" && (
-            <>
-              {canUpdate && (
-                <IconButton
-                  size="small"
-                  color="primary"
-                  title="Edit Payment"
-                  onClick={() => handleEdit(row)}
-                >
-                  <Edit fontSize="small" />
-                </IconButton>
-              )}
-              <Button
-                size="small"
-                variant="contained"
-                color="success"
-                startIcon={
-                  <CheckCircleOutline />
-                }
-                onClick={() => handleStatusChange(row.id, "POSTED")}
+    const matchedPoId = activeHeader.purchaseInvoice?.poHeaderId || activeHeader.purchase_invoice?.poHeaderId;
+    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(matchedPoId));
+
+    const subId = activeHeader.subsidiary_id || activeHeader.vendor?.primary_subsidiary_id || vendorObj?.primary_subsidiary_id || activeHeader.bankAccount?.subsidiary_id || poObj?.subsidiary_id;
+    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subId))?.subsidiary_name || "—";
+
+    const classId = activeHeader.class_id || poObj?.class_id || poObj?.classId;
+    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classId))?.class_name || "—";
+
+    const deptId = activeHeader.department_id || poObj?.department_id || poObj?.departmentId;
+    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptId))?.department_name || "—";
+
+    const locId = activeHeader.location_id || poObj?.city_id || poObj?.cityId || poObj?.location_id;
+    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(locId))?.city_name || "—";
+
+    const bankAccObj = bankAccounts.find((b: any) => String(b.id) === String(activeHeader.bankAccountId || activeHeader.bank_account_id));
+
+    return (
+      <RecordPageLayout
+        recordType="Purchase Payment (Vendor Payment)"
+        subtitle={isView ? `Payment #${activeHeader.paymentNumber || activeHeader.payment_number || activePayment.id}` : isEdit ? `Edit Payment #${formik.values.paymentNumber}` : "Record Vendor Payment"}
+        mode={isView ? "view" : "edit"}
+        onSave={() => formik.handleSubmit()}
+        onEdit={() => { if (activePayment?.id) handleEdit(activePayment.id); }}
+        onBack={() => { setOpen(false); setViewMode("list"); setSelectedPaymentId(null); setSelectedPoId(""); setSearchParams({}); }}
+        onCancel={() => { setOpen(false); setViewMode("list"); setSelectedPaymentId(null); setSelectedPoId(""); setSearchParams({}); }}
+        onListClick={() => { setOpen(false); setViewMode("list"); setSelectedPaymentId(null); setSelectedPoId(""); setSearchParams({}); }}
+        onSearchClick={() => { setOpen(false); setViewMode("list"); setSelectedPaymentId(null); setSelectedPoId(""); setSearchParams({}); }}
+        isSaving={isCreating || isUpdating}
+        customActions={
+          isView && activePayment?.id ? (
+            <div className="flex items-center space-x-1.5">
+              <button
+                type="button"
+                onClick={() => navigate(`/purchase-return?paymentId=${activePayment.id}`)}
+                className="bg-red-700 hover:bg-red-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
               >
-                Post
-              </Button>
-              {canDelete && (
-                <IconButton
-                  size="small"
-                  color="error"
-                  title="Delete"
-                  onClick={() => {
-                    setPaymentToDelete(row);
-                    setDeleteDialogOpen(true);
-                  }}
-                >
-                  <Delete fontSize="small" />
-                </IconButton>
+                Authorize Return
+              </button>
+            </div>
+          ) : undefined
+        }
+        subTabs={isView ? [
+          {
+            id: "allocations",
+            label: "Payment Allocations",
+            badge: activeLines.length,
+            content: (
+              <div className="overflow-x-auto border border-slate-300 rounded-xs">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-[#1d3e4c] text-white font-bold uppercase text-[10px]">
+                    <tr>
+                      <th className="p-2 border-r border-slate-400 w-10 text-center">#</th>
+                      <th className="p-2 border-r border-slate-400">INVOICE LINE ID</th>
+                      <th className="p-2 border-r border-slate-400 text-right">AMOUNT PAID (₹)</th>
+                      <th className="p-2">REMARKS</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {activeLines.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-4 text-center text-slate-400 italic">No allocation lines recorded.</td>
+                      </tr>
+                    ) : (
+                      activeLines.map((l: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-2 text-center font-mono text-slate-500 border-r border-slate-200">{idx + 1}</td>
+                          <td className="p-2 border-r border-slate-200 font-mono text-slate-800">Line #{l.purchaseInvoiceLineId || l.id}</td>
+                          <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900">₹{Number(l.amountPaid || 0).toFixed(2)}</td>
+                          <td className="p-2 text-slate-600">{l.remarks || "—"}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )
+          },
+          {
+            id: "gl_impact",
+            label: "GL Impact",
+            content: (() => {
+              const payAmt = Number(activeHeader.totalAmount || activeHeader.amount || 0);
+              const pNoStr = activeHeader.paymentNumber || activeHeader.payment_number || `PAY-${activePayment.id || "NEW"}`;
+              const bankAccName = activeHeader.bankAccount?.account_name || bankAccObj?.account_name || "Bank / Cash Account";
+              const bankAccCode = activeHeader.bankAccount?.account_number || bankAccObj?.account_number || "1020";
+
+              return (
+                <GLImpactSubtab
+                  documentNumber={pNoStr}
+                  entries={[
+                    {
+                      accountCode: "2100",
+                      accountName: "Accounts Payable (Vendor Payables)",
+                      debit: payAmt,
+                      credit: 0,
+                      memo: `Vendor Payables Settlement - ${vendorName}`,
+                    },
+                    {
+                      accountCode: bankAccCode,
+                      accountName: bankAccName,
+                      debit: 0,
+                      credit: payAmt,
+                      memo: `Bank Disbursement - Payment #${pNoStr}`,
+                    },
+                  ]}
+                />
+              );
+            })()
+          }
+        ] : undefined}
+      >
+        {/* SECTION 1: PRIMARY INFORMATION */}
+        <RecordSection title="Primary Information" defaultOpen={true}>
+          <div className="col-span-full flex flex-col lg:flex-row justify-between items-start gap-6">
+            {/* Form Fields Column */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 flex-1">
+              {isView ? (
+                <>
+                  <div className="flex flex-col space-y-0.5">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase">PAYEE / VENDOR</span>
+                    <span className="text-xs font-bold text-slate-900">{vendorName}</span>
+                  </div>
+                  <div className="flex flex-col space-y-0.5">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase">PAYMENT #</span>
+                    <span className="text-xs font-bold text-slate-900">{activeHeader.paymentNumber || activeHeader.payment_number || `PAY-${selectedPayment?.id}`}</span>
+                  </div>
+                  <div className="flex flex-col space-y-0.5">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase">PAYMENT DATE</span>
+                    <span className="text-xs text-slate-800">{activeHeader.paymentDate || activeHeader.payment_date ? new Date(activeHeader.paymentDate || activeHeader.payment_date).toLocaleDateString() : "—"}</span>
+                  </div>
+                  <div className="flex flex-col space-y-0.5">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase">INVOICE REF #</span>
+                    <span className="text-xs font-semibold text-sky-800">{activeHeader.purchaseInvoice?.invoiceNumber || activeHeader.invoiceNumber || (activeHeader.purchaseInvoiceHeaderId ? `BILL-${activeHeader.purchaseInvoiceHeaderId}` : "—")}</span>
+                  </div>
+                  <div className="flex flex-col space-y-0.5">
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase">STATUS</span>
+                    <div>
+                      <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
+                        String(activeHeader.status || "DRAFT").toUpperCase() === "DRAFT"
+                          ? "bg-amber-50 text-amber-800 border-amber-300"
+                          : String(activeHeader.status || "DRAFT").toUpperCase() === "POSTED" || String(activeHeader.status || "").toUpperCase() === "APPROVED"
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                          : "bg-red-50 text-red-800 border-red-300"
+                      }`}>
+                        {activeHeader.status || "DRAFT"}
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      PAYEE / VENDOR <span className="text-amber-600">*</span>
+                    </label>
+                    <select
+                      name="vendorId"
+                      value={formik.values.vendorId || ""}
+                      onChange={(e) => handleVendorChange(e.target.value)}
+                      onBlur={formik.handleBlur}
+                      className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 ${
+                        formik.touched.vendorId && formik.errors.vendorId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
+                      }`}
+                    >
+                      <option value="">-- Select Payee / Vendor --</option>
+                      {vendors.map((v: any) => (
+                        <option key={v.id} value={v.id}>
+                          {getVendorDisplayName(v)}
+                        </option>
+                      ))}
+                    </select>
+                    {formik.touched.vendorId && formik.errors.vendorId && (
+                      <span className="text-[10px] text-red-500">{String(formik.errors.vendorId)}</span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">PURCHASE ORDER</label>
+                    <select
+                      value={selectedPoId}
+                      onChange={(e) => handlePoChange(e.target.value)}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    >
+                      <option value="">-- Select Purchase Order --</option>
+                      {vendorPOs.map((p: any) => (
+                        <option key={p.id} value={p.id}>
+                          {p.purchaseNo || `PO #${p.id}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      ACCOUNT <span className="text-amber-600">*</span>
+                    </label>
+                    <select
+                      name="bankAccountId"
+                      value={formik.values.bankAccountId || ""}
+                      onChange={formik.handleChange}
+                      onBlur={formik.handleBlur}
+                      className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 font-mono ${
+                        formik.touched.bankAccountId && formik.errors.bankAccountId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
+                      }`}
+                    >
+                      <option value="">-- Select Account --</option>
+                      {bankAccounts.map((acc: any) => (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.account_number ? `${acc.account_number} - ${acc.account_name}` : acc.account_name}
+                        </option>
+                      ))}
+                    </select>
+                    {formik.touched.bankAccountId && formik.errors.bankAccountId && (
+                      <span className="text-[10px] text-red-500">{String(formik.errors.bankAccountId)}</span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      PAYMENT AMOUNT (₹) <span className="text-amber-600">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      name="totalAmount"
+                      value={formik.values.totalAmount}
+                      onChange={formik.handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-mono font-bold text-sky-800"
+                    />
+                    {formik.touched.totalAmount && formik.errors.totalAmount && (
+                      <span className="text-[10px] text-red-500">{String(formik.errors.totalAmount)}</span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                      PAYMENT DATE <span className="text-amber-600">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      name="paymentDate"
+                      value={formik.values.paymentDate}
+                      onChange={formik.handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">CURRENCY</label>
+                    <input
+                      type="text"
+                      disabled={true}
+                      name="currency"
+                      value={formik.values.currency || "INR"}
+                      className="h-7 text-xs bg-slate-100 border border-slate-300 rounded-xs px-2 font-semibold text-slate-700 cursor-not-allowed"
+                    />
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">EXCHANGE RATE</label>
+                    <input
+                      type="text"
+                      disabled={true}
+                      name="exchangeRate"
+                      value="1.00"
+                      className="h-7 text-xs bg-slate-100 border border-slate-300 rounded-xs px-2 font-mono text-slate-700 cursor-not-allowed"
+                    />
+                  </div>
+
+                  <div className="flex flex-col space-y-1">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">STATUS</label>
+                    <select
+                      name="status"
+                      value={formik.values.status || "DRAFT"}
+                      onChange={formik.handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold"
+                    >
+                      <option value="DRAFT">DRAFT</option>
+                      <option value="POSTED">POSTED</option>
+                      <option value="CANCELLED">CANCELLED</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col space-y-1 sm:col-span-2">
+                    <label className="text-[11px] font-semibold text-[#475569] uppercase">MEMO / REMARKS</label>
+                    <input
+                      type="text"
+                      name="remarks"
+                      placeholder="Enter payment memo / remarks..."
+                      value={formik.values.remarks}
+                      onChange={formik.handleChange}
+                      className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                </>
               )}
+            </div>
+
+            {/* Exact NetSuite Right-Corner Summary Box */}
+            <div className="w-full lg:w-64 bg-[#dceef2] border border-[#75bac9] rounded-xs overflow-hidden shadow-2xs self-start justify-self-end">
+              <div className="bg-[#6fb3c5] text-white px-3 py-1 text-[11px] font-bold tracking-wider uppercase">
+                Summary
+              </div>
+              <div className="p-3 space-y-1.5 text-xs text-slate-800">
+                <div className="flex justify-between items-center text-[11px] font-semibold">
+                  <span className="text-slate-600 uppercase">VENDOR</span>
+                  <span className="font-semibold text-slate-900 truncate max-w-[120px]">{vendorName}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs font-bold text-slate-900 pt-1 border-t border-[#a8d3de]">
+                  <span className="uppercase">AMOUNT PAID</span>
+                  <span className="font-mono text-sm text-[#1e4856] font-extrabold">₹{Number(activeHeader.totalAmount || activeHeader.amount || 0).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </RecordSection>
+
+        {/* SECTION 2: CLASSIFICATION */}
+        <RecordSection title="Classification" defaultOpen={true}>
+          {isView ? (
+            <>
+              <div className="flex flex-col space-y-0.5">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase">SUBSIDIARY</span>
+                <span className="text-xs font-semibold text-slate-800">{subsidiaryName}</span>
+              </div>
+              <div className="flex flex-col space-y-0.5">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>
+                <span className="text-xs font-semibold text-slate-800">{classNameVal}</span>
+              </div>
+              <div className="flex flex-col space-y-0.5">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase">DEPARTMENT</span>
+                <span className="text-xs font-semibold text-slate-800">{deptNameVal}</span>
+              </div>
+              <div className="flex flex-col space-y-0.5">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase">LOCATION</span>
+                <span className="text-xs font-semibold text-slate-800">{locNameVal}</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col space-y-1">
+                <label className="text-[11px] font-semibold text-[#475569] uppercase">SUBSIDIARY</label>
+                <select
+                  disabled={true}
+                  name="subsidiary_id"
+                  value={formik.values.subsidiary_id || ""}
+                  onChange={formik.handleChange}
+                  className="h-7 text-xs bg-slate-100 border border-slate-300 rounded-xs px-2 text-slate-700 cursor-not-allowed font-medium"
+                >
+                  <option value="">-- Auto-filled from PO/Vendor --</option>
+                  {subsidiaries.map((s: any) => (
+                    <option key={s.id} value={s.id}>
+                      {s.subsidiary_name || s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col space-y-1">
+                <label className="text-[11px] font-semibold text-[#475569] uppercase">CLASS</label>
+                <select
+                  disabled={true}
+                  name="class_id"
+                  value={formik.values.class_id || ""}
+                  onChange={formik.handleChange}
+                  className="h-7 text-xs bg-slate-100 border border-slate-300 rounded-xs px-2 text-slate-700 cursor-not-allowed font-medium"
+                >
+                  <option value="">-- Auto-filled from PO --</option>
+                  {classesList.map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.class_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col space-y-1">
+                <label className="text-[11px] font-semibold text-[#475569] uppercase">DEPARTMENT</label>
+                <select
+                  disabled={true}
+                  name="department_id"
+                  value={formik.values.department_id || ""}
+                  onChange={formik.handleChange}
+                  className="h-7 text-xs bg-slate-100 border border-slate-300 rounded-xs px-2 text-slate-700 cursor-not-allowed font-medium"
+                >
+                  <option value="">-- Auto-filled from PO --</option>
+                  {departmentsList.map((d: any) => (
+                    <option key={d.id} value={d.id}>
+                      {d.department_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col space-y-1">
+                <label className="text-[11px] font-semibold text-[#475569] uppercase">LOCATION</label>
+                <select
+                  disabled={true}
+                  name="location_id"
+                  value={formik.values.location_id || ""}
+                  onChange={formik.handleChange}
+                  className="h-7 text-xs bg-slate-100 border border-slate-300 rounded-xs px-2 text-slate-700 cursor-not-allowed font-medium"
+                >
+                  <option value="">-- Auto-filled from PO --</option>
+                  {citiesList.map((c: any) => (
+                    <option key={c.id} value={c.id}>
+                      {c.city_name || c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </>
           )}
-          {row.status === "POSTED" && (
-            <Button
-              size="small"
-              variant="outlined"
-              color="error"
-              startIcon={<Cancel />}
-              onClick={() =>
-                handleStatusChange(row.id, "CANCELLED")
-              }
-            >
-              Cancel
-            </Button>
-          )}
-        </Box>
-      ),
-    },
-  ];
+        </RecordSection>
+      </RecordPageLayout>
+    );
+  }
 
+  // ── RENDER 2: DATAGRID LIST VIEW MODE ──
   return (
-    <Box
-      sx={{
-        width: "100%",
-        maxWidth: {
-          sm: "100%",
-          md: "1810px",
-        },
-      }}
-    >
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          mb: 2,
-        }}
-      >
-        <Box>
-          <Typography
-            variant="h5"
-            fontWeight="bold"
-          >
-            Purchase Payment (Vendor Payment)
-          </Typography>
-          <NavbarBreadcrumbs />
-        </Box>
-        {canCreate && (
-          <Button
-            variant="contained"
-            startIcon={<Add />}
+    <div className="flex flex-col space-y-3 p-4 bg-slate-50 min-h-screen font-sans text-slate-800">
+      {/* Top Header Title & Action Links */}
+      <div className="flex items-center justify-between pb-1 border-b border-slate-300">
+        <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">Purchase Payments (Vendor Payments)</h1>
+        <div className="flex items-center space-x-2 text-xs font-semibold">
+          <button
             onClick={() => {
+              setOpen(false);
+              setViewMode("list");
+              setSelectedPaymentId(null);
+              setSelectedPoId("");
+              setSearchParams({});
+            }}
+            className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1"
+          >
+            <ListIcon className="!w-3.5 !h-3.5" />
+            <span>List</span>
+          </button>
+          <span className="text-slate-300">|</span>
+          <button
+            onClick={() => {
+              setOpen(false);
+              setViewMode("list");
+              setSelectedPaymentId(null);
+              setSelectedPoId("");
+              setSearchParams({});
+            }}
+            className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1"
+          >
+            <Search className="!w-3.5 !h-3.5" />
+            <span>Search</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between border-b border-slate-300 pb-2 bg-white p-3 rounded-xs shadow-2xs">
+        <div>
+          <p className="text-xs text-slate-500 font-medium">Record and track vendor bill payments and disbursements</p>
+        </div>
+
+        {canCreate("purchase_payment") && (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(true);
+              setViewMode("form");
               setIsEdit(false);
               setEditId(null);
               formik.resetForm();
-              setOpen(true);
             }}
+            className="bg-[#0070d2] hover:bg-blue-700 text-white text-xs font-semibold px-3.5 py-1.5 rounded-xs border border-blue-800 shadow-2xs transition-colors flex items-center space-x-1"
           >
-            New Payment
-          </Button>
+            <Add className="!w-4 !h-4" />
+            <span>Record Payment</span>
+          </button>
         )}
-      </Box>
-      <Paper
-        sx={{
-          width: "100%",
-          overflow: "hidden",
-        }}
-      >
-        <DynamicTable
-          columns={columns}
-          data={payments}
-          getRowId={(row: any) => String(row.id || row._id)}
-        />
-      </Paper>
-      <Dialog
-        open={isOpen}
-        onClose={() => setOpen(false)}
-        maxWidth="xl"
-        fullWidth
-      >
-        <DialogTitle
-          sx={{
-            fontWeight: "bold",
-            borderBottom: "1px solid #eee",
-          }}
-        >
-          {isEdit ? "Edit Purchase Payment" : "Create New Purchase Payment"}
-        </DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          <form onSubmit={formik.handleSubmit}>
-            <Typography
-              variant="h6"
-              fontWeight="bold"
-              sx={{ mt: 1, mb: 2 }}
-            >
-              Payment & Bill Details
-            </Typography>
-            <Grid
-              container
-              spacing={2}
-            >
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl
-                  fullWidth
-                  size="small"
-                  error={formik.touched.purchaseInvoiceHeaderId &&
-                    Boolean(formik.errors.purchaseInvoiceHeaderId)
-                  }
-                >
-                  <FormLabel>
-                    Purchase Invoice *
-                  </FormLabel>
-                  <Select
-                    name="purchaseInvoiceHeaderId"
-                    value={formik.values.purchaseInvoiceHeaderId}
-                    onChange={(e) => handleInvoiceSelect(e.target.value)}
-                    displayEmpty
-                    renderValue={(selected) => {
-                      if (!selected) {
-                        return <span style={{ color: "#888" }}>Select Purchase Invoice</span>;
-                      }
-                      const found = allInvoices.find((inv: any) => String(inv.id) === String(selected));
-                      return found ? (found.invoiceNumber || `Invoice #${found.id}`) : String(selected);
-                    }}
-                  >
-                    <MenuItem value="">
-                      <em>Select Purchase Invoice</em>
-                    </MenuItem>
-                    {allInvoices?.filter((inv: any) => inv.status === "POSTED" || inv.status === "PARTIAL_PAID")
-                      .filter((inv: any) => inv.balanceAmount === undefined || Number(inv.balanceAmount) > 0
-                      ).map((invoice: any) => (
-                        <MenuItem
-                          key={invoice.id}
-                          value={invoice.id}
-                        >
-                          {invoice.invoiceNumber || `Invoice #${invoice.id}`}
-                          {" — "} ₹ {Number(invoice.balanceAmount ?? invoice.totalAmount ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, })}
-                        </MenuItem>
-                      ))}
-                  </Select>
-                  {formik.touched.purchaseInvoiceHeaderId && (
-                    <FormHelperText>
-                      {formik.errors.purchaseInvoiceHeaderId}
-                    </FormHelperText>
-                  )}
-                </FormControl>
-              </Grid>
+      </div>
 
-              {/* Bill Details Fields - Only appear when Purchase Invoice is selected */}
-              {Boolean(formik.values.purchaseInvoiceHeaderId) && (
-                <>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Invoice Number</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="Auto-populated"
-                        value={formik.values.invoiceNumber}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Vendor Invoice Number</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="Auto-populated"
-                        value={formik.values.vendorInvoiceNumber}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Vendor</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="Auto-populated"
-                        value={formik.values.vendorName}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Invoice Date</FormLabel>
-                      <TextField
-                        type="date"
-                        size="small"
-                        value={formik.values.invoiceDate}
-                        disabled
-                        InputLabelProps={{
-                          shrink: true,
-                        }}
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Purchase Order</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="Auto-populated"
-                        value={formik.values.purchaseOrderNumber}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Invoice Total</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="₹0.00"
-                        value={`₹${Number(formik.values.invoiceTotalAmount || 0).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}`}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Already Paid</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="₹0.00"
-                        value={`₹${Number(formik.values.invoicePaidAmount || 0).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}`}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Balance Due</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="₹0.00"
-                        value={`₹${Number(formik.values.invoiceBalanceAmount || 0).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}`}
-                        disabled
-                        sx={{ "& .MuiInputBase-input": { fontWeight: "bold" } }}
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Currency</FormLabel>
-                      <TextField
-                        size="small"
-                        placeholder="INR"
-                        value={formik.values.currency}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Exchange Rate</FormLabel>
-                      <TextField
-                        type="number"
-                        size="small"
-                        placeholder="1"
-                        value={formik.values.exchangeRate}
-                        disabled
-                      />
-                    </FormControl>
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 4 }}>
-                    <FormControl fullWidth>
-                      <FormLabel>Invoice Status</FormLabel>
-                      <Box sx={{ mt: 0.5, display: "flex", alignItems: "center", minHeight: 40 }}>
-                        {formik.values.invoiceStatus ? (
-                          <Chip
-                            label={formik.values.invoiceStatus}
-                            color={
-                              formik.values.invoiceStatus === "POSTED" || formik.values.invoiceStatus === "PAID"
-                                ? "success"
-                                : formik.values.invoiceStatus === "PARTIALLY_PAID" || formik.values.invoiceStatus === "APPROVED"
-                                  ? "warning"
-                                  : formik.values.invoiceStatus === "CANCELLED"
-                                    ? "error"
-                                    : "primary"
-                            }
-                            size="small"
-                            sx={{ fontWeight: "bold" }}
-                          />
+      <div className="bg-white border border-slate-300 rounded-xs shadow-2xs overflow-hidden">
+        <table className="w-full text-left text-xs border-collapse">
+          <thead className="bg-[#244b5a] text-white font-bold uppercase text-[10px]">
+            <tr>
+              <th className="p-2.5 border-r border-slate-400">Payment #</th>
+              <th className="p-2.5 border-r border-slate-400">Bill Ref #</th>
+              <th className="p-2.5 border-r border-slate-400">Vendor</th>
+              <th className="p-2.5 border-r border-slate-400">Payment Date</th>
+              <th className="p-2.5 border-r border-slate-400 text-right">Amount Paid</th>
+              <th className="p-2.5 border-r border-slate-400 text-center">Status</th>
+              <th className="p-2.5 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {payments.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="p-8 text-center text-slate-500 font-medium">
+                  No Vendor Payments found. Click "Record Payment" to create one.
+                </td>
+              </tr>
+            ) : (
+              payments.map((p: any) => {
+                const header = p.header ?? p;
+                const amt = Number(header.totalAmount || header.amount || 0);
+
+                return (
+                  <tr key={p.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="p-2.5 border-r border-slate-200 font-mono text-sky-700 font-semibold">
+                      <button onClick={() => handleView(p.id)} className="hover:underline text-left">
+                        {header.paymentNumber || header.payment_number || `PAY-${p.id}`}
+                      </button>
+                    </td>
+                    <td className="p-2.5 border-r border-slate-200 font-mono text-slate-700">
+                      {header.invoiceNumber || (header.purchase_invoice_header_id ? `BILL-${header.purchase_invoice_header_id}` : "—")}
+                    </td>
+                    <td className="p-2.5 border-r border-slate-200 font-medium text-slate-900">
+                      {header.vendor?.vendor_name || header.vendorName || "—"}
+                    </td>
+                    <td className="p-2.5 border-r border-slate-200 text-slate-700">
+                      {header.paymentDate || header.payment_date ? new Date(header.paymentDate || header.payment_date).toLocaleDateString() : "—"}
+                    </td>
+                    <td className="p-2.5 border-r border-slate-200 text-right font-mono font-bold text-slate-900">
+                      ₹{amt.toFixed(2)}
+                    </td>
+                    <td className="p-2.5 border-r border-slate-200 text-center">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        String(header.status || "DRAFT").toUpperCase() === "DRAFT"
+                          ? "bg-amber-100 text-amber-800 border border-amber-200"
+                          : String(header.status || "DRAFT").toUpperCase() === "POSTED" || String(header.status || "").toUpperCase() === "APPROVED"
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                          : "bg-red-100 text-red-800 border border-red-200"
+                      }`}>
+                        {header.status || "DRAFT"}
+                      </span>
+                    </td>
+                    <td className="p-2.5 text-right space-x-2 font-semibold text-[11px]">
+                      <button onClick={() => handleView(p.id)} className="text-slate-600 hover:text-sky-700 hover:underline">
+                        View
+                      </button>
+                      <button onClick={() => navigate(`/purchase-return?paymentId=${p.id}`)} className="text-red-600 hover:underline">
+                        Return
+                      </button>
+                      {canUpdate("purchase_payment") && (
+                        String(header.status || "DRAFT").toUpperCase() === "DRAFT" ? (
+                          <button onClick={() => handleEdit(p.id)} className="text-sky-600 hover:underline">
+                            Edit
+                          </button>
                         ) : (
-                          <Typography variant="body2" color="text.secondary">
-                            -
-                          </Typography>
-                        )}
-                      </Box>
-                    </FormControl>
-                  </Grid>
-                </>
-              )}
-            </Grid>
-
-            <Divider sx={{ my: 3 }} />
-
-            <Typography
-              variant="h6"
-              fontWeight="bold"
-              sx={{ mb: 2 }}
-            > Payment Details</Typography>
-
-            <Grid container spacing={2}>
-              {/* 1. Payment Number */}
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Payment Number</FormLabel>
-                  <TextField
-                    name="paymentNumber"
-                    size="small"
-                    placeholder="Enter Payment Number (e.g. PAY-123456)"
-                    value={formik.values.paymentNumber}
-                    onChange={formik.handleChange}
-                    error={formik.touched.paymentNumber && Boolean(formik.errors.paymentNumber)}
-                  />
-                </FormControl>
-              </Grid>
-
-              {/* 2. Reference / UTR / Cheque No */}
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Reference / UTR / Cheque No</FormLabel>
-                  <TextField
-                    name="referenceNo"
-                    size="small"
-                    placeholder="Enter Reference / UTR / Cheque No (e.g. UTR12345678)"
-                    value={formik.values.referenceNo}
-                    onChange={formik.handleChange}
-                  />
-                </FormControl>
-              </Grid>
-
-              {/* 3. Payment Amount */}
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Payment Amount *</FormLabel>
-                  <TextField
-                    type="number"
-                    name="totalAmount"
-                    size="small"
-                    placeholder="Enter Payment Amount"
-                    value={formik.values.totalAmount}
-                    onChange={(e) => handlePaymentAmountChange(e.target.value)}
-                    inputProps={{
-                      min: 0,
-                      step: "any",
-                      max: formik.values.invoiceBalanceAmount,
-                    }}
-                    error={formik.touched.totalAmount && Boolean(formik.errors.totalAmount)}
-                    helperText={
-                      formik.touched.totalAmount
-                        ? formik.errors.totalAmount
-                        : `Maximum payable: ₹${Number(
-                          formik.values.invoiceBalanceAmount || 0).toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}`
-                    }
-                  />
-                </FormControl>
-              </Grid>
-
-              {/* 4. Payment Date */}
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Payment Date *</FormLabel>
-                  <TextField
-                    type="date"
-                    name="paymentDate"
-                    size="small"
-                    value={formik.values.paymentDate}
-                    onChange={formik.handleChange}
-                    error={formik.touched.paymentDate && Boolean(formik.errors.paymentDate)}
-                  />
-                </FormControl>
-              </Grid>
-
-              {/* 5. Payment Method */}
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl fullWidth size="small" error={formik.touched.paymentMethodId && Boolean(formik.errors.paymentMethodId)}>
-                  <FormLabel>Payment Method *</FormLabel>
-                  <Select
-                    name="paymentMethodId"
-                    value={formik.values.paymentMethodId || ""}
-                    onChange={formik.handleChange}
-                    displayEmpty
-                    renderValue={(selected) => {
-                      if (!selected) {
-                        return <span style={{ color: "#888" }}>Select Payment Method</span>;
-                      }
-                      const found = paymentMethods.find((pay: any) => String(pay.id) === String(selected));
-                      return found ? found.name : String(selected);
-                    }}
-                  >
-                    <MenuItem value="">
-                      <em>Select Payment Method</em>
-                    </MenuItem>
-                    {paymentMethods?.map((pay: any) => (
-                      <MenuItem key={pay?.id} value={pay?.id}>
-                        {pay?.name}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              {/* 6. Paying Bank / Cash Account */}
-              <Grid size={{ xs: 12, md: 4 }}>
-                <FormControl
-                  fullWidth
-                  size="small"
-                  error={formik.touched.bankAccountId && Boolean(formik.errors.bankAccountId)}
-                >
-                  <FormLabel>Paying Bank / Cash Account *</FormLabel>
-                  <Select
-                    name="bankAccountId"
-                    value={formik.values.bankAccountId || ""}
-                    onChange={formik.handleChange}
-                    displayEmpty
-                    renderValue={(selected) => {
-                      if (!selected) {
-                        return <span style={{ color: "#888" }}>Select Bank / Cash Account</span>;
-                      }
-                      const found = bankAccounts.find((acc: any) => String(acc.id) === String(selected));
-                      return found ? `${found.account_name} (${found.account_number})` : String(selected);
-                    }}
-                  >
-                    <MenuItem value="">
-                      <em>Select Bank / Cash Account</em>
-                    </MenuItem>
-                    {bankAccounts?.map((acc: any) => (
-                      <MenuItem key={acc?.id} value={acc?.id}>
-                        {acc?.account_name} ({acc?.account_number})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-
-              {/* 7. Remarks */}
-              <Grid size={{ xs: 12 }}>
-                <FormControl fullWidth>
-                  <FormLabel>Remarks</FormLabel>
-                  <TextField
-                    name="remarks"
-                    size="small"
-                    multiline
-                    rows={2}
-                    placeholder="Enter payment remarks..."
-                    value={formik.values.remarks}
-                    onChange={formik.handleChange}
-                  />
-                </FormControl>
-              </Grid>
-            </Grid>
-
-
-
-            <Divider sx={{ my: 3 }} />
-
-            <Typography
-              variant="h6"
-              fontWeight="bold"
-              sx={{ mb: 2 }}
-            >Payment Allocation</Typography>
-            <TableContainer
-              component={Paper}
-              variant="outlined"
-            >
-              <Table size="small">
-                <TableHead
-                  sx={{ backgroundColor: "#f5f5f5" }}
-                >
-                  <TableRow>
-                    <TableCell>Purchase Invoice</TableCell>
-                    <TableCell>Invoice Total</TableCell>
-                    <TableCell>Balance Due</TableCell>
-                    <TableCell>Payment Amount</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {formik.values.purchaseInvoiceHeaderId ? (
-                    <TableRow>
-                      <TableCell>
-                        <Typography fontWeight="bold">{formik.values.invoiceNumber}</Typography>
-                      </TableCell>
-                      <TableCell>
-                        ₹{Number(formik.values.invoiceTotalAmount || 0).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        }
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ color: "error.main", fontWeight: "bold", }}>
-                        ₹
-                        {Number(formik.values.invoiceBalanceAmount || 0).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        }
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ color: "success.main", fontWeight: "bold" }}>
-                        ₹{Number(formik.values.totalAmount || 0).toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        }
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        align="center"
-                      >
-                        <Typography color="text.secondary">
-                          Select a Purchase
-                          Invoice to
-                          create payment
-                          allocation.
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            <Box
-              sx={{
-                mt: 3,
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 2,
-              }}
-            >
-              <Button
-                onClick={() => setOpen(false)}
-                color="inherit"
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                variant="contained"
-                color="primary"
-                disabled={!formik.values.purchaseInvoiceHeaderId}
-              >
-                {isEdit ? "Update Payment" : "Save Payment"}
-              </Button>
-            </Box>
-          </form>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={viewModalOpen}
-        onClose={() => setViewModalOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle sx={{ fontWeight: "bold", borderBottom: "1px solid #eee" }}>Payment Details - {selectedPayment?.paymentNumber || "-"}</DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          {selectedPayment && (
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Payment Number</Typography>
-                <Typography fontWeight="bold">{selectedPayment.paymentNumber || "-"}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Purchase Invoice</Typography>
-                <Typography fontWeight="bold">
-                  {selectedPayment.purchaseInvoice?.invoiceNumber ||
-                    selectedPayment.lines?.[0]?.purchaseInvoice?.invoiceNumber ||
-                    selectedPayment.invoiceNumber ||
-                    (selectedPayment.purchaseInvoiceHeaderId ? `Invoice #${selectedPayment.purchaseInvoiceHeaderId}` : "-")}
-                </Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Vendor Invoice No</Typography>
-                <Typography fontWeight="bold">
-                  {selectedPayment.purchaseInvoice?.vendorInvoiceNumber || selectedPayment.vendorInvoiceNumber || "-"}
-                </Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Vendor</Typography>
-                <Typography fontWeight="bold">
-                  {selectedPayment.vendor?.vendor_name || selectedPayment.vendor?.vendorName || selectedPayment.vendorName || "-"}
-                </Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Payment Date</Typography>
-                <Typography fontWeight="bold">
-                  {selectedPayment.paymentDate ? selectedPayment.paymentDate.slice(0, 10) : "-"}
-                </Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Payment Method</Typography>
-                <Typography fontWeight="bold">
-                  {selectedPayment.paymentMethod?.name || selectedPayment.paymentMethodId || "-"}
-                </Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Reference / UTR</Typography>
-                <Typography fontWeight="bold">{selectedPayment.referenceNo || "-"}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Status</Typography>
-                <Box>
-                  <Chip label={selectedPayment.status || "-"} color="primary" size="small" />
-                </Box>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Total Amount</Typography>
-                <Typography fontWeight="bold" color="success.main">
-                  ₹{Number(selectedPayment.totalAmount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
-                </Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 4 }}>
-                <Typography variant="caption" color="text.secondary">Currency</Typography>
-                <Typography fontWeight="bold">{selectedPayment.currency || "INR"}</Typography>
-              </Grid>
-
-              <Grid size={{ xs: 12 }}>
-                <Divider sx={{ my: 2 }} />
-
-                <Typography variant="h6" fontWeight="bold" sx={{ mb: 1 }}>
-                  Allocated Invoice
-                </Typography>
-
-                <TableContainer component={Paper} variant="outlined">
-                  <Table size="small">
-                    <TableHead sx={{ backgroundColor: "#f5f5f5" }}>
-                      <TableRow>
-                        <TableCell>Invoice #</TableCell>
-                        <TableCell align="right">Amount Paid</TableCell>
-                        <TableCell>Remarks</TableCell>
-                      </TableRow>
-                    </TableHead>
-
-                    <TableBody>
-                      {selectedPayment.lines && selectedPayment.lines.length > 0 ? (
-                        selectedPayment.lines.map((line: any, idx: number) => (
-                          <TableRow key={idx}>
-                            <TableCell sx={{ fontWeight: "bold" }}>
-                              {selectedPayment.purchaseInvoice?.invoiceNumber ||
-                                line.purchaseInvoice?.invoiceNumber ||
-                                line.invoiceNumber ||
-                                (line.purchaseInvoiceHeaderId ? `Invoice #${line.purchaseInvoiceHeaderId}` : `Line #${idx + 1}`)}
-                            </TableCell>
-                            <TableCell align="right" sx={{ fontWeight: "bold", color: "success.main" }}>
-                              ₹{Number(line.amountPaid || selectedPayment.totalAmount || 0).toLocaleString("en-IN", {
-                                minimumFractionDigits: 2,
-                              })}
-                            </TableCell>
-                            <TableCell>{line.remarks || selectedPayment.remarks || "-"}</TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell sx={{ fontWeight: "bold" }}>
-                            {selectedPayment.purchaseInvoice?.invoiceNumber ||
-                              selectedPayment.invoiceNumber ||
-                              (selectedPayment.purchaseInvoiceHeaderId ? `Invoice #${selectedPayment.purchaseInvoiceHeaderId}` : "-")}
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: "bold", color: "success.main" }}>
-                            ₹{Number(selectedPayment.totalAmount || 0).toLocaleString("en-IN", {
-                              minimumFractionDigits: 2,
-                            })}
-                          </TableCell>
-                          <TableCell>{selectedPayment.remarks || "-"}</TableCell>
-                        </TableRow>
+                          <span className="text-slate-300 cursor-not-allowed" title="Only DRAFT payments can be edited">Edit</span>
+                        )
                       )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Grid>
-            </Grid>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setViewModalOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+                      {canDelete("purchase_payment") && (
+                        <button
+                          onClick={() => {
+                            setPaymentToDelete(p);
+                            setDeleteDialogOpen(true);
+                          }}
+                          className="text-red-600 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
-      {/* GL Impact Modal */}
-      <Dialog open={glImpactOpen} onClose={() => setGlImpactOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>GL Impact - Payment Disbursement Voucher</DialogTitle>
-        <DialogContent dividers>
-          <Box sx={{ py: 1 }}>
-            <Typography variant="subtitle2" color="text.secondary" mb={2}>
-              GL posting breakdown for vendor <strong>{glVendorName}</strong>:
-            </Typography>
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead sx={{ bgcolor: "grey.100" }}>
-                  <TableRow>
-                    <TableCell>Account</TableCell>
-                    <TableCell>Description</TableCell>
-                    <TableCell align="right">Debit (DR)</TableCell>
-                    <TableCell align="right">Credit (CR)</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {isJournalLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={4} align="center">
-                        Loading GL entries...
-                      </TableCell>
-                    </TableRow>
-                  ) : journalEntriesData?.result?.lines?.length ? (
-                    <>
-                      {journalEntriesData.result.lines.map((line: any, idx: number) => (
-                        <TableRow key={line.id || idx}>
-                          <TableCell>
-                            <strong>
-                              {line.account ? `${line.account.account_number} - ${line.account.account_name}` : line.account_name || `Account #${line.account_id}`}
-                            </strong>
-                          </TableCell>
-                          <TableCell>{line.narration || line.memo || line.description || "-"}</TableCell>
-                          <TableCell align="right" sx={{ color: Number(line.debit_amount || line.debit) > 0 ? "success.main" : "inherit", fontWeight: Number(line.debit_amount || line.debit) > 0 ? "bold" : "normal" }}>
-                            {Number(line.debit_amount || line.debit || 0) > 0
-                              ? `₹${Number(line.debit_amount || line.debit).toLocaleString()}`
-                              : "-"}
-                          </TableCell>
-                          <TableCell align="right" sx={{ color: Number(line.credit_amount || line.credit) > 0 ? "error.main" : "inherit", fontWeight: Number(line.credit_amount || line.credit) > 0 ? "bold" : "normal" }}>
-                            {Number(line.credit_amount || line.credit || 0) > 0
-                              ? `₹${Number(line.credit_amount || line.credit).toLocaleString()}`
-                              : "-"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                      <TableRow sx={{ bgcolor: "grey.100" }}>
-                        <TableCell colSpan={2} align="right">
-                          <strong>Total</strong>
-                        </TableCell>
-                        <TableCell align="right">
-                          <strong>
-                            ₹{Number(journalEntriesData?.result?.total_debit ?? 0).toLocaleString()}
-                          </strong>
-                        </TableCell>
-                        <TableCell align="right">
-                          <strong>
-                            ₹{Number(journalEntriesData?.result?.total_credit ?? 0).toLocaleString()}
-                          </strong>
-                        </TableCell>
-                      </TableRow>
-                    </>
-                  ) : (
-                    <>
-                      <TableRow>
-                        <TableCell><strong>Accounts Payable - {glVendorName}</strong></TableCell>
-                        <TableCell>Reducing vendor liability</TableCell>
-                        <TableCell align="right" sx={{ color: "success.main", fontWeight: "bold" }}>
-                          ₹{Number(selectedPaymentForGl?.totalAmount || 0).toLocaleString()}
-                        </TableCell>
-                        <TableCell align="right">-</TableCell>
-                      </TableRow>
-                      <TableRow>
-                        <TableCell>
-                          <strong>
-                            {selectedPaymentForGl?.bankAccount
-                              ? `${selectedPaymentForGl.bankAccount.account_name} (${selectedPaymentForGl.bankAccount.account_number})`
-                              : selectedPaymentForGl?.paymentMethod?.name
-                                ? `${selectedPaymentForGl.paymentMethod.name} Account`
-                                : "Bank / Cash Account"}
-                          </strong>
-                        </TableCell>
-                        <TableCell>Outward payment disbursement</TableCell>
-                        <TableCell align="right">-</TableCell>
-                        <TableCell align="right" sx={{ color: "error.main", fontWeight: "bold" }}>
-                          ₹{Number(selectedPaymentForGl?.totalAmount || 0).toLocaleString()}
-                        </TableCell>
-                      </TableRow>
-                    </>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        </DialogContent>
-        <Box sx={{ p: 2, display: "flex", justifyContent: "flex-end" }}>
-          <Button onClick={() => setGlImpactOpen(false)}>Close</Button>
-        </Box>
-      </Dialog>
-
-      {/* =====================================================
-          DELETE CONFIRMATION
-      ===================================================== */}
-
-      <Dialog
+      <ConfirmationDialog
         open={deleteDialogOpen}
-        onClose={() =>
-          setDeleteDialogOpen(false)
-        }
-      >
-        <DialogTitle>
-          Confirm Delete
-        </DialogTitle>
-
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete
-            payment record{" "}
-            <strong>
-              {
-                paymentToDelete?.paymentNumber
-              }
-            </strong>
-            ?
-          </Typography>
-
-          <Box
-            sx={{
-              mt: 3,
-              display: "flex",
-              justifyContent:
-                "flex-end",
-              gap: 2,
-            }}
-          >
-            <Button
-              onClick={() =>
-                setDeleteDialogOpen(false)
-              }
-            >
-              Cancel
-            </Button>
-
-            <Button
-              onClick={handleDelete}
-              color="error"
-              variant="contained"
-            >
-              Delete
-            </Button>
-          </Box>
-        </DialogContent>
-      </Dialog>
-    </Box>
+        title="Delete Vendor Payment"
+        message="Are you sure you want to delete this payment? This action cannot be undone."
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
+    </div>
   );
 }

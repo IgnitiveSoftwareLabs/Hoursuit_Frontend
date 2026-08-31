@@ -1,366 +1,494 @@
-import React, { useState } from "react";
-
-import { Add } from "@mui/icons-material";
-import toast from "react-hot-toast";
+import React, { useState, useEffect } from "react";
+import { CircularProgress } from "@mui/material";
+import { Add, List as ListIcon, GetApp, Print } from "@mui/icons-material";
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import {
-  Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  FormHelperText,
-  FormLabel,
-  InputAdornment,
-  MenuItem,
-  Select,
-  Switch,
-  TextField,
-  Typography,
-  CircularProgress,
-  FormControlLabel,
-} from "@mui/material";
+import toast from "react-hot-toast";
+import { useSearchParams } from "react-router-dom";
 
-import ConfirmationDialog from "./Dialog/ConfirmationDialog";
-import { usePermissions } from "../Hooks/usePermissions";
-import NavbarBreadcrumbs from "./NavbarBreadcrumbs";
 import {
   useCreateItemGroupMutation,
   useDeleteItemGroupMutation,
   useGetItemGroupsQuery,
+  useGetItemGroupByIdQuery,
   useUpdateItemGroupMutation,
 } from "../RTK/services/itemGroupApi";
 import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
-import DynamicTable from "./Tables";
 
-interface ItemGroupType {
+import ConfirmationDialog from "../components/Dialog/ConfirmationDialog";
+import { usePermissions } from "../Hooks/usePermissions";
+import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
+
+interface ItemGroupFormValues {
   id?: number;
   item_group_code: string;
   item_group_name: string;
-  subsidiary_id?: number | null;
-  isActive?: boolean;
-  base_rate: number;
-  subsidiary?: { subsidiary_name: string } | null;
+  subsidiary_id?: number | string | null;
+  isActive: boolean;
 }
 
 const ItemGroupComp: React.FC = () => {
-  const { canCreate, canRead, canUpdate, canDelete, isAdmin } = usePermissions();
+  const { canCreate, canRead, canUpdate, canDelete } = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [isDeleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
-  const [isOpen, setOpen] = useState<boolean>(false);
-  const [isEdit, setIsEdit] = useState<boolean>(false);
-  const [editItemGroupId, setEditItemGroupId] = useState<number | null>(null);
-  const [deleteItemGroupId, setDeleteItemGroupId] = useState<number | null>(null);
+  // Mode: 'list' | 'view' | 'form'
+  const [viewMode, setViewMode] = useState<"list" | "view" | "form">("list");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<any | null>(null);
+  const [isEdit, setIsEdit] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const { data: response, isLoading, refetch } = useGetItemGroupsQuery() as {
-    data: { result: ItemGroupType[] } | undefined;
-    isLoading: boolean;
-    refetch: () => void;
-  };
+  const { data: itemGroupsData, isLoading } = useGetItemGroupsQuery();
+  const { data: singleRecordData, isLoading: isSingleLoading } = useGetItemGroupByIdQuery(selectedId!, {
+    skip: !selectedId || viewMode !== "view",
+  });
+  const { data: subsidiariesData } = useGetSubsidiariesQuery();
 
-  const itemGroups = response?.result || [];
-  const sortedItemGroups = [...itemGroups].sort((a, b) => (a.id || 0) - (b.id || 0));
-  const { data: subsidiariesResponse } = useGetSubsidiariesQuery();
-
-  const [createItemGroup, { isLoading: creating }] = useCreateItemGroupMutation();
-  const [updateItemGroup, { isLoading: updating }] = useUpdateItemGroupMutation();
+  const [createItemGroup, { isLoading: isCreating }] = useCreateItemGroupMutation();
+  const [updateItemGroup, { isLoading: isUpdating }] = useUpdateItemGroupMutation();
   const [deleteItemGroup] = useDeleteItemGroupMutation();
 
-  const formik = useFormik<{
-    item_group_code: string;
-    item_group_name: string;
-    subsidiary_id?: number | null;
-    isActive: boolean;
-    base_rate: number;
-  }>({
+  const rawRecords = Array.isArray(itemGroupsData?.result)
+    ? itemGroupsData.result
+    : Array.isArray(itemGroupsData?.data)
+    ? itemGroupsData.data
+    : Array.isArray(itemGroupsData)
+    ? itemGroupsData
+    : [];
+
+  const rawSubsidiaries = Array.isArray(subsidiariesData?.result)
+    ? subsidiariesData.result
+    : Array.isArray(subsidiariesData?.data)
+    ? subsidiariesData.data
+    : Array.isArray(subsidiariesData)
+    ? subsidiariesData
+    : [];
+
+  const formik = useFormik<ItemGroupFormValues>({
     initialValues: {
       item_group_code: "",
       item_group_name: "",
-      subsidiary_id: null,
+      subsidiary_id: "",
       isActive: true,
-      base_rate: 0,
     },
     validationSchema: Yup.object({
-      item_group_code: Yup.string().required("Item group code is required"),
-      item_group_name: Yup.string().required("Item group name is required"),
-      base_rate: Yup.number().required("Base rate is required").min(0, "Base rate must be >= 0"),
+      item_group_code: Yup.string()
+        .min(2, "Code must be at least 2 characters")
+        .max(50, "Code must be at most 50 characters")
+        .required("Item Group Code is required"),
+      item_group_name: Yup.string()
+        .min(2, "Group Name must be at least 2 characters")
+        .max(100, "Group Name must be at most 100 characters")
+        .required("Item Group Name is required"),
+      subsidiary_id: Yup.mixed().optional().nullable(),
+      isActive: Yup.boolean(),
     }),
-    onSubmit: async (values, { resetForm }) => {
+    onSubmit: async (values) => {
       try {
-        const payload: any = {
-          item_group_code: values.item_group_code.trim(),
-          item_group_name: values.item_group_name.trim(),
-          subsidiary_id: values.subsidiary_id,
-          base_rate: values.base_rate,
+        const payload = {
+          item_group_code: values.item_group_code,
+          item_group_name: values.item_group_name,
+          subsidiary_id: values.subsidiary_id ? Number(values.subsidiary_id) : null,
           isActive: values.isActive,
         };
 
-        if (isEdit && editItemGroupId) {
-          if (!canUpdate("item_group")) {
-            toast.error("No permission to update");
+        if (isEdit && editId) {
+          if (!canUpdate("itemGroup")) {
+            toast.error("You do not have permission to update item groups");
             return;
           }
-          await updateItemGroup({ id: editItemGroupId, payload }).unwrap();
-          toast.success("Item group updated successfully");
+          const response = await updateItemGroup({ id: editId, payload }).unwrap();
+          toast.success(response.message || "Item Group updated successfully");
         } else {
-          if (!canCreate("item_group")) {
-            toast.error("No permission to create");
+          if (!canCreate("itemGroup")) {
+            toast.error("You do not have permission to create item groups");
             return;
           }
-          await createItemGroup(payload).unwrap();
-          toast.success("Item group created successfully");
+          const response = await createItemGroup(payload).unwrap();
+          toast.success(response.message || "Item Group created successfully");
         }
 
-        setOpen(false);
+        formik.resetForm();
+        setViewMode("list");
         setIsEdit(false);
-        resetForm();
-        refetch();
+        setSearchParams({});
       } catch (error: any) {
-        const msg = error?.data?.message || "Operation failed";
-        toast.error(msg);
+        toast.error(error?.data?.message || error?.message || "Something went wrong");
       }
     },
   });
 
+  // URL search parameter page routing
+  useEffect(() => {
+    const urlId = searchParams.get("id");
+    const urlAction = searchParams.get("action");
+
+    if (urlId) {
+      const idNum = Number(urlId);
+      setSelectedId(idNum);
+
+      if (urlAction === "edit") {
+        const rec = rawRecords.find((r: any) => r.id === idNum);
+        if (rec) {
+          setSelectedRecord(rec);
+          formik.setValues({
+            item_group_code: rec.item_group_code || rec.code || "",
+            item_group_name: rec.item_group_name || rec.name || "",
+            subsidiary_id: rec.subsidiary_id || rec.subsidiary?.id || "",
+            isActive: rec.isActive ?? true,
+          });
+          setEditId(idNum);
+          setIsEdit(true);
+        }
+        setViewMode("form");
+      } else {
+        const recFallback = rawRecords.find((r: any) => r.id === idNum);
+        if (recFallback) {
+          setSelectedRecord(recFallback);
+        }
+        setViewMode("view");
+      }
+    } else if (urlAction === "new" || urlAction === "form") {
+      setViewMode("form");
+      if (urlAction === "new") {
+        setIsEdit(false);
+        setEditId(null);
+        setSelectedRecord(null);
+        formik.resetForm();
+      }
+    } else {
+      setViewMode("list");
+      setSelectedId(null);
+    }
+  }, [searchParams, rawRecords.length]);
+
+  const handleView = (id: number) => {
+    setSelectedId(id);
+    const rec = rawRecords.find((r: any) => r.id === id);
+    if (rec) setSelectedRecord(rec);
+    setViewMode("view");
+    setSearchParams({ id: String(id), action: "view" });
+  };
+
   const handleEdit = (id: number) => {
-    if (!canUpdate("item_group")) {
-      toast.error("No permission to edit");
+    if (!canUpdate("itemGroup")) {
+      toast.error("You do not have permission to edit item groups");
       return;
     }
-
-    const group = itemGroups.find((g) => g.id === id);
-    if (!group) return;
-
-    formik.setValues({
-      item_group_code: group.item_group_code,
-      item_group_name: group.item_group_name,
-      subsidiary_id: group.subsidiary_id || null,
-      isActive: group.isActive ?? true,
-      base_rate: group.base_rate,
-    });
-
-    setEditItemGroupId(id);
-    setIsEdit(true);
-    setOpen(true);
+    setSelectedId(id);
+    const rec = rawRecords.find((r: any) => r.id === id);
+    if (rec) {
+      setSelectedRecord(rec);
+      formik.setValues({
+        item_group_code: rec.item_group_code || rec.code || "",
+        item_group_name: rec.item_group_name || rec.name || "",
+        subsidiary_id: rec.subsidiary_id || rec.subsidiary?.id || "",
+        isActive: rec.isActive ?? true,
+      });
+      setEditId(id);
+      setIsEdit(true);
+    }
+    setViewMode("form");
+    setSearchParams({ id: String(id), action: "edit" });
   };
 
   const handleDelete = async (id: number) => {
-    if (!canDelete("item_group")) {
-      toast.error("No permission to delete");
+    if (!canDelete("itemGroup")) {
+      toast.error("You do not have permission to delete item groups");
       return;
     }
-
     try {
-      await deleteItemGroup(id).unwrap();
-      toast.success("Item group deleted successfully");
+      const response = await deleteItemGroup(id).unwrap();
+      toast.success(response.message || "Item Group deleted successfully");
+      setDeleteId(null);
       setDeleteDialogOpen(false);
-      setDeleteItemGroupId(null);
-      refetch();
-    } catch (error: any) {
-      toast.error(error?.data?.message || "Failed to delete");
+    } catch (error) {
+      toast.error("Failed to delete record");
     }
   };
 
-  const handleAdd = () => {
-    if (!canCreate("item_group")) {
-      toast.error("No permission to create");
+  const handleAddRecord = () => {
+    if (!canCreate("itemGroup")) {
+      toast.error("You do not have permission to create item groups");
       return;
     }
-    formik.resetForm();
+    setViewMode("form");
     setIsEdit(false);
-    setEditItemGroupId(null);
-    setOpen(true);
+    setEditId(null);
+    setSelectedRecord(null);
+    setSelectedId(null);
+    formik.resetForm();
+    setSearchParams({ action: "new" });
   };
 
-  const columns = [
-    { key: "item_group_code", label: "Code" },
-    { key: "item_group_name", label: "Name" },
-    {
-      key: "base_rate",
-      label: "Base Rate",
-      render: (row: ItemGroupType) => (
-        <Typography>
-          ₹{row.base_rate?.toFixed(2) || "0.00"}
-        </Typography>
-      ),
-    },
-    {
-      key: "isActive",
-      label: "Status",
-      render: (row: ItemGroupType) => (
-        <Typography
-          sx={{ color: row.isActive ? "success.main" : "error.main", fontWeight: "bold" }}
+  const handleExportCSV = () => {
+    if (rawRecords.length === 0) {
+      toast.error("No records to export");
+      return;
+    }
+    const headers = ["Internal ID", "Group Code", "Group Name", "Subsidiary", "Status"];
+    const rows = rawRecords.map((r: any) => [
+      r.id,
+      `"${r.item_group_code || r.code || ""}"`,
+      `"${r.item_group_name || r.name || ""}"`,
+      `"${r.subsidiary?.subsidiary_name || "N/A"}"`,
+      r.isActive !== false ? "Active" : "Inactive",
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Item_Groups_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("Item Groups exported as CSV");
+  };
+
+  if (!canRead("itemGroup")) {
+    return (
+      <div className="p-6 bg-white rounded border border-slate-200 text-xs text-slate-600">
+        You do not have permission to view Item Groups.
+      </div>
+    );
+  }
+
+  // ── RENDER 1: NETSUITE READ-ONLY VIEW MODE (CALLS GET SINGLE BY ID API) ──
+  if (viewMode === "view") {
+    const activeRec =
+      (singleRecordData?.result && typeof singleRecordData.result === "object" ? singleRecordData.result : null) ||
+      (singleRecordData && typeof singleRecordData === "object" && !Array.isArray(singleRecordData) ? singleRecordData : null) ||
+      selectedRecord ||
+      rawRecords.find((r: any) => r.id === selectedId);
+
+    if (isSingleLoading && !activeRec) {
+      return (
+        <div className="p-12 text-center text-xs text-slate-500 font-medium">
+          <CircularProgress size={24} className="mb-2" />
+          <div>Loading item group details from API...</div>
+        </div>
+      );
+    }
+
+    if (!activeRec) {
+      return (
+        <div className="p-8 bg-white border border-slate-200 rounded text-center text-xs text-slate-600">
+          <div>Item group record unavailable.</div>
+          <button onClick={() => { setViewMode("list"); setSearchParams({}); }} className="mt-2 px-3 py-1 bg-sky-600 text-white rounded text-xs">
+            Back to List
+          </button>
+        </div>
+      );
+    }
+
+    const subName = activeRec.subsidiary?.subsidiary_name || rawSubsidiaries.find((s: any) => String(s.id) === String(activeRec.subsidiary_id))?.subsidiary_name || "N/A";
+
+    return (
+      <RecordPageLayout
+        recordType="Item Group"
+        subtitle={`${activeRec.item_group_code ? `${activeRec.item_group_code} - ` : ""}${activeRec.item_group_name || activeRec.name}`}
+        mode="view"
+        onEdit={() => handleEdit(activeRec.id || selectedId!)}
+        onBack={() => { setViewMode("list"); setSearchParams({}); }}
+        onListClick={() => { setViewMode("list"); setSearchParams({}); }}
+      >
+        <RecordSection title="Primary Information" defaultOpen={true}>
+          <div className="flex flex-col space-y-0.5">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase">INTERNAL ID</span>
+            <span className="text-xs font-mono font-bold text-slate-900">{activeRec.id}</span>
+          </div>
+          <div className="flex flex-col space-y-0.5">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase">ITEM GROUP CODE</span>
+            <span className="text-xs font-mono font-bold text-slate-900">{activeRec.item_group_code || activeRec.code}</span>
+          </div>
+          <div className="flex flex-col space-y-0.5">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase">ITEM GROUP NAME</span>
+            <span className="text-xs font-bold text-slate-900">{activeRec.item_group_name || activeRec.name}</span>
+          </div>
+          <div className="flex flex-col space-y-0.5">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase">SUBSIDIARY</span>
+            <span className="text-xs font-semibold text-slate-800">{subName}</span>
+          </div>
+          <div className="flex flex-col space-y-0.5">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase">STATUS</span>
+            <span className="text-xs font-semibold text-slate-800">{activeRec.isActive !== false ? "Active" : "Inactive"}</span>
+          </div>
+        </RecordSection>
+      </RecordPageLayout>
+    );
+  }
+
+  // ── RENDER 2: NETSUITE EDITABLE FORM MODE ──
+  if (viewMode === "form") {
+    return (
+      <form onSubmit={formik.handleSubmit}>
+        <RecordPageLayout
+          recordType="Item Group"
+          recordTitle={formik.values.item_group_name || (isEdit ? "Edit Item Group" : "New Item Group")}
+          mode="edit"
+          onSave={() => formik.handleSubmit()}
+          onCancel={() => { setViewMode("list"); setSearchParams({}); }}
+          onListClick={() => { setViewMode("list"); setSearchParams({}); }}
+          isSaving={isCreating || isUpdating}
         >
-          {row.isActive ? "Active" : "Inactive"}
-        </Typography>
-      ),
-    },
-  ];
-
-  if (isLoading) {
-    return (
-      <Box display="flex" justifyContent="center" alignItems="center" height="100vh">
-        <CircularProgress />
-      </Box>
-    );
-  }
-
-  if (!isAdmin && !canRead("item_group")) {
-    return (
-      <Box sx={{ p: 4, textAlign: "center" }}>
-        <Typography variant="h6" color="error">
-          Access Denied: You do not have permission to view item groups.
-        </Typography>
-      </Box>
-    );
-  }
-
-  return (
-    <Box sx={{ width: "100%", maxWidth: { sm: "100%", md: "1810px" }, p: 2 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Box>
-          <Typography variant="h3" gutterBottom>
-            Item Groups
-          </Typography>
-          <NavbarBreadcrumbs />
-        </Box>
-
-        {canCreate("item_group") && (
-          <Button variant="contained" onClick={handleAdd} startIcon={<Add />}>
-            Add Item Group
-          </Button>
-        )}
-      </Box>
-
-      <DynamicTable
-        columns={columns}
-        data={sortedItemGroups}
-        getRowId={(row) => String(row.id)} 
-        onEdit={
-          canUpdate("item_group")
-            ? (id: string) => handleEdit(Number(id)) 
-            : undefined
-        }
-        onDelete={
-          canDelete("item_group")
-            ? (id: string) => {
-              setDeleteItemGroupId(Number(id));
-              setDeleteDialogOpen(true);
-            }
-            : undefined
-        }
-      />
-
-      {/* Add/Edit Dialog */}
-      <Dialog open={isOpen} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{isEdit ? "Edit Item Group" : "Add New Item Group"}</DialogTitle>
-        <Box component="form" onSubmit={formik.handleSubmit}>
-          <DialogContent dividers>
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <FormControl fullWidth>
-                <FormLabel>Item Group Code</FormLabel>
-                <TextField
-                  {...formik.getFieldProps("item_group_code")}
-                  placeholder="e.g., GRP001"
-                  error={formik.touched.item_group_code && !!formik.errors.item_group_code}
-                  helperText={formik.touched.item_group_code && formik.errors.item_group_code}
-                />
-              </FormControl>
-
-              <FormControl fullWidth>
-                <FormLabel>Item Group Name</FormLabel>
-                <TextField
-                  {...formik.getFieldProps("item_group_name")}
-                  placeholder="e.g., Raw Materials"
-                  error={formik.touched.item_group_name && !!formik.errors.item_group_name}
-                  helperText={formik.touched.item_group_name && formik.errors.item_group_name}
-                />
-              </FormControl>
-
-              <FormControl fullWidth>
-                <FormLabel>Subsidiary</FormLabel>
-                <Select
-                  id="subsidiary_id"
-                  value={formik.values.subsidiary_id ?? ""}
-                  onChange={(e) =>
-                    formik.setFieldValue(
-                      "subsidiary_id",
-                      e.target.value === "" ? null : Number(e.target.value)
-                    )
-                  }
-                >
-                  <MenuItem value="">None</MenuItem>
-                  {subsidiariesResponse?.result?.map((subsidiary: any) => (
-                    <MenuItem key={subsidiary.id} value={subsidiary.id}>
-                      {subsidiary.subsidiary_name}
-                    </MenuItem>
-                  ))}
-                </Select>
-                {formik.touched.subsidiary_id && formik.errors.subsidiary_id && (
-                  <FormHelperText>{String(formik.errors.subsidiary_id)}</FormHelperText>
-                )}
-              </FormControl>
-
-              <FormControl fullWidth>
-                <FormLabel>Base Rate</FormLabel>
-                <TextField
-                  type="number"
-                  {...formik.getFieldProps("base_rate")}
-                  InputProps={{
-                    startAdornment: <InputAdornment position="start">₹</InputAdornment>,
-                  }}
-                  inputProps={{ min: 0, step: "0.01" }}
-                  error={formik.touched.base_rate && !!formik.errors.base_rate}
-                  helperText={formik.touched.base_rate && formik.errors.base_rate}
-                />
-              </FormControl>
-
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={formik.values.isActive}
-                    onChange={(e) => formik.setFieldValue("isActive", e.target.checked)}
-                  />
-                }
-                label="Active"
+          <RecordSection title="Primary Information" defaultOpen={true}>
+            <div className="flex flex-col space-y-1">
+              <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                ITEM GROUP CODE <span className="text-amber-600">*</span>
+              </label>
+              <input
+                type="text"
+                name="item_group_code"
+                value={formik.values.item_group_code}
+                onChange={formik.handleChange}
+                onBlur={formik.handleBlur}
+                placeholder="e.g. GRP-01 / ELEC"
+                className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 font-mono focus:outline-none focus:border-sky-500"
               />
-            </Box>
-          </DialogContent>
+            </div>
 
-          <DialogActions>
-            <Button onClick={() => setOpen(false)}>Cancel</Button>
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={formik.isSubmitting || creating || updating}
-            >
-              {formik.isSubmitting || creating || updating ? (
-                <CircularProgress size={20} />
-              ) : isEdit ? (
-                "Update"
-              ) : (
-                "Create"
-              )}
-            </Button>
-          </DialogActions>
-        </Box>
-      </Dialog>
+            <div className="flex flex-col space-y-1">
+              <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                ITEM GROUP NAME <span className="text-amber-600">*</span>
+              </label>
+              <input
+                type="text"
+                name="item_group_name"
+                value={formik.values.item_group_name}
+                onChange={formik.handleChange}
+                onBlur={formik.handleBlur}
+                placeholder="Item Group Display Name"
+                className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+              />
+            </div>
+
+            <div className="flex flex-col space-y-1">
+              <label className="text-[11px] font-semibold text-[#475569] uppercase">PRIMARY SUBSIDIARY</label>
+              <select
+                name="subsidiary_id"
+                value={formik.values.subsidiary_id || ""}
+                onChange={formik.handleChange}
+                className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+              >
+                <option value="">-- Select Subsidiary --</option>
+                {rawSubsidiaries.map((s: any) => (
+                  <option key={s.id} value={s.id}>
+                    {s.subsidiary_name || s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </RecordSection>
+        </RecordPageLayout>
+      </form>
+    );
+  }
+
+  // ── RENDER 3: NETSUITE LIST VIEW ──
+  return (
+    <div className="flex flex-col space-y-3 max-w-full font-sans text-slate-800">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-300 pb-2">
+        <div className="flex items-center space-x-2">
+          <div className="w-4 h-4 bg-sky-600 rounded-xs"></div>
+          <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">Item Groups</h1>
+        </div>
+        <div className="flex items-center space-x-3 text-xs font-semibold text-sky-700">
+          <button onClick={() => setViewMode("list")} className="hover:underline flex items-center space-x-1">
+            <ListIcon className="!w-3.5 !h-3.5" />
+            <span>List</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-300 p-2 rounded-xs">
+        <div className="flex items-center space-x-3">
+          <span className="font-semibold text-slate-600 uppercase text-[10px]">VIEW</span>
+          <select className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 font-medium">
+            <option value="All">All Item Groups</option>
+          </select>
+        </div>
+
+        {canCreate("itemGroup") && (
+          <button
+            onClick={handleAddRecord}
+            className="h-7 px-3 bg-[#0070d2] hover:bg-blue-700 text-white text-xs font-semibold rounded-xs shadow-2xs flex items-center space-x-1"
+          >
+            <Add className="!w-4 !h-4" />
+            <span>New Item Group</span>
+          </button>
+        )}
+      </div>
+
+      <div className="bg-slate-100 border border-slate-300 px-3 py-1.5 flex items-center justify-between gap-2 text-xs">
+        <div className="flex items-center space-x-3">
+          <button onClick={handleExportCSV} className="p-1 text-slate-600 hover:text-sky-700 flex items-center space-x-1 font-semibold text-[11px]">
+            <GetApp className="!w-4 !h-4" />
+            <span>CSV</span>
+          </button>
+          <button onClick={() => window.print()} className="p-1 text-slate-600 hover:text-sky-700 flex items-center space-x-1 font-semibold text-[11px]">
+            <Print className="!w-4 !h-4" />
+            <span>Print</span>
+          </button>
+        </div>
+        <span className="font-bold text-slate-700 uppercase text-[11px]">TOTAL: {rawRecords.length}</span>
+      </div>
+
+      <div className="border border-slate-300 rounded-xs overflow-x-auto bg-white shadow-2xs">
+        <table className="w-full text-xs text-left border-collapse">
+          <thead className="bg-slate-200 text-slate-700 uppercase text-[10px] tracking-wider font-bold border-b border-slate-300 select-none">
+            <tr>
+              <th className="px-3 py-2 border-r border-slate-300 w-24">EDIT | VIEW</th>
+              <th className="px-3 py-2 border-r border-slate-300">INTERNAL ID</th>
+              <th className="px-3 py-2 border-r border-slate-300">GROUP CODE</th>
+              <th className="px-3 py-2 border-r border-slate-300">GROUP NAME</th>
+              <th className="px-3 py-2 border-r border-slate-300">SUBSIDIARY</th>
+              <th className="px-3 py-2 text-right">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200 text-slate-700">
+            {isLoading ? (
+              <tr><td colSpan={6} className="py-8 text-center text-slate-400 italic">Loading item groups...</td></tr>
+            ) : rawRecords.length === 0 ? (
+              <tr><td colSpan={6} className="py-8 text-center text-slate-400 italic">No records found.</td></tr>
+            ) : (
+              rawRecords.map((row: any, idx: number) => {
+                const subName = row.subsidiary?.subsidiary_name || rawSubsidiaries.find((s: any) => String(s.id) === String(row.subsidiary_id))?.subsidiary_name || "N/A";
+                return (
+                  <tr key={row.id || idx} className={`hover:bg-amber-50/70 ${idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"}`}>
+                    <td className="px-3 py-1.5 border-r border-slate-200 whitespace-nowrap text-sky-700 font-semibold">
+                      <button onClick={() => handleEdit(row.id)} className="hover:underline mr-1">Edit</button>
+                      <span className="text-slate-300">|</span>
+                      <button onClick={() => handleView(row.id)} className="hover:underline ml-1">View</button>
+                    </td>
+                    <td className="px-3 py-1.5 border-r border-slate-200 font-mono text-slate-500">{row.id}</td>
+                    <td className="px-3 py-1.5 border-r border-slate-200 font-mono font-bold text-slate-900">{row.item_group_code || row.code}</td>
+                    <td className="px-3 py-1.5 border-r border-slate-200 font-bold text-slate-900">{row.item_group_name || row.name}</td>
+                    <td className="px-3 py-1.5 border-r border-slate-200 font-medium text-slate-700">{subName}</td>
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                      {canDelete("itemGroup") && (
+                        <button onClick={() => { setDeleteId(row.id); setDeleteDialogOpen(true); }} className="text-red-600 hover:underline font-semibold text-[11px]">
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <ConfirmationDialog
         open={isDeleteDialogOpen}
-        onClose={() => {
-          setDeleteDialogOpen(false);
-          setDeleteItemGroupId(null);
-        }}
-        onConfirm={() => deleteItemGroupId && handleDelete(deleteItemGroupId)}
         title="Delete Item Group"
-        message="This action cannot be undone."
-        variant="delete"
+        message="Are you sure you want to delete this item group?"
+        onConfirm={() => deleteId && handleDelete(deleteId)}
+        onClose={() => { setDeleteDialogOpen(false); setDeleteId(null); }}
       />
-    </Box>
+    </div>
   );
 };
 

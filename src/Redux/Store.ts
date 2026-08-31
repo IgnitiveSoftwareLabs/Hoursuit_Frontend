@@ -44,6 +44,7 @@ import { transportationModeApi } from "../RTK/services/transportationModeApi"
 import { stackApi } from "../RTK/services/stackApi";
 import { panAvailibiltyApi } from "../RTK/services/panAvailibiltyApi";
 import { paymentMethodApi } from "../RTK/services/paymentMethodApi";
+import { paymentTermApi } from "../RTK/services/paymentTermApi";
 import { registrationTypeApi } from "../RTK/services/resigtrationTypeApi";
 import { misTypeApi } from "../RTK/services/misTypeApi";
 import { accountTypeApi } from "../RTK/services/accountTypeApi";
@@ -53,6 +54,8 @@ import { journalEntryApi } from "../RTK/services/journalEntryApi";
 import { debitNoteApi } from "../RTK/services/debitNoteApi";
 
 import { systemLogApi } from "../RTK/services/systemLogApi";
+import { classApi } from "../RTK/services/classApi";
+import { departmentApi } from "../RTK/services/departmentApi";
 
 // Combine reducers
 const rootReducer = combineReducers({
@@ -97,6 +100,7 @@ const rootReducer = combineReducers({
   [transportationModeApi.reducerPath]: transportationModeApi.reducer,
   [panAvailibiltyApi.reducerPath]: panAvailibiltyApi.reducer,
   [paymentMethodApi.reducerPath]: paymentMethodApi.reducer,
+  [paymentTermApi.reducerPath]: paymentTermApi.reducer,
   [registrationTypeApi.reducerPath]: registrationTypeApi.reducer,
   [misTypeApi.reducerPath]: misTypeApi.reducer,
   [accountTypeApi.reducerPath]: accountTypeApi.reducer,
@@ -105,6 +109,8 @@ const rootReducer = combineReducers({
   [journalEntryApi.reducerPath]: journalEntryApi.reducer,
   [debitNoteApi.reducerPath]: debitNoteApi.reducer,
   [systemLogApi.reducerPath]: systemLogApi.reducer,
+  [classApi.reducerPath]: classApi.reducer,
+  [departmentApi.reducerPath]: departmentApi.reducer,
   currentUser: currentUserSlice,
   ledger: ledgerSlice,
   voucher: voucherSlice,
@@ -153,6 +159,7 @@ export const store = configureStore({
       transportationModeApi.middleware,
       panAvailibiltyApi.middleware,
       paymentMethodApi.middleware,
+      paymentTermApi.middleware,
       misTypeApi.middleware,
       accountTypeApi.middleware,
       itemTypeApi.middleware,
@@ -160,7 +167,9 @@ export const store = configureStore({
       journalEntryApi.middleware,
       debitNoteApi.middleware,
       registrationTypeApi.middleware,
-      systemLogApi.middleware
+      systemLogApi.middleware,
+      classApi.middleware,
+      departmentApi.middleware
     ),
 });
 

@@ -1,30 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import CssBaseline from "@mui/material/CssBaseline";
 import Box from "@mui/material/Box";
-import Stack from "@mui/material/Stack";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import Button from "@mui/material/Button";
 import Typography from "@mui/material/Typography";
-import AppNavbar from "../../components/AppNavbar";
-import SideMenu from "../../components/SideMenu";
 import AppTheme from "../../shared-theme/AppTheme";
-import MainHeader from "../MainHeader";
+import AppLayout from "./AppLayout";
 import { useFetchCompanyQuery } from "../../RTK/services/companyApi";
 
-const HEADER_HEIGHT = 64;
-
 export default function Layout({ children, disableCustomTheme }: any) {
-  const mainScrollRef = useRef<HTMLDivElement>(null);
   const { data: companyData, isLoading } = useFetchCompanyQuery();
   const [reminders, setReminders] = useState<any[]>([]);
   const [openReminder, setOpenReminder] = useState(false);
 
-  // Function to generate a unique key for current reminders
-  // This creates a unique key based on the reminder content so that if reminders change,
-  // the skip will be reset and new reminders will be shown
   const generateReminderKey = (reminders: any[]) => {
     const sortedReminders = reminders
       .map((r) => `${r.category}-${r.name}-${r.validTill}`)
@@ -33,14 +24,12 @@ export default function Layout({ children, disableCustomTheme }: any) {
     return `reminder_skip_${btoa(sortedReminders)}`;
   };
 
-  // Function to check if reminders should be skipped
   const shouldSkipReminders = (reminders: any[]) => {
     if (reminders.length === 0) return true;
     const reminderKey = generateReminderKey(reminders);
     return localStorage.getItem(reminderKey) === "true";
   };
 
-  // Function to skip reminders
   const handleSkipReminders = () => {
     if (reminders.length > 0) {
       const reminderKey = generateReminderKey(reminders);
@@ -49,7 +38,6 @@ export default function Layout({ children, disableCustomTheme }: any) {
     }
   };
 
-  // Function to clear all skipped reminders (utility function)
   const clearAllSkippedReminders = () => {
     const keys = Object.keys(localStorage).filter((key) =>
       key.startsWith("reminder_skip_")
@@ -57,12 +45,10 @@ export default function Layout({ children, disableCustomTheme }: any) {
     keys.forEach((key) => localStorage.removeItem(key));
   };
 
-  // Expose function globally for debugging (optional)
   useEffect(() => {
     (window as any).clearAllSkippedReminders = clearAllSkippedReminders;
   }, []);
 
-  // Function to check expiry status
   const checkExpiry = (validTill: string, type: string) => {
     if (!validTill) return null;
     const today = new Date();
@@ -83,7 +69,6 @@ export default function Layout({ children, disableCustomTheme }: any) {
     if (!isLoading && companyData?.result) {
       const alerts: any[] = [];
 
-      // Check company attachments
       if (companyData.result.attachments?.length) {
         companyData.result.attachments.forEach((doc: any) => {
           const alert = checkExpiry(doc.validTill, doc.type.replace(/_/g, " "));
@@ -98,7 +83,6 @@ export default function Layout({ children, disableCustomTheme }: any) {
         });
       }
 
-      // Check expiring insurances
       if (companyData.result.expiringInsurances?.length) {
         companyData.result.expiringInsurances.forEach((insurance: any) => {
           const alert = checkExpiry(insurance.end_date, "Insurance");
@@ -114,7 +98,6 @@ export default function Layout({ children, disableCustomTheme }: any) {
         });
       }
 
-      // Check expiring warehouse attachments
       if (companyData.result.expiringWarehouseAttachments?.length) {
         companyData.result.expiringWarehouseAttachments.forEach(
           (attachment: any) => {
@@ -139,59 +122,17 @@ export default function Layout({ children, disableCustomTheme }: any) {
 
       if (alerts.length > 0) {
         setReminders(alerts);
-        // Only show reminder if not skipped in localStorage
         if (!shouldSkipReminders(alerts)) {
           setOpenReminder(true);
         }
       }
     }
   }, [companyData, isLoading]);
+
   return (
     <AppTheme {...disableCustomTheme}>
       <CssBaseline enableColorScheme />
-      <Box
-        sx={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}
-      >
-        <MainHeader />
-        {/* Content area below the fixed header */}
-        <Box
-          sx={{
-            display: "flex",
-            flexDirection: { xs: 'column', md: 'row' },
-            width: '100%',
-            marginTop: `${HEADER_HEIGHT}px`,
-            minHeight: `calc(100vh - ${HEADER_HEIGHT}px)`,
-          }}
-        >
-          <SideMenu />
-          <AppNavbar />
-          <Box
-            component="main"
-            ref={mainScrollRef}
-            sx={{
-              flexGrow: 1,
-              backgroundColor: '#F0F2F5',
-              overflow: "auto",
-              height: `calc(100vh - ${HEADER_HEIGHT}px)`,
-              pt: 3,
-            }}
-          >
-            <Stack
-              spacing={3}
-              sx={{ 
-                alignItems: "center", 
-                mx: 'auto', 
-                maxWidth: '1600px',
-                width: '100%',
-                pb: 5, 
-                px: { xs: 2, md: 3 } 
-              }}
-            >
-              {children}
-            </Stack>
-          </Box>
-        </Box>
-      </Box>
+      <AppLayout>{children}</AppLayout>
 
       {/* Reminder Modal */}
       <Dialog

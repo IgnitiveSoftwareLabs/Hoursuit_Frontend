@@ -14,7 +14,8 @@ import { Warning, Delete, Info, Help } from '@mui/icons-material';
 
 interface ConfirmationDialogProps {
   open: boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  onCancel?: () => void;
   onConfirm: () => void;
   title?: string;
   message?: string;
@@ -30,7 +31,9 @@ interface ConfirmationDialogProps {
 const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
   open,
   onClose,
+  onCancel,
   onConfirm,
+
   title = 'Confirm Action',
   message = 'Are you sure you want to proceed? This action cannot be undone.',
   confirmText = 'Confirm',
@@ -84,9 +87,11 @@ const ConfirmationDialog: React.FC<ConfirmationDialogProps> = ({
 
   const handleClose = () => {
     if (!loading) {
-      onClose();
+      if (onCancel) onCancel();
+      else if (onClose) onClose();
     }
   };
+
 
   return (
     <Dialog
