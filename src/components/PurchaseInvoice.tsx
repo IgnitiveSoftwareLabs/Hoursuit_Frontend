@@ -347,14 +347,22 @@ const PurchaseInvoiceComp: React.FC = () => {
     return `VB-${new Date().getFullYear()}-${String(nextSeq).padStart(4, "0")}`;
   }, [purchaseInvoices]);
 
-  // Auto-generate Vendor Bill Number if empty
+  // Auto-generate Vendor Bill Number if empty or if currently set to an existing invoice number
   useEffect(() => {
-    if (viewMode === "form" && !isEdit && !formik.values.header.vendorInvoiceNumber) {
-      const generatedBillNo = getNextBillNumber();
-      formik.setFieldValue("header.vendorInvoiceNumber", generatedBillNo);
-      formik.setFieldValue("header.invoiceNumber", generatedBillNo);
+    if (viewMode === "form" && !isEdit) {
+      const curNum = formik.values.header.vendorInvoiceNumber || formik.values.header.invoiceNumber;
+      const isDuplicate = curNum && purchaseInvoices.some((inv: any) => {
+        const invNo = inv.invoiceNumber || inv.invoice_number || inv.vendorInvoiceNumber || inv.vendor_invoice_number;
+        return String(invNo).trim().toUpperCase() === String(curNum).trim().toUpperCase();
+      });
+
+      if (!curNum || isDuplicate) {
+        const generatedBillNo = getNextBillNumber();
+        formik.setFieldValue("header.vendorInvoiceNumber", generatedBillNo);
+        formik.setFieldValue("header.invoiceNumber", generatedBillNo);
+      }
     }
-  }, [viewMode, isEdit, getNextBillNumber, formik.values.header.vendorInvoiceNumber]);
+  }, [viewMode, isEdit, getNextBillNumber, purchaseInvoices]);
 
   // Auto-populate all details (PO, Vendor, Items, Location, Memo, Subsidiary) when GRN is selected
   const lastProcessedGrnIdRef = React.useRef<string | null>(null);
