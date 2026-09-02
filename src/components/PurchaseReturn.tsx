@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Add, Delete, Edit, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
 import { useFormik } from "formik";
@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import * as Yup from "yup";
 
 import { useGetVendorsQuery } from "../RTK/services/vendorApi";
+import { useGetChartOfAccountsQuery } from "../RTK/services/chartOfAccountApi";
 import { useGetItemsQuery } from "../RTK/services/itemApi";
 import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
 import { useGetClassesQuery } from "../RTK/services/classApi";
@@ -29,7 +30,7 @@ import {
 } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
-import { GLImpactSubtab } from "./Layout/GLImpactSubtab";
+import { GLImpactSubtab, GLEntry } from "./Layout/GLImpactSubtab";
 import ConfirmationDialog from "./Dialog/ConfirmationDialog";
 
 interface PurchaseReturnLineForm {
@@ -39,6 +40,10 @@ interface PurchaseReturnLineForm {
   uom_id?: string;
   returnQty: number;
   unitPrice: number;
+  discountPercent: number;
+  discountAmount: number;
+  taxPercent: number;
+  taxAmount: number;
   lineTotal: number;
   remarks: string;
 }
@@ -50,6 +55,10 @@ const emptyLineItem = (): PurchaseReturnLineForm => ({
   uom_id: "",
   returnQty: 1,
   unitPrice: 0,
+  discountPercent: 0,
+  discountAmount: 0,
+  taxPercent: 0,
+  taxAmount: 0,
   lineTotal: 0,
   remarks: "",
 });
@@ -77,10 +86,15 @@ export default function PurchaseReturnComp() {
   const [returnToDelete, setReturnToDelete] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const pendingActionRef = useRef<"fulfill" | "credit" | null>(null);
+
+  const urlId = searchParams.get("id");
+  const urlAction = searchParams.get("action");
+  const effectiveReturnId = selectedReturnId || (urlId && (urlAction === "view" || urlAction === "edit") ? urlId : null);
 
   // Eager Queries
   const { data: purchaseReturnsData, refetch: refetchReturns } = useGetPurchaseReturnsQuery({ page: 1, limit: 50 });
-  const { data: singleReturnData } = useGetPurchaseReturnByIdQuery(selectedReturnId!, { skip: !selectedReturnId });
+  const { data: singleReturnData, isLoading: isLoadingSingleReturn } = useGetPurchaseReturnByIdQuery(effectiveReturnId!, { skip: !effectiveReturnId });
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
   const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 1000 });
   const { data: subsidiariesData } = useGetSubsidiariesQuery(undefined);
@@ -89,6 +103,7 @@ export default function PurchaseReturnComp() {
   const { data: citiesData } = useGetCitiesQuery(undefined);
   const { data: currenciesData } = useGetCurrenciesQuery(undefined);
   const { data: uomsData } = useGetUOMsQuery(undefined);
+  const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
   const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery(undefined);
   const { data: purchasePaymentsData } = useGetPurchasePaymentsQuery(undefined);
   const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery(undefined);
@@ -100,13 +115,23 @@ export default function PurchaseReturnComp() {
 
   const handleAuthorizeReturn = async (id: number | string) => {
     try {
-      await updatePurchaseReturnStatus({ id, body: { status: "AUTHORIZED" } }).unwrap();
+      const res = await updatePurchaseReturnStatus({ id, body: { status: "AUTHORIZED" } }).unwrap();
       toast.success("Purchase Return Authorization has been AUTHORIZED.");
       refetchReturns();
-      if (selectedReturnId) {
-        setSelectedReturnId(null);
-        setTimeout(() => setSelectedReturnId(id), 50);
+      const updated = res?.result || res?.data || res;
+      if (updated) {
+        setSelectedReturn(updated);
+      } else if (selectedReturn) {
+        setSelectedReturn({
+          ...selectedReturn,
+          header: { ...(selectedReturn.header || selectedReturn), status: "AUTHORIZED" },
+          status: "AUTHORIZED",
+        });
       }
+      setSelectedReturnId(id);
+      setViewMode("view");
+      setIsEdit(false);
+      setSearchParams({ action: "view", id: String(id) });
     } catch (error: any) {
       toast.error(error?.data?.message || "Failed to authorize Purchase Return.");
     }
@@ -124,6 +149,7 @@ export default function PurchaseReturnComp() {
   const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
   const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : Array.isArray(currenciesData?.data) ? currenciesData.data : Array.isArray(currenciesData) ? currenciesData : [];
   const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
+  const accounts = useMemo(() => (Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : []), [chartOfAccountsData]);
 
   const formik = useFormik({
     initialValues: {
@@ -185,19 +211,37 @@ export default function PurchaseReturnComp() {
           })),
         };
 
+        let savedId = editId;
         if (isEdit && editId) {
           await updatePurchaseReturn({ id: editId, body: payload }).unwrap();
           toast.success("Purchase Return updated successfully.");
         } else {
-          await createPurchaseReturn(payload).unwrap();
+          const res = await createPurchaseReturn(payload).unwrap();
           toast.success("Purchase Return recorded successfully.");
+          savedId = res?.result?.header?.id || res?.data?.header?.id || res?.result?.id || res?.id;
         }
-        setViewMode("list");
-        setIsEdit(false);
-        setEditId(null);
-        setSearchParams({});
-        formik.resetForm();
         refetchReturns();
+
+        const action = pendingActionRef.current;
+        pendingActionRef.current = null;
+
+        if (action === "fulfill" && savedId) {
+          navigate(`/return-fulfillment?returnId=${savedId}`);
+        } else if (action === "credit" && savedId) {
+          navigate(`/debit-note?returnId=${savedId}`);
+        } else if (savedId) {
+          setSelectedReturnId(savedId);
+          setViewMode("view");
+          setIsEdit(false);
+          setEditId(null);
+          setSearchParams({ action: "view", id: String(savedId) });
+        } else {
+          setViewMode("list");
+          setIsEdit(false);
+          setEditId(null);
+          setSearchParams({});
+        }
+        formik.resetForm();
       } catch (error: any) {
         toast.error(error?.data?.message || "Something went wrong.");
       }
@@ -227,6 +271,11 @@ export default function PurchaseReturnComp() {
           const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
           const qty = Number(l.quantity || l.qty || 1);
           const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
+          const dPct = Number(l.discountPercent || l.discount_percent || 0);
+          const dAmt = Number(l.discountAmount || l.discount_amount || 0);
+          const tPct = Number(l.taxPercent || l.tax_percent || 0);
+          const tAmt = Number(l.taxAmount || l.tax_amount || 0);
+          const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
           return {
             itemId: String(l.itemId || l.item_id || ""),
             location_id: String(l.location_id || l.city_id || locId || citiesList[0]?.id || ""),
@@ -234,7 +283,11 @@ export default function PurchaseReturnComp() {
             uom_id: String(l.uom_id || itemObj?.uom_id || ""),
             returnQty: qty,
             unitPrice: price,
-            lineTotal: Number((qty * price).toFixed(2)),
+            discountPercent: dPct,
+            discountAmount: dAmt,
+            taxPercent: tPct,
+            taxAmount: tAmt,
+            lineTotal: Number(lTot.toFixed(2)),
             remarks: l.remarks || `Return from Bill #${header.invoiceNumber || header.vendorInvoiceNumber || inv.id}`,
           };
         });
@@ -271,6 +324,11 @@ export default function PurchaseReturnComp() {
           const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
           const qty = Number(l.quantity || l.qty || 1);
           const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
+          const dPct = Number(l.discountPercent || l.discount_percent || 0);
+          const dAmt = Number(l.discountAmount || l.discount_amount || 0);
+          const tPct = Number(l.taxPercent || l.tax_percent || 0);
+          const tAmt = Number(l.taxAmount || l.tax_amount || 0);
+          const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
           return {
             itemId: String(l.itemId || l.item_id || ""),
             location_id: String(l.location_id || l.city_id || header.location_id || citiesList[0]?.id || ""),
@@ -278,7 +336,11 @@ export default function PurchaseReturnComp() {
             uom_id: String(l.uom_id || itemObj?.uom_id || ""),
             returnQty: qty,
             unitPrice: price,
-            lineTotal: Number((qty * price).toFixed(2)),
+            discountPercent: dPct,
+            discountAmount: dAmt,
+            taxPercent: tPct,
+            taxAmount: tAmt,
+            lineTotal: Number(lTot.toFixed(2)),
             remarks: l.remarks || `Return from Payment #${header.paymentNumber || pay.id}`,
           };
         });
@@ -314,6 +376,11 @@ export default function PurchaseReturnComp() {
           const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
           const qty = Number(l.quantity || l.qty || 1);
           const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
+          const dPct = Number(l.discountPercent || l.discount_percent || 0);
+          const dAmt = Number(l.discountAmount || l.discount_amount || 0);
+          const tPct = Number(l.taxPercent || l.tax_percent || 0);
+          const tAmt = Number(l.taxAmount || l.tax_amount || 0);
+          const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
           return {
             itemId: String(l.itemId || l.item_id || ""),
             location_id: String(l.location_id || l.city_id || header.location_id || header.city_id || citiesList[0]?.id || ""),
@@ -321,7 +388,11 @@ export default function PurchaseReturnComp() {
             uom_id: String(l.uom_id || itemObj?.uom_id || ""),
             returnQty: qty,
             unitPrice: price,
-            lineTotal: Number((qty * price).toFixed(2)),
+            discountPercent: dPct,
+            discountAmount: dAmt,
+            taxPercent: tPct,
+            taxAmount: tAmt,
+            lineTotal: Number(lTot.toFixed(2)),
             remarks: l.remarks || `Return from PO #${header.poNumber || po.id}`,
           };
         });
@@ -393,12 +464,20 @@ export default function PurchaseReturnComp() {
   const fillItemDetails = (idx: number, itemId: string) => {
     const item = items.find((i: any) => String(i.id) === String(itemId));
     const lineItems = [...formik.values.lineItems];
+    const rQty = Number(lineItems[idx].returnQty || 1);
+    const uPrice = Number(item?.purchase_price || item?.cost_price || item?.default_rate || 0);
+    const gross = Number((rQty * uPrice).toFixed(2));
+    const dAmt = Number(lineItems[idx].discountAmount || 0);
+    const taxable = Math.max(0, Number((gross - dAmt).toFixed(2)));
+    const tAmt = Number(lineItems[idx].taxAmount || 0);
+    const total = Number((taxable + tAmt).toFixed(2));
+
     lineItems[idx] = {
       ...lineItems[idx],
       itemId,
       uom_id: String(item?.uom_id || ""),
-      unitPrice: Number(item?.purchase_price || item?.cost_price || item?.default_rate || 0),
-      lineTotal: Number((Number(lineItems[idx].returnQty || 1) * Number(item?.purchase_price || item?.cost_price || 0)).toFixed(2)),
+      unitPrice: uPrice,
+      lineTotal: total,
     };
     formik.setFieldValue("lineItems", lineItems);
   };
@@ -429,10 +508,42 @@ export default function PurchaseReturnComp() {
       }
     }
 
-    const updatedLine = { ...lineItems[idx], [field]: newValue };
+    const updatedLine: any = { ...lineItems[idx], [field]: newValue };
     const rQty = Number(updatedLine.returnQty) || 0;
     const uPrice = Number(updatedLine.unitPrice) || 0;
-    updatedLine.lineTotal = Number((rQty * uPrice).toFixed(2));
+    const gross = Number((rQty * uPrice).toFixed(2));
+
+    if (field === "discountPercent") {
+      const dPct = Number(newValue) || 0;
+      updatedLine.discountAmount = Number(((gross * dPct) / 100).toFixed(2));
+    } else if (field === "discountAmount") {
+      const dAmt = Number(newValue) || 0;
+      updatedLine.discountPercent = gross > 0 ? Number(((dAmt / gross) * 100).toFixed(2)) : 0;
+    } else if (field === "returnQty" || field === "unitPrice") {
+      const dPct = Number(updatedLine.discountPercent) || 0;
+      if (dPct > 0) {
+        updatedLine.discountAmount = Number(((gross * dPct) / 100).toFixed(2));
+      }
+    }
+
+    const dAmt = Number(updatedLine.discountAmount) || 0;
+    const taxable = Math.max(0, Number((gross - dAmt).toFixed(2)));
+
+    if (field === "taxPercent") {
+      const tPct = Number(newValue) || 0;
+      updatedLine.taxAmount = Number(((taxable * tPct) / 100).toFixed(2));
+    } else if (field === "taxAmount") {
+      const tAmt = Number(newValue) || 0;
+      updatedLine.taxPercent = taxable > 0 ? Number(((tAmt / taxable) * 100).toFixed(2)) : 0;
+    } else if (field === "returnQty" || field === "unitPrice" || field === "discountAmount" || field === "discountPercent") {
+      const tPct = Number(updatedLine.taxPercent) || 0;
+      if (tPct > 0) {
+        updatedLine.taxAmount = Number(((taxable * tPct) / 100).toFixed(2));
+      }
+    }
+
+    const tAmt = Number(updatedLine.taxAmount) || 0;
+    updatedLine.lineTotal = Number((taxable + tAmt).toFixed(2));
 
     lineItems[idx] = updatedLine;
     formik.setFieldValue("lineItems", lineItems);
@@ -476,14 +587,18 @@ export default function PurchaseReturnComp() {
         },
         lineItems: rawLines.length > 0
           ? rawLines.map((l: any) => ({
-              itemId: String(l.itemId ?? l.item_id ?? ""),
-              orderedQty: Number(l.orderedQty ?? l.ordered_quantity ?? l.returnQty ?? l.quantity ?? 1),
-              uom_id: String(l.uom_id ?? l.uomId ?? ""),
-              returnQty: Number(l.returnQty ?? l.return_quantity ?? l.quantity ?? 1),
-              unitPrice: Number(l.unitPrice ?? l.unit_price ?? l.rate ?? 0),
-              lineTotal: Number(l.lineTotal ?? l.line_total ?? 0),
-              remarks: l.remarks ?? "",
-            }))
+            itemId: String(l.itemId ?? l.item_id ?? ""),
+            orderedQty: Number(l.orderedQty ?? l.ordered_quantity ?? l.returnQty ?? l.quantity ?? 1),
+            uom_id: String(l.uom_id ?? l.uomId ?? ""),
+            returnQty: Number(l.returnQty ?? l.return_quantity ?? l.quantity ?? 1),
+            unitPrice: Number(l.unitPrice ?? l.unit_price ?? l.rate ?? 0),
+            discountPercent: Number(l.discountPercent ?? l.discount_percent ?? 0),
+            discountAmount: Number(l.discountAmount ?? l.discount_amount ?? 0),
+            taxPercent: Number(l.taxPercent ?? l.tax_percent ?? 0),
+            taxAmount: Number(l.taxAmount ?? l.tax_amount ?? 0),
+            lineTotal: Number(l.lineTotal ?? l.line_total ?? 0),
+            remarks: l.remarks ?? "",
+          }))
           : [emptyLineItem()],
       });
     }
@@ -578,17 +693,187 @@ export default function PurchaseReturnComp() {
     const currIdVal = activeHeader.currency_id || vendorObj?.currency_id;
     const currencyObj = currencies.find((c: any) => String(c.id) === String(currIdVal));
 
-    const totalReturnAmt = activeLines.reduce((acc: number, l: any) => {
+    const totalSubtotal = activeLines.reduce((acc: number, l: any) => {
       const q = Number(l.returnQty || l.return_quantity || l.quantity || 0);
       const p = Number(l.unitPrice || l.unit_price || 0);
       return acc + (q * p);
     }, 0);
+
+    const totalDiscountAmt = activeLines.reduce((acc: number, l: any) => {
+      return acc + Number(l.discountAmount || l.discount_amount || 0);
+    }, 0);
+
+    const totalTaxAmt = activeLines.reduce((acc: number, l: any) => {
+      return acc + Number(l.taxAmount || l.tax_amount || 0);
+    }, 0);
+
+    const totalReturnAmt = activeLines.reduce((acc: number, l: any) => {
+      if (l.lineTotal !== undefined && l.lineTotal !== null && Number(l.lineTotal) > 0) return acc + Number(l.lineTotal);
+      if (l.line_total !== undefined && l.line_total !== null && Number(l.line_total) > 0) return acc + Number(l.line_total);
+      const q = Number(l.returnQty || l.return_quantity || l.quantity || 0);
+      const p = Number(l.unitPrice || l.unit_price || 0);
+      const d = Number(l.discountAmount || l.discount_amount || 0);
+      const t = Number(l.taxAmount || l.tax_amount || 0);
+      return acc + (q * p - d + t);
+    }, 0);
+
+      const glEntries: GLEntry[] = (() => {
+    if (!isView || !selectedReturn) return [];
+    const statusVal = String(activeHeader.status || selectedReturn?.status || "").toUpperCase();
+
+    // Step 1: DRAFT or AUTHORIZED -> Non-posting operational document
+    if (statusVal === "DRAFT" || statusVal === "AUTHORIZED") {
+      return [];
+    }
+
+    const entries: GLEntry[] = [];
+    const currentPeriod = (activeHeader.returnDate || new Date().toISOString()).slice(0, 7);
+
+    const findAccount = (keywords: string[], typeKeywords: string[], defaultName: string, defaultCode: string) => {
+      const byName = accounts.find((a: any) =>
+        keywords.some((k) => (a.account_name || a.name || "").toLowerCase().includes(k.toLowerCase()))
+      );
+      if (byName) return { name: byName.account_name || byName.name, code: byName.account_code || byName.code || defaultCode };
+
+      const byType = accounts.find((a: any) =>
+        typeKeywords.some((k) => (a.accountType?.account_type_name || a.account_type || "").toLowerCase().includes(k.toLowerCase()))
+      );
+      if (byType) return { name: byType.account_name || byType.name, code: byType.account_code || byType.code || defaultCode };
+
+      return { name: defaultName, code: defaultCode };
+    };
+
+    const clearingAcc = findAccount(
+      ["Purchase Return Clearing", "Return Clearing", "GRNI", "Clearing"],
+      ["Asset", "Current Asset", "Liability", "Current Liability"],
+      "Purchase Return Clearing Account",
+      "2115"
+    );
+
+    const apAcc = findAccount(
+      ["Accounts Payable", "Trade Creditors", "Creditors", "Payable"],
+      ["Accounts Payable", "Current Liability", "Liability"],
+      "Accounts Payable",
+      "2000"
+    );
+
+    const taxAcc = findAccount(
+      ["Input Tax", "Input GST", "Tax Receivable", "Tax Credit", "GST Input"],
+      ["Tax", "Current Asset", "Asset"],
+      "Input Tax Receivable",
+      "1400"
+    );
+
+    const discAcc = findAccount(
+      ["Purchase Discount", "Discount Received", "Discount Income", "Discount"],
+      ["Income", "Expense", "Direct Income"],
+      "Purchase Discount",
+      "4200"
+    );
+
+    // ── STEP 2: RETURN FULFILLMENT GL IMPACT ──
+    if (["FULFILLED", "PARTIALLY_FULFILLED", "RETURNED"].includes(statusVal)) {
+      let fulfillmentSubtotal = 0;
+      activeLines.forEach((line: any) => {
+        const itemObj = items.find((i: any) => String(i.id) === String(line.itemId || line.item_id));
+        const q = Number(line.returnQty || line.return_quantity || line.quantity || 0);
+        const p = Number(line.unitPrice || line.unit_price || line.rate || 0);
+        const lineGross = Number((q * p).toFixed(2));
+        if (lineGross <= 0) return;
+        fulfillmentSubtotal += lineGross;
+
+        const invAcc = itemObj?.asset_account_id
+          ? accounts.find((a: any) => String(a.id) === String(itemObj.asset_account_id))
+          : null;
+        const invName = invAcc ? (invAcc.account_name || invAcc.name) : "Inventory Asset Account";
+        const invCode = invAcc ? (invAcc.account_code || invAcc.code || "1200") : "1200";
+
+        // CREDIT: Inventory Asset
+        entries.push({
+          accountCode: invCode,
+          accountName: invName,
+          debit: 0,
+          credit: lineGross,
+          postingPeriod: currentPeriod,
+          memo: `Step 2 Fulfillment: Stock Outward for ${itemObj?.item_name || line.item?.item_name || "Item"} (Qty: ${q})`
+        });
+      });
+
+      fulfillmentSubtotal = Number(fulfillmentSubtotal.toFixed(2));
+      if (fulfillmentSubtotal > 0) {
+        // DEBIT: Purchase Return Clearing
+        entries.unshift({
+          accountCode: clearingAcc.code,
+          accountName: clearingAcc.name,
+          debit: fulfillmentSubtotal,
+          credit: 0,
+          postingPeriod: currentPeriod,
+          memo: `Step 2 Fulfillment: Purchase Return Clearing Accrual`
+        });
+      }
+    }
+
+    // ── STEP 3: VENDOR CREDIT GL IMPACT ──
+    if (statusVal === "RETURNED") {
+      const netTotal = totalReturnAmt > 0 ? totalReturnAmt : Number(activeHeader.totalAmount || activeHeader.total_amount || 0);
+      const subtotal = totalSubtotal > 0 ? totalSubtotal : Number(activeHeader.subtotal || 0);
+      const taxAmt = totalTaxAmt > 0 ? totalTaxAmt : Number(activeHeader.taxAmount || activeHeader.tax_amount || 0);
+      const discAmt = totalDiscountAmt > 0 ? totalDiscountAmt : Number(activeHeader.discountAmount || activeHeader.discount_amount || 0);
+
+      // DEBIT: Accounts Payable (Reduces vendor liability)
+      entries.push({
+        accountCode: apAcc.code,
+        accountName: apAcc.name,
+        debit: netTotal,
+        credit: 0,
+        postingPeriod: currentPeriod,
+        memo: `Step 3 Vendor Credit: Liability reduction with Vendor`
+      });
+
+      // CREDIT: Purchase Return Clearing (Offsets step 2 accrual)
+      entries.push({
+        accountCode: clearingAcc.code,
+        accountName: clearingAcc.name,
+        debit: 0,
+        credit: subtotal,
+        postingPeriod: currentPeriod,
+        memo: `Step 3 Vendor Credit: Purchase Return Clearing offset`
+      });
+
+      // CREDIT: Input Tax Reversal
+      if (taxAmt > 0) {
+        entries.push({
+          accountCode: taxAcc.code,
+          accountName: taxAcc.name,
+          debit: 0,
+          credit: taxAmt,
+          postingPeriod: currentPeriod,
+          memo: `Step 3 Vendor Credit: Input Tax Reversal`
+        });
+      }
+
+      // DEBIT: Purchase Discount Reversal
+      if (discAmt > 0) {
+        entries.push({
+          accountCode: discAcc.code,
+          accountName: discAcc.name,
+          debit: discAmt,
+          credit: 0,
+          postingPeriod: currentPeriod,
+          memo: `Step 3 Vendor Credit: Purchase Discount Reversal`
+        });
+      }
+    }
+
+    return entries;
+  })();
 
     const retNoStr = activeHeader.returnNumber || activeHeader.return_number || `RET-${selectedReturn?.id || "NEW"}`;
 
     return (
       <form onSubmit={formik.handleSubmit}>
         <RecordPageLayout
+          mode={isView ? "view" : "edit"}
           recordType="Purchase Return Authorization"
           subtitle={isView ? `Return #${retNoStr} ${vendorName}` : isEdit ? `Edit Return #${formik.values.header.returnNumber}` : "New Purchase Return"}
           onSave={() => formik.handleSubmit()}
@@ -602,45 +887,54 @@ export default function PurchaseReturnComp() {
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
           customActions={
-            isView && selectedReturn ? (
-              <div className="flex items-center space-x-1.5">
-                {String(activeHeader.status || selectedReturn?.status || "DRAFT").toUpperCase() === "DRAFT" && (
-                  <button
-                    type="button"
-                    onClick={() => handleAuthorizeReturn(selectedReturn.id)}
-                    className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                  >
-                    Authorize Return
-                  </button>
-                )}
-                {["AUTHORIZED", "APPROVED", "PARTIALLY_FULFILLED"].includes(String(activeHeader.status || selectedReturn?.status || "").toUpperCase()) && (
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/return-fulfillment?returnId=${selectedReturn.id}`)}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                  >
-                    Fulfill Return
-                  </button>
-                )}
-                {String(activeHeader.status || selectedReturn?.status || "").toUpperCase() === "FULFILLED" && (
-                  <button
-                    type="button"
-                    disabled={true}
-                    className="bg-slate-200 text-slate-500 text-xs font-semibold px-3 py-1 rounded-xs cursor-not-allowed border border-slate-300"
-                    title="Purchase return is already fulfilled"
-                  >
-                    Fulfilled
-                  </button>
-                )}
+            <div className="flex items-center space-x-1.5">
+              {(selectedReturnId || editId || selectedReturn) && String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "DRAFT").toUpperCase() === "DRAFT" && (
                 <button
                   type="button"
-                  onClick={() => navigate(`/debit-note?returnId=${selectedReturn.id}`)}
+                  onClick={() => handleAuthorizeReturn(selectedReturnId || editId || selectedReturn?.id)}
+                  className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                >
+                  Authorize Return
+                </button>
+              )}
+
+              {/* Step 2: Return (Item Fulfillment) - Only after Authorization, before full fulfillment */}
+              {(["AUTHORIZED", "APPROVED", "PARTIALLY_FULFILLED"].includes(String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase()) || (!isView && !editId)) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const retId = selectedReturnId || editId || selectedReturn?.id;
+                    if (isView && retId) {
+                      navigate(`/return-fulfillment?returnId=${retId}`);
+                    } else if (editId) {
+                      pendingActionRef.current = "fulfill";
+                      formik.handleSubmit();
+                    } else {
+                      formik.setFieldValue("header.status", "AUTHORIZED");
+                      pendingActionRef.current = "fulfill";
+                      formik.handleSubmit();
+                    }
+                  }}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                >
+                  Return (Item Fulfillment)
+                </button>
+              )}
+
+              {/* Step 3: Credit (Vendor Credit) - STRICTLY AFTER FULFILLMENT */}
+              {["FULFILLED", "RETURNED"].includes(String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase()) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const retId = selectedReturnId || editId || selectedReturn?.id;
+                    navigate(`/debit-note?returnId=${retId}`);
+                  }}
                   className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
                 >
-                  Debit Note
+                  Credit (Vendor Credit)
                 </button>
-              </div>
-            ) : undefined
+              )}
+            </div>
           }
           isSaving={isCreating || isUpdating}
           subTabs={[
@@ -658,23 +952,27 @@ export default function PurchaseReturnComp() {
                           <th className="p-2 border-r border-slate-400 w-24 text-right">ORDERED QTY</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">RETURN QTY *</th>
                           <th className="p-2 border-r border-slate-400 w-28 text-right">UNIT PRICE (₹)</th>
-                          <th className="p-2 border-r border-slate-400 w-28 text-right">LINE TOTAL (₹)</th>
-                          <th className="p-2 border-r border-slate-400 min-w-[150px]">REMARKS</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">DISC (₹)</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">TAX (₹)</th>
+                          <th className="p-2 border-r border-slate-400 w-28 text-right">TOTAL (₹)</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[140px]">REMARKS</th>
                           {!isView && <th className="p-2 w-10 text-center">ACTION</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 bg-white">
                         {activeLines.map((line: any, idx: number) => {
                           const itemObj = items.find((i: any) => String(i.id) === String(line.itemId || line.item_id));
-                          const selectedUom = uoms.find((u: any) => String(u.id) === String(line.uom_id || itemObj?.uom_id));
-                          const allowsDecimals = isDecimalAllowedForUOM(selectedUom);
+                          const ordQty = Number(line.orderedQty ?? line.returnQty ?? 0);
+                          const rQty = Number(line.returnQty ?? 1);
+                          const uPrice = Number(line.unitPrice ?? line.unit_price ?? line.rate ?? 0);
+                          const dPct = Number(line.discountPercent ?? line.discount_percent ?? 0);
+                          const dAmt = Number(line.discountAmount ?? line.discount_amount ?? 0);
+                          const tPct = Number(line.taxPercent ?? line.tax_percent ?? 0);
+                          const tAmt = Number(line.taxAmount ?? line.tax_amount ?? 0);
+                          const lTotal = Number(line.lineTotal ?? line.line_total ?? ((rQty * uPrice) - dAmt + tAmt));
+                          const allowsDecimals = isDecimalAllowedForUOM(uoms.find((u: any) => String(u.id) === String(line.uom_id || itemObj?.uom_id)));
 
                           if (isView) {
-                            const rQty = Number(line.returnQty || line.return_quantity || line.quantity || 0);
-                            const ordQty = Number(line.orderedQty ?? line.returnQty ?? 0);
-                            const uPrice = Number(line.unitPrice || line.unit_price || 0);
-                            const lTotal = Number(line.lineTotal || line.line_total || (rQty * uPrice));
-
                             return (
                               <tr key={idx} className="hover:bg-slate-50">
                                 <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
@@ -682,6 +980,12 @@ export default function PurchaseReturnComp() {
                                 <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700">{ordQty}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-red-600">{rQty}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">₹{uPrice.toFixed(2)}</td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono text-emerald-700">
+                                  {dAmt > 0 ? `₹${dAmt.toFixed(2)}${dPct > 0 ? ` (${dPct}%)` : ""}` : "—"}
+                                </td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono text-sky-700">
+                                  {tAmt > 0 ? `₹${tAmt.toFixed(2)}${tPct > 0 ? ` (${tPct}%)` : ""}` : "—"}
+                                </td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900">₹{lTotal.toFixed(2)}</td>
                                 <td className="p-2 border-r border-slate-200 text-slate-700">{line.remarks || "—"}</td>
                               </tr>
@@ -736,6 +1040,28 @@ export default function PurchaseReturnComp() {
                                   className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono bg-slate-100 font-medium text-slate-800 cursor-not-allowed"
                                 />
                               </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  placeholder="0.00"
+                                  value={line.discountAmount || ""}
+                                  onChange={(e) => updateLineItemField(idx, "discountAmount", e.target.value)}
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
+                                />
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  placeholder="0.00"
+                                  value={line.taxAmount || ""}
+                                  onChange={(e) => updateLineItemField(idx, "taxAmount", e.target.value)}
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
+                                />
+                              </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900 bg-slate-50">
                                 ₹{Number(line.lineTotal || 0).toFixed(2)}
                               </td>
@@ -783,59 +1109,6 @@ export default function PurchaseReturnComp() {
                 </div>
               ),
             },
-            ...(isView
-              ? [
-                  {
-                    id: "gl_impact",
-                    label: "GL Impact",
-                    content: (() => {
-                      const retLines = activeHeader.returnLines || activeHeader.lines || activeHeader.details || [];
-                      const entries: any[] = [];
-                      let totalDebitSum = 0;
-
-                      retLines.forEach((l: any) => {
-                        const itemObj = itemsList.find((i: any) => String(i.id) === String(l.itemId || l.item_id || l.item?.id)) || l.item;
-                        const itemName = itemObj?.item_name || l.item_name || `Item #${l.itemId || l.id}`;
-                        const qty = Number(l.quantity || 0);
-                        const unitPrice = Number(l.unitPrice || l.unit_price || l.rate || 0);
-                        const lineAmt = Number((qty * unitPrice).toFixed(2));
-
-                        if (lineAmt > 0) {
-                          totalDebitSum += lineAmt;
-                          entries.push({
-                            accountCode: itemObj?.asset_account?.account_number || "1100",
-                            accountName: itemObj?.asset_account?.account_name || `Inventory Asset - ${itemName}`,
-                            debit: 0,
-                            credit: lineAmt,
-                            memo: `Return Outward: ${itemName} (Qty: ${qty} @ ₹${unitPrice})`,
-                          });
-                        }
-                      });
-
-                      const finalTotal = totalDebitSum > 0 ? Number(totalDebitSum.toFixed(2)) : Number((totalReturnAmt || 0).toFixed(2));
-                      if (entries.length === 0 && finalTotal > 0) {
-                        entries.push({
-                          accountCode: "1100",
-                          accountName: "Inventory Asset / Return Outward",
-                          debit: 0,
-                          credit: finalTotal,
-                          memo: `Return Outward #${retNoStr}`,
-                        });
-                      }
-
-                      entries.unshift({
-                        accountCode: "2100",
-                        accountName: "Accounts Payable (Vendor Return Settlement)",
-                        debit: finalTotal,
-                        credit: 0,
-                        memo: `Vendor Return Debit Note - #${retNoStr}`,
-                      });
-
-                      return <GLImpactSubtab documentNumber={retNoStr} entries={entries} />;
-                    })(),
-                  },
-                ]
-              : []),
           ]}
         >
           {/* PRIMARY INFORMATION + SUMMARY CARD */}
@@ -857,6 +1130,25 @@ export default function PurchaseReturnComp() {
                       <span className="text-xs text-slate-800">{activeHeader.returnDate || activeHeader.return_date ? new Date(activeHeader.returnDate || activeHeader.return_date).toLocaleDateString() : "—"}</span>
                     </div>
                     <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">STATUS</span>
+                      <div>
+                        <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${String(activeHeader.status || "DRAFT").toUpperCase() === "DRAFT"
+                          ? "bg-amber-100 text-amber-800 border-amber-200"
+                          : ["AUTHORIZED", "APPROVED"].includes(String(activeHeader.status || "").toUpperCase())
+                            ? "bg-sky-100 text-sky-800 border-sky-200"
+                            : String(activeHeader.status || "").toUpperCase() === "PARTIALLY_FULFILLED"
+                              ? "bg-indigo-100 text-indigo-800 border-indigo-200"
+                              : String(activeHeader.status || "").toUpperCase() === "FULFILLED"
+                                ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                                : String(activeHeader.status || "").toUpperCase() === "RETURNED"
+                                  ? "bg-teal-100 text-teal-800 border-teal-200"
+                                  : "bg-slate-100 text-slate-800 border-slate-200"
+                          }`}>
+                          {activeHeader.status || "DRAFT"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
                       <span className="text-[10px] font-semibold text-slate-500 uppercase">REASON</span>
                       <span className="text-xs text-slate-800">{activeHeader.reason || "—"}</span>
                     </div>
@@ -872,9 +1164,8 @@ export default function PurchaseReturnComp() {
                         value={formik.values.header.vendorId}
                         onChange={handleVendorChange}
                         onBlur={formik.handleBlur}
-                        className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 ${
-                          formik.touched.header?.vendorId && formik.errors.header?.vendorId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
-                        }`}
+                        className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 ${formik.touched.header?.vendorId && formik.errors.header?.vendorId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
+                          }`}
                       >
                         <option value="">Select Vendor...</option>
                         {vendors.map((v: any) => (
@@ -896,6 +1187,22 @@ export default function PurchaseReturnComp() {
                         onChange={formik.handleChange}
                         className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
                       />
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                        STATUS <span className="text-amber-600">*</span>
+                      </label>
+                      <select
+                        name="header.status"
+                        value={formik.values.header.status}
+                        onChange={formik.handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold text-slate-800"
+                      >
+                        <option value="DRAFT">DRAFT (Non-Posting)</option>
+                        <option value="AUTHORIZED">AUTHORIZED (Ready for Fulfillment)</option>
+                        <option value="APPROVED">APPROVED</option>
+                      </select>
                     </div>
 
                     <div className="flex flex-col space-y-1">
@@ -925,8 +1232,24 @@ export default function PurchaseReturnComp() {
                     <span className="font-semibold text-slate-700 uppercase text-[10px]">ITEMS</span>
                     <span>{activeLines.length}</span>
                   </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span className="font-semibold text-slate-700 uppercase text-[10px]">SUBTOTAL</span>
+                    <span>₹{totalSubtotal.toFixed(2)}</span>
+                  </div>
+                  {totalDiscountAmt > 0 && (
+                    <div className="flex justify-between text-emerald-700">
+                      <span className="font-semibold uppercase text-[10px]">DISCOUNT</span>
+                      <span>-₹{totalDiscountAmt.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {totalTaxAmt > 0 && (
+                    <div className="flex justify-between text-sky-700">
+                      <span className="font-semibold uppercase text-[10px]">TAX (GST)</span>
+                      <span>+₹{totalTaxAmt.toFixed(2)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1 text-sm">
-                    <span className="uppercase text-[11px]">TOTAL RETURN</span>
+                    <span className="uppercase text-[11px]">NET TOTAL</span>
                     <span className="text-red-700">₹{totalReturnAmt.toFixed(2)}</span>
                   </div>
                 </div>
@@ -1171,18 +1494,6 @@ export default function PurchaseReturnComp() {
                       <button onClick={() => handleView(ret.id)} className="text-sky-700 hover:underline cursor-pointer">
                         View
                       </button>
-                      <span className="text-slate-300">|</span>
-                      {retStatus === "DRAFT" ? (
-                        <button onClick={() => handleAuthorizeReturn(ret.id)} className="text-sky-700 font-bold hover:underline cursor-pointer" title="Authorize Purchase Return">
-                          Authorize
-                        </button>
-                      ) : retStatus === "FULFILLED" ? (
-                        <span className="text-slate-300 cursor-not-allowed font-normal" title="Purchase return is already fulfilled">Fulfill</span>
-                      ) : (
-                        <button onClick={() => navigate(`/return-fulfillment?returnId=${ret.id}`)} className="text-emerald-700 font-bold hover:underline cursor-pointer">
-                          Fulfill
-                        </button>
-                      )}
                     </td>
                     <td className="p-2 border-r border-slate-200 font-mono text-slate-600">{ret.id}</td>
                     <td className="p-2 border-r border-slate-200 font-mono font-bold text-sky-800">
@@ -1195,13 +1506,18 @@ export default function PurchaseReturnComp() {
                       {retHeader.returnDate || retHeader.return_date ? new Date(retHeader.returnDate || retHeader.return_date).toLocaleDateString() : "—"}
                     </td>
                     <td className="p-2 border-r border-slate-200 text-center">
-                      <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
-                        isDraftReturn
-                          ? "bg-amber-100 text-amber-800 border-amber-200"
-                          : retStatus === "FULFILLED" || retStatus === "APPROVED" || retStatus === "COMPLETED"
-                          ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-                          : "bg-red-100 text-red-800 border-red-200"
-                      }`}>
+                      <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${isDraftReturn
+                        ? "bg-amber-100 text-amber-800 border-amber-200"
+                        : retStatus === "AUTHORIZED" || retStatus === "APPROVED"
+                          ? "bg-sky-100 text-sky-800 border-sky-200"
+                          : retStatus === "PARTIALLY_FULFILLED"
+                            ? "bg-indigo-100 text-indigo-800 border-indigo-200"
+                            : retStatus === "FULFILLED"
+                              ? "bg-emerald-100 text-emerald-800 border-emerald-200"
+                              : retStatus === "RETURNED"
+                                ? "bg-teal-100 text-teal-800 border-teal-200"
+                                : "bg-slate-100 text-slate-800 border-slate-200"
+                        }`}>
                         {retHeader.status || "DRAFT"}
                       </span>
                     </td>

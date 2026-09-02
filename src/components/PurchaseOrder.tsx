@@ -1,20 +1,19 @@
 import React, { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Add, Delete, Edit, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
+import { Add, Delete, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
 import toast from "react-hot-toast";
 import { useFormik } from "formik";
 import * as Yup from "yup";
 
-import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
 import { useGetVendorsQuery, useGetSingleVendorQuery } from "../RTK/services/vendorApi";
+import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
+import { useGetDepartmentsQuery } from "../RTK/services/departmentApi";
+import { useGetCurrenciesQuery } from "../RTK/services/currencyApi";
+import { useGetClassesQuery } from "../RTK/services/classApi";
 import { useGetCitiesQuery } from "../RTK/services/cityApi";
 import { useGetItemsQuery } from "../RTK/services/itemApi";
 import { useGetUOMsQuery } from "../RTK/services/uomApi";
-import { useGetClassesQuery } from "../RTK/services/classApi";
-import { useGetDepartmentsQuery } from "../RTK/services/departmentApi";
-import { useGetCurrenciesQuery } from "../RTK/services/currencyApi";
 import { usePermissions } from "../Hooks/usePermissions";
-
 import {
   useGetPurchaseOrdersQuery,
   useGetPurchaseOrderByIdQuery,
@@ -28,7 +27,6 @@ import {
 } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
-import { GLImpactSubtab } from "./Layout/GLImpactSubtab";
 import ConfirmationDialog from "./Dialog/ConfirmationDialog";
 
 const PurchaseOrderComp: React.FC = () => {
@@ -45,9 +43,9 @@ const PurchaseOrderComp: React.FC = () => {
   const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
+  const [updatePOStatus, { isLoading: isStatusUpdating }] = useUpdatePurchaseOrderStatusMutation();
   const [createPurchaseOrder, { isLoading: isCreating }] = useCreatePurchaseOrderMutation();
   const [updatePurchaseOrder, { isLoading: isUpdating }] = useUpdatePurchaseOrderMutation();
-  const [updatePOStatus, { isLoading: isStatusUpdating }] = useUpdatePurchaseOrderStatusMutation();
   const [deletePurchaseOrder] = useDeletePurchaseOrderMutation();
 
   // Eager List Query
@@ -70,18 +68,18 @@ const PurchaseOrderComp: React.FC = () => {
   const { data: departmentsData } = useGetDepartmentsQuery(undefined);
   const { data: currenciesData } = useGetCurrenciesQuery(undefined);
 
-  const purchaseOrders = Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : [];
-  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
-  const vendors = Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : [];
-  const cities = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
-  const items = Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : Array.isArray(itemsData) ? itemsData : [];
-  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
-  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
-  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
-  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : Array.isArray(currenciesData?.data) ? currenciesData.data : Array.isArray(currenciesData) ? currenciesData : [];
-  const grnsList = Array.isArray(grnsData?.result) ? grnsData.result : Array.isArray(grnsData?.data) ? grnsData.data : Array.isArray(grnsData) ? grnsData : [];
-  const invoicesList = Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : [];
-  const paymentsList = Array.isArray(paymentsData?.result) ? paymentsData.result : Array.isArray(paymentsData?.data) ? paymentsData.data : Array.isArray(paymentsData) ? paymentsData : [];
+  const purchaseOrders = Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : [];
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : [];
+  const vendors = Array.isArray(vendorsData?.result) ? vendorsData.result : [];
+  const cities = Array.isArray(citiesData?.result) ? citiesData.result : [];
+  const items = Array.isArray(itemsData?.result) ? itemsData.result : [];
+  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : [];
+  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : [];
+  const grnsList = Array.isArray(grnsData?.result) ? grnsData.result : [];
+  const invoicesList = Array.isArray(invoicesData?.result) ? invoicesData.result : [];
+  const paymentsList = Array.isArray(paymentsData?.result) ? paymentsData.result : [];
 
   const isGrnCompletedForPo = (po: any) => {
     if (!po) return false;
@@ -133,9 +131,17 @@ const PurchaseOrderComp: React.FC = () => {
           uom_id: "",
           rate: 0,
           amount: 0,
+          discount_percent: 0,
+          discount_amount: 0,
+          discountPercent: 0,
+          discountAmount: 0,
+          subtotal: 0,
           tax_rate: 0,
           tax_amount: 0,
+          taxRate: 0,
+          taxAmount: 0,
           line_total: 0,
+          lineTotal: 0,
           remarks: "",
           isActive: true,
         }
@@ -185,16 +191,32 @@ const PurchaseOrderComp: React.FC = () => {
           }
           const res = await updatePurchaseOrder({ id: editId, payload }).unwrap();
           toast.success(res?.message || "Purchase Order updated successfully.");
+          setSelectedPOId(Number(editId));
+          setViewMode("view");
+          setSearchParams({ id: String(editId), action: "view" });
         } else {
-          await createPurchaseOrder(payload).unwrap();
-          toast.success("Purchase Order created successfully");
+          const res = await createPurchaseOrder(payload).unwrap();
+          toast.success(res?.message || "Purchase Order created successfully");
+          const createdId =
+            res?.result?.header?.id ??
+            res?.result?.id ??
+            res?.data?.header?.id ??
+            res?.data?.id ??
+            res?.header?.id ??
+            res?.id;
+
+          if (createdId) {
+            setSelectedPOId(Number(createdId));
+            setViewMode("view");
+            setSearchParams({ id: String(createdId), action: "view" });
+          } else {
+            setViewMode("list");
+            setSearchParams({});
+          }
         }
-        setViewMode("list");
         setIsEdit(false);
         setEditId(null);
-        setSelectedPOId(null);
         formik.resetForm();
-        setSearchParams({});
         refetch();
       } catch (error: any) {
         toast.error(error?.data?.message || "Something went wrong");
@@ -421,24 +443,34 @@ const PurchaseOrderComp: React.FC = () => {
 
   const calculateTotals = () => {
     let subtotal = 0;
+    let discountAmount = 0;
     let taxAmount = 0;
 
-    formik.values.lineItems.forEach((item) => {
+    formik.values.lineItems.forEach((item: any) => {
       const qty = Number(item.quantity) || 0;
       const rate = Number(item.rate) || 0;
-      const taxRate = Number(item.tax_rate) || 0;
+      const discountPercent = Number(item.discount_percent || item.discountPercent) || 0;
+      const taxRate = Number(item.tax_rate || item.taxRate) || 0;
 
-      const lineSubtotal = qty * rate;
-      const lineTax = lineSubtotal * (taxRate / 100);
+      const gross = qty * rate;
+      const lineDisc = item.discount_amount != null && item.discount_amount !== ""
+        ? Number(item.discount_amount)
+        : (gross * discountPercent) / 100;
+      const taxable = gross - lineDisc;
+      const lineTax = item.tax_amount != null && item.tax_amount !== ""
+        ? Number(item.tax_amount)
+        : (taxable * taxRate) / 100;
 
-      subtotal += lineSubtotal;
+      subtotal += gross;
+      discountAmount += lineDisc;
       taxAmount += lineTax;
     });
 
-    const totalAmount = subtotal + taxAmount;
+    const totalAmount = subtotal - discountAmount + taxAmount;
 
     return {
       subtotal: subtotal.toFixed(2),
+      discountAmount: discountAmount.toFixed(2),
       taxAmount: taxAmount.toFixed(2),
       totalAmount: totalAmount.toFixed(2),
     };
@@ -488,10 +520,10 @@ const PurchaseOrderComp: React.FC = () => {
         if (typeof newValue === "string" && (newValue.includes(".") || newValue.includes(","))) {
           const intPart = newValue.split(".")[0].split(",")[0];
           newValue = intPart === "" ? "" : Math.floor(Number(intPart)) || 0;
-          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+          toast.error(`Quantity for UOM '${uomObj.uom_name}' cannot contain decimals.`);
         } else if (Number(newValue) % 1 !== 0) {
           newValue = Math.floor(Number(newValue)) || 0;
-          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+          toast.error(`Quantity for UOM '${uomObj.uom_name}' cannot contain decimals.`);
         }
       }
     }
@@ -502,20 +534,27 @@ const PurchaseOrderComp: React.FC = () => {
       const newUomObj = uoms.find((u: any) => String(u.id) === String(newValue));
       if (newUomObj && !isDecimalAllowedForUOM(newUomObj) && Number(lineItem.quantity) % 1 !== 0) {
         lineItem.quantity = Math.floor(Number(lineItem.quantity)) || 1;
-        toast.error(`Quantity adjusted to whole number for UOM '${newUomObj.uom_name || newUomObj.name}'.`);
+        toast.error(`Quantity adjusted to whole number for UOM '${newUomObj.uom_name}'.`);
       }
     }
 
     const qty = Number(lineItem.quantity) || 0;
     const rate = Number(lineItem.rate) || 0;
-    const taxRate = Number(lineItem.tax_rate) || 0;
+    const discountPercent = Number(lineItem.discount_percent || lineItem.discountPercent) || 0;
+    const taxRate = Number(lineItem.tax_rate || lineItem.taxRate) || 0;
 
-    const lineSubtotal = qty * rate;
-    const taxAmount = lineSubtotal * (taxRate / 100);
-    const lineTotal = lineSubtotal + taxAmount;
+    const gross = qty * rate;
+    const discountAmount = Number(((gross * discountPercent) / 100).toFixed(2));
+    const subtotal = Number((gross - discountAmount).toFixed(2));
+    const taxAmount = Number(((subtotal * taxRate) / 100).toFixed(2));
+    const lineTotal = Number((subtotal + taxAmount).toFixed(2));
 
-    lineItem.tax_amount = Number(taxAmount.toFixed(2));
-    lineItem.line_total = Number(lineTotal.toFixed(2));
+    lineItem.amount = gross;
+    lineItem.discount_percent = discountPercent;
+    lineItem.discount_amount = discountAmount;
+    lineItem.subtotal = subtotal;
+    lineItem.tax_amount = taxAmount;
+    lineItem.line_total = lineTotal;
 
     lineItems[index] = lineItem;
     formik.setFieldValue("lineItems", lineItems);
@@ -539,6 +578,9 @@ const PurchaseOrderComp: React.FC = () => {
         uom_id: "",
         rate: 0,
         amount: 0,
+        discount_percent: 0,
+        discount_amount: 0,
+        subtotal: 0,
         tax_rate: 0,
         tax_amount: 0,
         line_total: 0,
@@ -578,18 +620,29 @@ const PurchaseOrderComp: React.FC = () => {
         remarks: header.remarks ?? "",
       },
       lineItems: Array.isArray(lineSource) && lineSource.length > 0
-        ? lineSource.map((line: any) => ({
-          item_id: String(line.item_id ?? line.itemId ?? ""),
-          quantity: Number(line.quantity ?? line.qty ?? 1),
-          uom_id: String(line.uom_id ?? line.uomId ?? ""),
-          rate: Number(line.rate ?? line.unitPrice ?? 0),
-          amount: Number(line.amount ?? 0),
-          tax_rate: Number(line.tax_rate ?? line.taxRate ?? 0),
-          tax_amount: Number(line.tax_amount ?? line.taxAmount ?? 0),
-          line_total: Number(line.line_total ?? line.lineTotal ?? 0),
-          remarks: line.remarks ?? "",
-          isActive: line.isActive ?? true,
-        }))
+        ? lineSource.map((line: any) => {
+          const q = Number(line.quantity ?? line.qty ?? 1);
+          const r = Number(line.rate ?? line.unitPrice ?? 0);
+          const dp = Number(line.discount_percent ?? line.discountPercent ?? 0);
+          const da = line.discount_amount != null ? Number(line.discount_amount) : Number(((q * r * dp) / 100).toFixed(2));
+          const sub = line.subtotal != null ? Number(line.subtotal) : Number((q * r - da).toFixed(2));
+
+          return {
+            item_id: String(line.item_id ?? line.itemId ?? ""),
+            quantity: q,
+            uom_id: String(line.uom_id ?? line.uomId ?? ""),
+            rate: r,
+            amount: Number(line.amount ?? (q * r).toFixed(2)),
+            discount_percent: dp,
+            discount_amount: da,
+            subtotal: sub,
+            tax_rate: Number(line.tax_rate ?? line.taxRate ?? 0),
+            tax_amount: Number(line.tax_amount ?? line.taxAmount ?? 0),
+            line_total: Number(line.line_total ?? line.lineTotal ?? 0),
+            remarks: line.remarks ?? "",
+            isActive: line.isActive ?? true,
+          };
+        })
         : [
           {
             item_id: "",
@@ -597,6 +650,9 @@ const PurchaseOrderComp: React.FC = () => {
             uom_id: "",
             rate: 0,
             amount: 0,
+            discount_percent: 0,
+            discount_amount: 0,
+            subtotal: 0,
             tax_rate: 0,
             tax_amount: 0,
             line_total: 0,
@@ -713,10 +769,16 @@ const PurchaseOrderComp: React.FC = () => {
       <form onSubmit={formik.handleSubmit}>
         <RecordPageLayout
           recordType="Purchase Order"
-          recordTitle={isEdit ? `Edit Purchase Order #${formik.values.header.purchaseNo || editId}` : "New Purchase Order"}
-          subtitle={isEdit ? "Update purchase order header and line items" : "Primary Information & Line Items details"}
+          recordTitle={formik.values.header.purchaseNo ? `#${formik.values.header.purchaseNo}` : (isEdit && editId ? `#${editId}` : "")}
+          subtitle=""
           mode="edit"
-          onSave={() => formik.handleSubmit()}
+          onSave={async () => {
+            const errors = await formik.validateForm();
+            formik.handleSubmit();
+            if (Object.keys(errors).length > 0) {
+              toast.error("Please fill in all required fields marked with *.");
+            }
+          }}
           onCancel={handleCancel}
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
@@ -737,6 +799,8 @@ const PurchaseOrderComp: React.FC = () => {
                           <th className="p-2 border-r border-slate-400 min-w-[110px]">UNITS (UOM) *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">QTY *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">RATE (₹) *</th>
+                          <th className="p-2 border-r border-slate-400 w-20 text-right">DISCOUNT %</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">DISCOUNT (₹)</th>
                           <th className="p-2 border-r border-slate-400 w-28 text-right">SUBTOTAL (₹)</th>
                           <th className="p-2 border-r border-slate-400 w-20 text-right">TAX %</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">TAX AMT (₹)</th>
@@ -749,6 +813,15 @@ const PurchaseOrderComp: React.FC = () => {
                           const selectedUom = uoms.find((u: any) => String(u.id) === String(line.uom_id));
                           const allowsDecimals = isDecimalAllowedForUOM(selectedUom);
 
+                          const lineError = Array.isArray(formik.errors.lineItems) ? (formik.errors.lineItems as any)[index] : undefined;
+                          const lineTouched = Array.isArray(formik.touched.lineItems) ? (formik.touched.lineItems as any)[index] : undefined;
+
+                          const q = Number(line.quantity || 0);
+                          const r = Number(line.rate || 0);
+                          const dp = Number(line.discount_percent ?? line.discountPercent ?? 0);
+                          const da = line.discount_amount != null && line.discount_amount !== "" ? Number(line.discount_amount) : Number(((q * r * dp) / 100).toFixed(2));
+                          const sub = line.subtotal != null && line.subtotal !== "" ? Number(line.subtotal) : Number((q * r - da).toFixed(2));
+
                           return (
                             <tr key={index} className="hover:bg-slate-50">
                               <td className="p-2 text-center font-mono text-slate-500 border-r border-slate-200">{index + 1}</td>
@@ -756,7 +829,11 @@ const PurchaseOrderComp: React.FC = () => {
                                 <select
                                   value={line.item_id}
                                   onChange={(e) => fillLineItemFromSelectedItem(index, e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs focus:outline-none focus:border-sky-500 bg-white"
+                                  onBlur={formik.handleBlur}
+                                  className={`w-full h-7 px-2 text-xs border rounded-xs focus:outline-none focus:border-sky-500 bg-white ${(lineTouched?.item_id || formik.submitCount > 0) && lineError?.item_id
+                                    ? "border-red-500 bg-red-50"
+                                    : "border-slate-300"
+                                    }`}
                                 >
                                   <option value="">Select Item...</option>
                                   {items.map((item: any) => (
@@ -765,12 +842,19 @@ const PurchaseOrderComp: React.FC = () => {
                                     </option>
                                   ))}
                                 </select>
+                                {(lineTouched?.item_id || formik.submitCount > 0) && lineError?.item_id && (
+                                  <span className="text-[10px] text-red-600 block mt-0.5">{String(lineError.item_id)}</span>
+                                )}
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <select
                                   value={line.uom_id}
                                   onChange={(e) => updateLineItemField(index, "uom_id", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs focus:outline-none focus:border-sky-500 bg-white"
+                                  onBlur={formik.handleBlur}
+                                  className={`w-full h-7 px-2 text-xs border rounded-xs focus:outline-none focus:border-sky-500 bg-white ${(lineTouched?.uom_id || formik.submitCount > 0) && lineError?.uom_id
+                                    ? "border-red-500 bg-red-50"
+                                    : "border-slate-300"
+                                    }`}
                                 >
                                   <option value="">Select UOM...</option>
                                   {uoms.map((u: any) => (
@@ -779,6 +863,9 @@ const PurchaseOrderComp: React.FC = () => {
                                     </option>
                                   ))}
                                 </select>
+                                {(lineTouched?.uom_id || formik.submitCount > 0) && lineError?.uom_id && (
+                                  <span className="text-[10px] text-red-600 block mt-0.5">{String(lineError.uom_id)}</span>
+                                )}
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
@@ -804,8 +891,15 @@ const PurchaseOrderComp: React.FC = () => {
                                     }
                                   }}
                                   onChange={(e) => updateLineItemField(index, "quantity", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
+                                  onBlur={formik.handleBlur}
+                                  className={`w-full h-7 px-2 text-xs border rounded-xs text-right font-mono focus:outline-none focus:border-sky-500 ${(lineTouched?.quantity || formik.submitCount > 0) && lineError?.quantity
+                                    ? "border-red-500 bg-red-50"
+                                    : "border-slate-300"
+                                    }`}
                                 />
+                                {(lineTouched?.quantity || formik.submitCount > 0) && lineError?.quantity && (
+                                  <span className="text-[10px] text-red-600 block text-right mt-0.5">{String(lineError.quantity)}</span>
+                                )}
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
@@ -814,11 +908,32 @@ const PurchaseOrderComp: React.FC = () => {
                                   min="0"
                                   value={line.rate}
                                   onChange={(e) => updateLineItemField(index, "rate", e.target.value)}
+                                  onBlur={formik.handleBlur}
+                                  className={`w-full h-7 px-2 text-xs border rounded-xs text-right font-mono focus:outline-none focus:border-sky-500 ${(lineTouched?.rate || formik.submitCount > 0) && lineError?.rate
+                                    ? "border-red-500 bg-red-50"
+                                    : "border-slate-300"
+                                    }`}
+                                />
+                                {(lineTouched?.rate || formik.submitCount > 0) && lineError?.rate && (
+                                  <span className="text-[10px] text-red-600 block text-right mt-0.5">{String(lineError.rate)}</span>
+                                )}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0"
+                                  max="100"
+                                  value={line.discount_percent ?? line.discountPercent ?? 0}
+                                  onChange={(e) => updateLineItemField(index, "discount_percent", e.target.value)}
                                   className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
                                 />
                               </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700 bg-slate-50">
-                                ₹{(Number(line.quantity || 0) * Number(line.rate || 0)).toFixed(2)}
+                                ₹{da.toFixed(2)}
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700 bg-slate-50 font-semibold">
+                                ₹{sub.toFixed(2)}
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
@@ -865,7 +980,11 @@ const PurchaseOrderComp: React.FC = () => {
                       <span>Add Line Item</span>
                     </button>
 
-
+                    {typeof formik.errors.lineItems === "string" && (
+                      <span className="text-xs text-red-600 font-medium bg-red-50 px-2.5 py-1 border border-red-200 rounded-xs">
+                        {formik.errors.lineItems}
+                      </span>
+                    )}
                   </div>
                 </div>
               ),
@@ -987,6 +1106,9 @@ const PurchaseOrderComp: React.FC = () => {
                       : "border-slate-300 bg-white"
                       }`}
                   />
+                  {formik.touched.header?.deliveryDate && formik.errors.header?.deliveryDate && (
+                    <span className="text-[10px] text-red-600">{String(formik.errors.header.deliveryDate)}</span>
+                  )}
                 </div>
 
                 {/* Date */}
@@ -1005,6 +1127,9 @@ const PurchaseOrderComp: React.FC = () => {
                       : "border-slate-300 bg-white"
                       }`}
                   />
+                  {formik.touched.header?.purchaseDate && formik.errors.header?.purchaseDate && (
+                    <span className="text-[10px] text-red-600">{String(formik.errors.header.purchaseDate)}</span>
+                  )}
                 </div>
               </RecordSection>
             </div>
@@ -1020,6 +1145,12 @@ const PurchaseOrderComp: React.FC = () => {
                     <span className="font-semibold text-slate-700">SUBTOTAL</span>
                     <span>₹{totals.subtotal}</span>
                   </div>
+                  {Number(totals.discountAmount) > 0 && (
+                    <div className="flex justify-between text-emerald-700 font-semibold">
+                      <span>DISCOUNT TOTAL</span>
+                      <span>-₹{totals.discountAmount}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-slate-600 border-b border-slate-200 pb-1.5">
                     <span className="font-semibold text-slate-700">TAX TOTAL</span>
                     <span>₹{totals.taxAmount}</span>
@@ -1057,12 +1188,15 @@ const PurchaseOrderComp: React.FC = () => {
                   </option>
                 ))}
               </select>
+              {formik.touched.header?.subsidiary_id && formik.errors.header?.subsidiary_id && (
+                <span className="text-[10px] text-red-600">{String(formik.errors.header.subsidiary_id)}</span>
+              )}
             </div>
 
-            {/* Location / City */}
+            {/* Location */}
             <div className="flex flex-col space-y-1">
               <label className="text-[11px] font-semibold text-[#475569] uppercase tracking-wider">
-                LOCATION / CITY <span className="text-amber-600">*</span>
+                LOCATION <span className="text-amber-600">*</span>
               </label>
               <select
                 name="header.city_id"
@@ -1081,6 +1215,9 @@ const PurchaseOrderComp: React.FC = () => {
                   </option>
                 ))}
               </select>
+              {formik.touched.header?.city_id && formik.errors.header?.city_id && (
+                <span className="text-[10px] text-red-600">{String(formik.errors.header.city_id)}</span>
+              )}
             </div>
 
             {/* Class */}
@@ -1182,6 +1319,14 @@ const PurchaseOrderComp: React.FC = () => {
 
     const poLines = selectedPO.purchaseOrderLines || selectedPO.line_items || selectedPO.lineItems || [];
     const subtotal = poLines.reduce((acc: number, l: any) => acc + (Number(l.quantity || 0) * Number(l.rate || 0)), 0);
+    const discountTotal = poLines.reduce((acc: number, l: any) => {
+      const lineDiscAmt = l.discount_amount != null
+        ? Number(l.discount_amount)
+        : (l.discountAmount != null
+          ? Number(l.discountAmount)
+          : ((Number(l.quantity || 0) * Number(l.rate || 0) * Number(l.discount_percent || l.discountPercent || 0)) / 100));
+      return acc + (Number(lineDiscAmt) || 0);
+    }, 0);
     const taxTotal = poLines.reduce((acc: number, l: any) => acc + Number(l.tax_amount || 0), 0);
     const grandTotal = poLines.reduce((acc: number, l: any) => acc + Number(l.line_total || 0), 0);
 
@@ -1189,8 +1334,8 @@ const PurchaseOrderComp: React.FC = () => {
     const poNumberStr = poHeader.purchaseNo || `PO-${selectedPO.id}`;
     const statusStr = String(poHeader.status || selectedPO.status || "DRAFT").toUpperCase();
     const isDraft = statusStr === "DRAFT";
-    const isApproved = statusStr === "APPROVED";
-    const isReceivedOrCompleted = statusStr === "PARTIAL_RECEIVED" || statusStr === "COMPLETED";
+    // const isApproved = statusStr === "APPROVED";
+    // const isReceivedOrCompleted = statusStr === "PARTIAL_RECEIVED" || statusStr === "COMPLETED";
 
     const isPoGrnDone = isGrnCompletedForPo(selectedPO);
     const isPoBillDone = isBillCompletedForPo(selectedPO);
@@ -1204,7 +1349,8 @@ const PurchaseOrderComp: React.FC = () => {
     return (
       <RecordPageLayout
         recordType="Purchase Order"
-        subtitle={`${poNumberStr} ${vendorDisplayName}`}
+        recordTitle={poNumberStr ? `#${poNumberStr.replace(/^#/, "")}` : ""}
+        subtitle=""
         mode="view"
         onEdit={isDraft && canUpdate("purchase_order") ? () => handleEdit(selectedPO.id) : undefined}
         onBack={() => { setViewMode("list"); setSearchParams({}); }}
@@ -1292,27 +1438,32 @@ const PurchaseOrderComp: React.FC = () => {
                         <th className="p-2 border-r border-slate-400 min-w-[80px]">UNITS</th>
                         <th className="p-2 border-r border-slate-400 w-20 text-right">QUANTITY</th>
                         <th className="p-2 border-r border-slate-400 w-24 text-right">RATE (₹)</th>
-                        <th className="p-2 border-r border-slate-400 w-24 text-right">AMOUNT (₹)</th>
+                        <th className="p-2 border-r border-slate-400 w-20 text-right">DISC %</th>
+                        <th className="p-2 border-r border-slate-400 w-24 text-right">DISC AMT (₹)</th>
+                        <th className="p-2 border-r border-slate-400 w-28 text-right">SUBTOTAL (₹)</th>
                         <th className="p-2 border-r border-slate-400 w-20 text-right">TAX RATE</th>
                         <th className="p-2 border-r border-slate-400 w-24 text-right">TAX AMT (₹)</th>
-                        <th className="p-2 w-28 text-right">GROSS AMT (₹)</th>
+                        <th className="p-2 w-28 text-right">TOTAL (₹)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {poLines.length === 0 ? (
                         <tr>
-                          <td colSpan={9} className="p-4 text-center text-slate-400 italic">No line items in this order.</td>
+                          <td colSpan={11} className="p-4 text-center text-slate-400 italic">No line items in this order.</td>
                         </tr>
                       ) : (
                         poLines.map((l: any, idx: number) => {
                           const itemObj = items.find((i: any) => String(i.id) === String(l.item_id || l.itemId));
                           const uomObj = uoms.find((u: any) => String(u.id) === String(l.uom_id || l.uomId));
-                          const lineQty = Number(l.quantity ?? l.qty ?? 0);
-                          const lineRate = Number(l.rate ?? l.unitPrice ?? 0);
-                          const lineSub = lineQty * lineRate;
-                          const lineTaxRate = Number(l.tax_rate ?? l.taxRate ?? 0);
-                          const lineTaxAmt = Number(l.tax_amount ?? (lineSub * (lineTaxRate / 100)) ?? 0);
-                          const lineGross = Number(l.line_total ?? (lineSub + lineTaxAmt) ?? 0);
+                          const lineQty = Number(l.quantity || l.qty || 0);
+                          const lineRate = Number(l.rate || l.unitPrice || 0);
+                          const lineGross = lineQty * lineRate;
+                          const lineDiscPercent = Number(l.discount_percent ?? l.discountPercent ?? 0);
+                          const lineDiscAmt = l.discount_amount != null ? Number(l.discount_amount) : ((lineGross * lineDiscPercent) / 100);
+                          const lineSubtotal = l.subtotal != null ? Number(l.subtotal) : (lineGross - lineDiscAmt);
+                          const lineTaxRate = Number(l.tax_rate || l.taxRate || 0);
+                          const lineTaxAmt = l.tax_amount != null ? Number(l.tax_amount) : (lineSubtotal * (lineTaxRate / 100));
+                          const lineTotal = l.line_total != null ? Number(l.line_total) : (lineSubtotal + lineTaxAmt);
 
                           return (
                             <tr key={idx} className="hover:bg-slate-50">
@@ -1325,10 +1476,12 @@ const PurchaseOrderComp: React.FC = () => {
                               </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold">{lineQty}</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lineRate.toFixed(2)}</td>
-                              <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lineSub.toFixed(2)}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono">{lineDiscPercent}%</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lineDiscAmt.toFixed(2)}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold">₹{lineSubtotal.toFixed(2)}</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">{lineTaxRate}%</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lineTaxAmt.toFixed(2)}</td>
-                              <td className="p-2 text-right font-mono font-bold text-slate-900">₹{lineGross.toFixed(2)}</td>
+                              <td className="p-2 text-right font-mono font-bold text-slate-900">₹{lineTotal.toFixed(2)}</td>
                             </tr>
                           );
                         })
@@ -1339,35 +1492,6 @@ const PurchaseOrderComp: React.FC = () => {
               </div>
             ),
           },
-          ...(!isDraft
-            ? [
-              {
-                id: "gl_impact",
-                label: "GL Impact",
-                content: (
-                  <GLImpactSubtab
-                    documentNumber={poNumberStr}
-                    entries={[
-                      {
-                        accountCode: "1100",
-                        accountName: "Inventory Asset / Encumbrances",
-                        debit: grandTotal,
-                        credit: 0,
-                        memo: `Purchase Order Encumbrance #${poNumberStr}`,
-                      },
-                      {
-                        accountCode: "2200",
-                        accountName: "Accrued Purchase Commitments",
-                        debit: 0,
-                        credit: grandTotal,
-                        memo: `Vendor Commitment - ${vendorDisplayName}`,
-                      },
-                    ]}
-                  />
-                ),
-              },
-            ]
-            : []),
           {
             id: "shipping",
             label: "Shipping",
@@ -1477,6 +1601,12 @@ const PurchaseOrderComp: React.FC = () => {
                   <span className="font-semibold text-slate-600 uppercase text-[10px]">SUBTOTAL</span>
                   <span className="font-bold text-slate-900">₹{subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                 </div>
+                {discountTotal > 0 && (
+                  <div className="flex justify-between items-center border-b border-slate-200 pb-1 text-emerald-700">
+                    <span className="font-semibold uppercase text-[10px]">DISCOUNT TOTAL</span>
+                    <span className="font-bold">-₹{discountTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center border-b border-slate-200 pb-1">
                   <span className="font-semibold text-slate-600 uppercase text-[10px]">TAX TOTAL</span>
                   <span className="font-bold text-slate-900">₹{taxTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
@@ -1635,13 +1765,6 @@ const PurchaseOrderComp: React.FC = () => {
                 const poNoStr = po.purchaseNo || `PO-${po.id}`;
 
                 const poIsGrnDone = isGrnCompletedForPo(po);
-                const poIsBillDone = isBillCompletedForPo(po);
-                const poIsPaymentDone = isPaymentCompletedForPo(po);
-
-                const canShowReceive = !isDraft && !poIsGrnDone;
-                const canShowBill = !isDraft && poIsGrnDone && !poIsBillDone;
-                const canShowPayment = !isDraft && poIsBillDone && !poIsPaymentDone;
-                const canShowReturn = !isDraft && poIsPaymentDone;
 
                 return (
                   <tr key={po.id} className="hover:bg-sky-50/50 transition-colors">
@@ -1657,54 +1780,6 @@ const PurchaseOrderComp: React.FC = () => {
                       <button onClick={() => handleView(po.id)} className="text-sky-700 hover:underline cursor-pointer">
                         View
                       </button>
-                      {canShowReceive && (
-                        <>
-                          <span className="text-slate-300">|</span>
-                          <button
-                            type="button"
-                            onClick={() => navigate(`/grn?poId=${po.id}`)}
-                            className="text-sky-700 font-semibold hover:underline cursor-pointer"
-                          >
-                            Receive
-                          </button>
-                        </>
-                      )}
-                      {canShowBill && (
-                        <>
-                          <span className="text-slate-300">|</span>
-                          <button
-                            type="button"
-                            onClick={() => navigate(`/purchase-invoice?poId=${po.id}`)}
-                            className="text-[#0070d2] font-semibold hover:underline cursor-pointer"
-                          >
-                            Bill
-                          </button>
-                        </>
-                      )}
-                      {canShowPayment && (
-                        <>
-                          <span className="text-slate-300">|</span>
-                          <button
-                            type="button"
-                            onClick={() => navigate(`/purchase-payment?poId=${po.id}`)}
-                            className="text-emerald-700 font-semibold hover:underline cursor-pointer"
-                          >
-                            Payment
-                          </button>
-                        </>
-                      )}
-                      {canShowReturn && (
-                        <>
-                          <span className="text-slate-300">|</span>
-                          <button
-                            type="button"
-                            onClick={() => navigate(`/purchase-return?poId=${po.id}`)}
-                            className="text-purple-700 font-semibold hover:underline cursor-pointer"
-                          >
-                            Return
-                          </button>
-                        </>
-                      )}
                     </td>
                     <td className="p-2 border-r border-slate-200 font-mono text-slate-600">{po.id}</td>
                     <td className="p-2 border-r border-slate-200 font-mono font-bold text-sky-800">
@@ -1727,7 +1802,7 @@ const PurchaseOrderComp: React.FC = () => {
                       ₹{totalLineVal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                     </td>
                     <td className="p-2 text-center">
-                      {canDelete("purchase_order") && isDraft && (
+                      {canDelete("purchase_order") && !poIsGrnDone && (
                         <button
                           onClick={() => {
                             setDeleteId(po.id);

@@ -21,7 +21,7 @@ import {
   useGetDebitNotesQuery,
   useUpdateDebitNoteMutation,
 } from "../RTK/services/debitNoteApi";
-import { useGetPurchaseInvoicesQuery } from "../RTK/services/purchaseApi";
+import { useGetPurchaseInvoicesQuery, useGetPurchaseReturnsQuery } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
 import { GLImpactSubtab } from "./Layout/GLImpactSubtab";
@@ -46,6 +46,7 @@ export default function DebitNoteComp() {
   // Eager Queries
   const { data: debitNotesData, refetch: refetchDebitNotes } = useGetDebitNotesQuery({ page: 1, limit: 50 });
   const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 });
+  const { data: purchaseReturnsData } = useGetPurchaseReturnsQuery({ page: 1, limit: 100 });
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
   const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
   const { data: subsidiariesData } = useGetSubsidiariesQuery(undefined);
@@ -60,6 +61,7 @@ export default function DebitNoteComp() {
 
   const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
   const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : []), [invoicesData]);
+  const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : Array.isArray(purchaseReturnsData) ? purchaseReturnsData : []), [purchaseReturnsData]);
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
   const accounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : [];
   const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
@@ -108,12 +110,17 @@ export default function DebitNoteComp() {
           await createDebitNote(payload).unwrap();
           toast.success("Debit Note recorded successfully.");
         }
-        setViewMode("list");
-        setIsEdit(false);
-        setEditId(null);
-        setSearchParams({});
-        formik.resetForm();
-        refetchDebitNotes();
+        const returnId = searchParams.get("returnId");
+        if (returnId) {
+          navigate(`/purchase-return?action=view&id=${returnId}`);
+        } else {
+          setViewMode("list");
+          setIsEdit(false);
+          setEditId(null);
+          setSearchParams({});
+          formik.resetForm();
+          refetchDebitNotes();
+        }
       } catch (error: any) {
         toast.error(error?.data?.message || "Something went wrong.");
       }
@@ -131,8 +138,35 @@ export default function DebitNoteComp() {
       setIsEdit(false);
       const retObj = purchaseReturns.find((r: any) => String(r.id) === String(returnId));
       if (retObj) {
-        if (retObj.vendorId || retObj.vendor_id) {
-          formik.setFieldValue("vendorId", String(retObj.vendorId || retObj.vendor_id));
+        const header = retObj.header || retObj;
+        const statusVal = String(header.status || retObj.status || "").toUpperCase();
+        if (statusVal !== "FULFILLED" && statusVal !== "RETURNED") {
+          toast.error(`Purchase Return #${header.returnNumber || header.return_number || returnId} must be FULFILLED before creating a Vendor Credit.`);
+          setViewMode("list");
+          setSearchParams({});
+          return;
+        }
+        if (header.vendorId || header.vendor_id) {
+          formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
+        }
+        if (header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id) {
+          formik.setFieldValue("purchaseInvoiceHeaderId", String(header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id));
+        }
+        const totalAmt = Number(header.totalAmount || header.total_amount || 0);
+        if (totalAmt > 0) {
+          formik.setFieldValue("amount", totalAmt);
+        }
+        if (header.subsidiary_id || header.subsidiaryId) {
+          formik.setFieldValue("subsidiary_id", String(header.subsidiary_id || header.subsidiaryId));
+        }
+        if (header.class_id || header.classId) {
+          formik.setFieldValue("class_id", String(header.class_id || header.classId));
+        }
+        if (header.department_id || header.departmentId) {
+          formik.setFieldValue("department_id", String(header.department_id || header.departmentId));
+        }
+        if (header.currency_id || header.currencyId) {
+          formik.setFieldValue("currency_id", String(header.currency_id || header.currencyId));
         }
       }
     } else if (invoiceId) {

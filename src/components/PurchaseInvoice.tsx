@@ -23,6 +23,7 @@ import {
   useCreatePurchaseInvoiceMutation,
   useDeletePurchaseInvoiceMutation,
   useGetGRNsQuery,
+  useGetPurchaseInvoiceByIdQuery,
   useGetPurchaseInvoicesQuery,
   useGetPurchaseOrdersQuery,
   useUpdatePurchaseInvoiceMutation,
@@ -115,6 +116,14 @@ const PurchaseInvoiceComp: React.FC = () => {
   const [invoiceToDelete, setInvoiceToDelete] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  const urlId = searchParams.get("id");
+  const urlAction = searchParams.get("action");
+  const shouldFetchSingle = Boolean(urlId && (urlAction === "view" || urlAction === "edit"));
+
+  const { data: singleInvoiceData, isLoading: isSingleLoading } = useGetPurchaseInvoiceByIdQuery(urlId || "", {
+    skip: !shouldFetchSingle,
+  });
 
   // Eager Queries
   const { data: purchaseInvoicesData, refetch: refetchInvoices } = useGetPurchaseInvoicesQuery({ page: 1, limit: 50 });
@@ -228,16 +237,27 @@ const PurchaseInvoiceComp: React.FC = () => {
         };
 
         if (isEdit && editId) {
-          await updatePurchaseInvoice({ id: editId, body: payload }).unwrap();
+          const res: any = await updatePurchaseInvoice({ id: editId, body: payload }).unwrap();
           toast.success("Vendor Bill updated successfully.");
+          const updatedRecord = res?.result || res?.data || res;
+          setSelectedInvoice(updatedRecord || { header: payload.header, lineItems: payload.lineItems, id: editId });
+          setViewMode("view");
+          setIsEdit(false);
+          setEditId(null);
+          setSearchParams({ id: String(editId), action: "view" });
         } else {
-          await createPurchaseInvoice(payload).unwrap();
+          const res: any = await createPurchaseInvoice(payload).unwrap();
           toast.success("Vendor Bill created successfully.");
+          const createdRecord = res?.result || res?.data || res;
+          const createdId = createdRecord?.header?.id || createdRecord?.id;
+          setSelectedInvoice(createdRecord || { header: payload.header, lineItems: payload.lineItems, id: createdId });
+          setViewMode("view");
+          setIsEdit(false);
+          setEditId(null);
+          if (createdId) {
+            setSearchParams({ id: String(createdId), action: "view" });
+          }
         }
-        setViewMode("list");
-        setIsEdit(false);
-        setEditId(null);
-        setSearchParams({});
         formik.resetForm();
         refetchInvoices();
       } catch (error: any) {
@@ -348,8 +368,8 @@ const PurchaseInvoiceComp: React.FC = () => {
       formik.setFieldValue("header.remarks", grnMemo);
     }
 
-    // 4. Auto-populate Location / City from GRN
-    const grnLoc = grnObj.location_id || grnObj.locationId || grnObj.city_id || grnObj.godownId || grnObj.warehouseId;
+    // 4. Auto-populate Location / City from PO or GRN
+    const grnLoc = poObj?.city_id || poObj?.cityId || poObj?.location_id || poObj?.locationId || grnObj.location_id || grnObj.locationId || grnObj.city_id || grnObj.godownId || grnObj.warehouseId;
     if (grnLoc) {
       formik.setFieldValue("header.location_id", String(grnLoc));
     }
@@ -399,8 +419,30 @@ const PurchaseInvoiceComp: React.FC = () => {
           0
         );
 
-        const discountPercent = Number(matchedPoLine?.discountPercent ?? matchedPoLine?.discount_percent ?? 0);
-        const taxPercent = Number(matchedPoLine?.taxPercent ?? matchedPoLine?.tax_percent ?? 0);
+        const discountPercent = Number(
+          matchedPoLine?.discount_percent ??
+          matchedPoLine?.discountPercent ??
+          gLine.discount_percent ??
+          gLine.discountPercent ??
+          0
+        );
+        const taxPercent = Number(
+          matchedPoLine?.tax_rate ??
+          matchedPoLine?.taxRate ??
+          matchedPoLine?.tax_percent ??
+          matchedPoLine?.taxPercent ??
+          gLine.purchaseOrderLine?.tax_rate ??
+          gLine.purchaseOrderLine?.taxRate ??
+          gLine.purchaseOrderLine?.tax_percent ??
+          gLine.purchaseOrderLine?.taxPercent ??
+          gLine.tax_rate ??
+          gLine.taxRate ??
+          gLine.tax_percent ??
+          gLine.taxPercent ??
+          itemObj?.hsnSacCode?.taxPercentage ??
+          itemObj?.hsnSac?.taxPercentage ??
+          0
+        );
 
         const baseLine: PurchaseInvoiceLineForm = {
           invoiceHeaderId: "",
@@ -457,7 +499,7 @@ const PurchaseInvoiceComp: React.FC = () => {
     }
 
     // 3. Auto-populate Location / City from PO
-    const poLoc = poObj.city_id || poObj.cityId || poObj.location_id || poObj.locationId;
+    const poLoc = poObj.city_id || poObj.cityId || poObj.location_id || poObj.locationId || poObj.location?.id || poObj.city?.id;
     if (poLoc) {
       formik.setFieldValue("header.location_id", String(poLoc));
     }
@@ -487,8 +529,18 @@ const PurchaseInvoiceComp: React.FC = () => {
 
         const quantity = Number(poLine.quantity ?? poLine.qty ?? 1);
         const unitPrice = Number(poLine.rate ?? poLine.unitPrice ?? poLine.unit_price ?? itemObj?.purchase_price ?? itemObj?.cost_price ?? itemObj?.default_rate ?? 0);
-        const discountPercent = Number(poLine.discountPercent ?? poLine.discount_percent ?? 0);
-        const taxPercent = Number(poLine.tax_rate ?? poLine.taxRate ?? poLine.taxPercent ?? 0);
+        const discountPercent = Number(poLine.discount_percent ?? poLine.discountPercent ?? 0);
+        const taxPercent = Number(
+          poLine.tax_rate ??
+          poLine.taxRate ??
+          poLine.tax_percent ??
+          poLine.taxPercent ??
+          poLine.hsnSac?.taxPercentage ??
+          poLine.hsnSacCode?.taxPercentage ??
+          itemObj?.hsnSacCode?.taxPercentage ??
+          itemObj?.hsnSac?.taxPercentage ??
+          0
+        );
 
         const baseLine: PurchaseInvoiceLineForm = {
           invoiceHeaderId: "",
@@ -517,12 +569,12 @@ const PurchaseInvoiceComp: React.FC = () => {
     }
   }, [formik.values.header.poHeaderId, formik.values.header.grnHeaderId, purchaseOrders, items, isEdit, userId]);
 
-  // Sync state with URL search params (PO / GRN bill link support)
+  // Sync state with URL search params (Single Bill View / PO / GRN link support)
   useEffect(() => {
     const urlPoId = searchParams.get("poId") || searchParams.get("po_id");
     const urlGrnId = searchParams.get("grnId") || searchParams.get("grn_id");
-    const urlAction = searchParams.get("action");
-    const urlId = searchParams.get("id");
+    const currentAction = searchParams.get("action");
+    const currentId = searchParams.get("id");
 
     if (urlPoId && !formik.values.header.poHeaderId) {
       formik.setFieldValue("header.poHeaderId", urlPoId);
@@ -530,17 +582,25 @@ const PurchaseInvoiceComp: React.FC = () => {
     } else if (urlGrnId && !formik.values.header.grnHeaderId) {
       formik.setFieldValue("header.grnHeaderId", urlGrnId);
       setViewMode("form");
-    } else if (urlAction === "create") {
+    } else if (currentAction === "create") {
       setViewMode("form");
       setIsEdit(false);
-    } else if (urlId && urlAction === "view") {
-      const inv = purchaseInvoices.find((i: any) => String(i.id) === String(urlId));
-      if (inv) {
-        setSelectedInvoice(inv);
-        setViewMode("view");
+    } else if (currentId && currentAction === "view") {
+      if (singleInvoiceData) {
+        const inv = singleInvoiceData.result || singleInvoiceData.data || singleInvoiceData;
+        if (inv) {
+          setSelectedInvoice(inv);
+          setViewMode("view");
+        }
+      } else {
+        const inv = purchaseInvoices.find((i: any) => String(i.id) === String(currentId));
+        if (inv) {
+          setSelectedInvoice(inv);
+          setViewMode("view");
+        }
       }
     }
-  }, [searchParams, purchaseInvoices]);
+  }, [searchParams, singleInvoiceData, purchaseInvoices]);
 
   const updateLineItem = (index: number, key: keyof PurchaseInvoiceLineForm, value: any) => {
     const updated = [...formik.values.lineItems];
@@ -567,6 +627,19 @@ const PurchaseInvoiceComp: React.FC = () => {
       if (foundItem) {
         nextLine.unitPrice = Number(foundItem.purchase_price || foundItem.cost_price || foundItem.default_rate || 0);
         nextLine.uom_id = String(foundItem.uom_id || "");
+        const itemTax = Number(
+          foundItem.hsnSacCode?.taxPercentage ??
+          foundItem.hsnSac?.taxPercentage ??
+          foundItem.tax_rate ??
+          foundItem.taxRate ??
+          foundItem.taxPercentage ??
+          0
+        );
+        nextLine.taxPercent = itemTax;
+
+        if (!formik.values.header.location_id && foundItem.location_id) {
+          formik.setFieldValue("header.location_id", String(foundItem.location_id));
+        }
       }
     }
 
@@ -600,15 +673,20 @@ const PurchaseInvoiceComp: React.FC = () => {
     );
   }, [formik.values.lineItems]);
 
-  const handleEdit = (id: number | string) => {
+  const handleEdit = (id: number | string, preloadedInv?: any) => {
     if (!canUpdate("purchase_invoice")) {
       toast.error("No permission to edit Vendor Bill");
       return;
     }
-    const inv = purchaseInvoices.find((item: any) => String(item.id) === String(id));
+    const inv = preloadedInv || purchaseInvoices.find((item: any) => String(item.id) === String(id)) || selectedInvoice;
     if (!inv) return;
 
     const header = inv.header || inv;
+    const invStatus = String(header.status || "").toUpperCase();
+    if (invStatus !== "DRAFT") {
+      toast.error(`Only DRAFT Vendor Bills can be edited. Current status: ${invStatus}`);
+      return;
+    }
     const lines = inv.lineItems || inv.purchaseInvoiceLines || [];
     const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
 
@@ -673,9 +751,9 @@ const PurchaseInvoiceComp: React.FC = () => {
     const inv = purchaseInvoices.find((item: any) => String(item.id) === String(id));
     if (inv) {
       setSelectedInvoice(inv);
-      setViewMode("view");
-      setSearchParams({ id: String(id), action: "view" });
     }
+    setViewMode("view");
+    setSearchParams({ id: String(id), action: "view" });
   };
 
   const confirmDelete = async () => {
@@ -730,6 +808,17 @@ const PurchaseInvoiceComp: React.FC = () => {
     const billNoStr = activeHeader.invoiceNumber || activeHeader.invoice_number || `INV-${selectedInvoice?.id || "NEW"}`;
     const activeBillTotal = isView ? viewGrandTotal : totals.total;
 
+    const isDraftBill = String(activeHeader.status || (selectedInvoice?.header || selectedInvoice)?.status || "").toUpperCase() === "DRAFT";
+
+    if (isView && isSingleLoading && !selectedInvoice) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
+          <div className="w-8 h-8 border-4 border-sky-600 border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-sm font-semibold text-slate-600">Loading Vendor Bill #{urlId}...</span>
+        </div>
+      );
+    }
+
     return (
       <form onSubmit={formik.handleSubmit}>
         <RecordPageLayout
@@ -737,24 +826,35 @@ const PurchaseInvoiceComp: React.FC = () => {
           subtitle={isView ? `Bill #${billNoStr} ${vendorName}` : isEdit ? `Edit Vendor Bill #${formik.values.header.invoiceNumber}` : "New Vendor Bill"}
           mode={isView ? "view" : "edit"}
           onSave={() => formik.handleSubmit()}
-          onEdit={() => { if (selectedInvoice) handleEdit(selectedInvoice.id); }}
+          onEdit={
+            selectedInvoice && String((selectedInvoice.header || selectedInvoice).status || "").toUpperCase() === "DRAFT" && canUpdate("purchase_invoice")
+              ? () => handleEdit(selectedInvoice.id || selectedInvoice.header?.id)
+              : undefined
+          }
           onBack={() => { setViewMode("list"); setSearchParams({}); }}
           onCancel={() => { setViewMode("list"); setSearchParams({}); }}
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
           customActions={
-            isView && selectedInvoice ? (
+            isView && selectedInvoice && !isDraftBill ? (
               <div className="flex items-center space-x-1.5">
                 <button
                   type="button"
-                  onClick={() => navigate(`/purchase-return?billId=${selectedInvoice.id}`)}
+                  onClick={() => navigate(`/purchase-payment?billId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
+                  className="bg-[#0070d2] hover:bg-blue-700 text-white text-xs font-bold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
+                >
+                  <span>Make Payment</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/purchase-return?billId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
                   className="bg-red-700 hover:bg-red-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
                 >
                   Authorize Return
                 </button>
                 <button
                   type="button"
-                  onClick={() => navigate(`/debit-note?invoiceId=${selectedInvoice.id}`)}
+                  onClick={() => navigate(`/debit-note?invoiceId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
                   className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
                 >
                   Debit Note
@@ -777,7 +877,8 @@ const PurchaseInvoiceComp: React.FC = () => {
                           <th className="p-2 border-r border-slate-400 min-w-[180px]">ITEM *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">QTY *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">UNIT PRICE (₹) *</th>
-                          <th className="p-2 border-r border-slate-400 w-24 text-right">DISCOUNT %</th>
+                          <th className="p-2 border-r border-slate-400 w-20 text-right">DISCOUNT %</th>
+                          <th className="p-2 border-r border-slate-400 w-24 text-right">DISCOUNT AMT (₹)</th>
                           <th className="p-2 border-r border-slate-400 w-20 text-right">TAX %</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">TAX AMT (₹)</th>
                           <th className="p-2 border-r border-slate-400 w-28 text-right">TOTAL (₹)</th>
@@ -793,8 +894,9 @@ const PurchaseInvoiceComp: React.FC = () => {
                           if (isView) {
                             const lQty = Number(line.quantity || 0);
                             const lPrice = Number(line.unitPrice || line.unit_price || 0);
+                            const lDiscount = Number(line.discountAmount || line.discount_amount || ((lQty * lPrice * Number(line.discountPercent || 0)) / 100));
                             const lTax = Number(line.taxAmount || line.tax_amount || 0);
-                            const lTotal = Number(line.lineTotal || line.line_total || (lQty * lPrice + lTax));
+                            const lTotal = Number(line.lineTotal || line.line_total || (lQty * lPrice - lDiscount + lTax));
 
                             return (
                               <tr key={idx} className="hover:bg-slate-50">
@@ -803,6 +905,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold">{lQty}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lPrice.toFixed(2)}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">{line.discountPercent || 0}%</td>
+                                <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700 bg-slate-50">₹{lDiscount.toFixed(2)}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">{line.taxPercent || 0}%</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lTax.toFixed(2)}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900">₹{lTotal.toFixed(2)}</td>
@@ -810,15 +913,19 @@ const PurchaseInvoiceComp: React.FC = () => {
                             );
                           }
 
+                          const isPoLinked = Boolean(formik.values.header.poHeaderId || formik.values.header.grnHeaderId || line.poLineId || line.grnLineId);
+
                           return (
                             <tr key={idx} className="hover:bg-slate-50">
                               <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <select
-                                  disabled={true}
+                                  disabled={isPoLinked}
                                   value={line.itemId}
                                   onChange={(e) => updateLineItem(idx, "itemId", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 font-medium text-slate-800 cursor-not-allowed"
+                                  className={`w-full h-7 px-2 text-xs border border-slate-300 rounded-xs font-medium text-slate-800 ${
+                                    isPoLinked ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
+                                  }`}
                                 >
                                   <option value="">Select Item...</option>
                                   {items.map((i: any) => (
@@ -831,7 +938,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
                                   type="number"
-                                  disabled={true}
+                                  disabled={isPoLinked}
                                   step={allowsDecimals ? "any" : "1"}
                                   min={allowsDecimals ? "0.01" : "1"}
                                   value={line.quantity}
@@ -841,17 +948,20 @@ const PurchaseInvoiceComp: React.FC = () => {
                                     }
                                   }}
                                   onChange={(e) => updateLineItem(idx, "quantity", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono bg-slate-100 font-bold text-slate-800 cursor-not-allowed"
+                                  className={`w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono font-bold text-slate-800 ${
+                                    isPoLinked ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
+                                  }`}
                                 />
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
                                   type="number"
+                                  disabled={true}
                                   step="any"
                                   min="0"
                                   value={line.unitPrice}
                                   onChange={(e) => updateLineItem(idx, "unitPrice", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono bg-slate-100 font-semibold text-slate-800 cursor-not-allowed"
                                 />
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
@@ -864,15 +974,26 @@ const PurchaseInvoiceComp: React.FC = () => {
                                   className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
                                 />
                               </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700 bg-slate-50">
+                                ₹{Number(line.discountAmount || 0).toFixed(2)}
+                              </td>
                               <td className="p-1.5 border-r border-slate-200">
-                                <input
-                                  type="number"
-                                  step="any"
-                                  min="0"
-                                  value={line.taxPercent}
-                                  onChange={(e) => updateLineItem(idx, "taxPercent", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
-                                />
+                                {isPoLinked ? (
+                                  <div className="flex items-center justify-end space-x-1 bg-slate-100 border border-slate-200 rounded-xs px-2 py-1 text-xs text-slate-700 select-none">
+                                    <span className="font-mono font-semibold">{Number(line.taxPercent || 0)}%</span>
+                                    <span className="text-[10px] text-amber-800 bg-amber-100 px-1 py-0.2 rounded-xs font-bold" title="Tax Rate is strictly locked from Purchase Order">🔒</span>
+                                  </div>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    max="100"
+                                    value={line.taxPercent}
+                                    onChange={(e) => updateLineItem(idx, "taxPercent", e.target.value)}
+                                    className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
+                                  />
+                                )}
                               </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700 bg-slate-50">
                                 ₹{Number(line.taxAmount || 0).toFixed(2)}
@@ -1012,7 +1133,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                 </RecordSection>
               ),
             },
-            ...(isView
+            ...(isView && !isDraftBill
               ? [
                 {
                   id: "gl_impact",
@@ -1167,6 +1288,18 @@ const PurchaseInvoiceComp: React.FC = () => {
                       <span className="text-[10px] font-semibold text-slate-500 uppercase">MEMO</span>
                       <span className="text-xs font-semibold text-slate-800">{activeHeader.remarks || "—"}</span>
                     </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">STATUS</span>
+                      <div>
+                        <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
+                          String(activeHeader.status || "").toUpperCase() === "DRAFT"
+                            ? "bg-amber-100 text-amber-800 border-amber-200"
+                            : "bg-emerald-100 text-emerald-800 border-emerald-200"
+                        }`}>
+                          {activeHeader.status || "DRAFT"}
+                        </span>
+                      </div>
+                    </div>
                   </>
                 ) : (
                   <>
@@ -1269,6 +1402,21 @@ const PurchaseInvoiceComp: React.FC = () => {
                             {c.currency_code || c.code} - {c.currency_name || c.name}
                           </option>
                         ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">STATUS</label>
+                      <select
+                        name="header.status"
+                        value={formik.values.header.status || "DRAFT"}
+                        onChange={formik.handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold uppercase text-slate-800"
+                      >
+                        <option value="DRAFT">DRAFT</option>
+                        <option value="APPROVED">APPROVED</option>
+                        <option value="POSTED">POSTED</option>
+                        <option value="CANCELLED">CANCELLED</option>
                       </select>
                     </div>
 
@@ -1470,14 +1618,13 @@ const PurchaseInvoiceComp: React.FC = () => {
               <th className="p-2 border-r border-slate-300 min-w-[180px]">VENDOR</th>
               <th className="p-2 border-r border-slate-300 w-28">BILL DATE</th>
               <th className="p-2 border-r border-slate-300 w-28">DUE DATE</th>
-              <th className="p-2 border-r border-slate-300 w-28 text-center">STATUS</th>
-              <th className="p-2 w-20 text-center">ACTIONS</th>
+              <th className="p-2 w-28 text-center">STATUS</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
             {filteredInvoices.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-8 text-center text-slate-500 font-medium italic">
+                <td colSpan={7} className="p-8 text-center text-slate-500 font-medium italic">
                   {searchTerm ? "No matching vendor bills found." : "No Vendor Bills found. Click '+ New Vendor Bill' to create one."}
                 </td>
               </tr>
@@ -1486,23 +1633,23 @@ const PurchaseInvoiceComp: React.FC = () => {
                 const invNoStr = inv.invoiceNumber || inv.invoice_number || `INV-${inv.id}`;
                 const vendorName = getVendorDisplayName(inv.vendor);
 
+                const isDraft = String(inv.status || "").toUpperCase() === "DRAFT";
+
                 return (
                   <tr key={inv.id} className="hover:bg-sky-50/50 transition-colors">
                     <td className="p-2 border-r border-slate-200 text-center font-semibold space-x-1">
-                      {canUpdate("purchase_invoice") ? (
+                      {isDraft && canUpdate("purchase_invoice") ? (
                         <button onClick={() => handleEdit(inv.id)} className="text-sky-700 hover:underline cursor-pointer">
                           Edit
                         </button>
                       ) : (
-                        <span className="text-slate-300">Edit</span>
+                        <span className="text-slate-300 select-none cursor-not-allowed" title="Only Draft bills can be edited">
+                          Edit
+                        </span>
                       )}
                       <span className="text-slate-300">|</span>
                       <button onClick={() => handleView(inv.id)} className="text-sky-700 hover:underline cursor-pointer">
                         View
-                      </button>
-                      <span className="text-slate-300">|</span>
-                      <button onClick={() => navigate(`/purchase-return?billId=${inv.id}`)} className="text-red-700 hover:underline cursor-pointer">
-                        Return
                       </button>
                     </td>
                     <td className="p-2 border-r border-slate-200 font-mono text-slate-600">{inv.id}</td>
@@ -1518,23 +1665,10 @@ const PurchaseInvoiceComp: React.FC = () => {
                     <td className="p-2 border-r border-slate-200 text-slate-700">
                       {inv.dueDate || inv.due_date ? new Date(inv.dueDate || inv.due_date).toLocaleDateString() : "—"}
                     </td>
-                    <td className="p-2 border-r border-slate-200 text-center">
+                    <td className="p-2 text-center">
                       <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase bg-sky-100 text-sky-800 border border-sky-200">
                         {inv.status || "DRAFT"}
                       </span>
-                    </td>
-                    <td className="p-2 text-center">
-                      {canDelete("purchase_invoice") && (
-                        <button
-                          onClick={() => {
-                            setInvoiceToDelete(inv);
-                            setDeleteDialogOpen(true);
-                          }}
-                          className="text-red-600 hover:underline font-semibold cursor-pointer"
-                        >
-                          Delete
-                        </button>
-                      )}
                     </td>
                   </tr>
                 );

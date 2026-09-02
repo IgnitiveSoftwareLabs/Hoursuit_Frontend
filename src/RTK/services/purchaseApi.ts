@@ -355,6 +355,7 @@ export const {
   useDeletePurchaseOrderMutation,
   useGetGRNsQuery,
   useGetGRNByIdQuery,
+  useLazyGetGRNByIdQuery,
   useCreateGRNMutation,
   useUpdateGRNMutation,
   useUpdateGRNStatusMutation,

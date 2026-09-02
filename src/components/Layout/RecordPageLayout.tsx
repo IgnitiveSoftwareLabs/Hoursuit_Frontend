@@ -125,13 +125,14 @@ export default function RecordPageLayout({
           <div className="flex items-center space-x-1.5">
             <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">
               {recordType}
+              {recordTitle ? ` ${recordTitle.startsWith("#") ? recordTitle : `#${recordTitle}`}` : ""}
             </h1>
             <Search className="!w-4 !h-4 text-slate-400 hover:text-sky-600 cursor-pointer ml-1" titleAccess="Search Record" />
           </div>
 
-          {(recordTitle || subtitle) && (
+          {subtitle && (
             <div className="text-base font-bold text-slate-900 tracking-tight flex items-center space-x-2">
-              <span>{subtitle || recordTitle}</span>
+              <span>{subtitle}</span>
             </div>
           )}
         </div>
