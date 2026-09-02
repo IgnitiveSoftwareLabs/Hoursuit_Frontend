@@ -36,6 +36,7 @@ const createDefaultLineItem = () => ({
   locationId: "",
   onHand: 0,
   orderedQty: 0,
+  remainingQty: 0,
   receivedQty: 1,
   acceptedQty: 1,
   rejectedQty: 0,
@@ -92,16 +93,16 @@ const GRNComp: React.FC = () => {
   const { data: inventoryData } = useGetInventoryQuery({ limit: 1000 });
   const { data: grnsData, refetch: refetchGRNs } = useGetGRNsQuery({ page: 1, limit: 1000 });
 
-  const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
-  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
-  const items = Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : Array.isArray(itemsData) ? itemsData : [];
-  const grns = Array.isArray(grnsData?.result) ? grnsData.result : Array.isArray(grnsData?.data) ? grnsData.data : Array.isArray(grnsData) ? grnsData : [];
-  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
-  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
-  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
-  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
-  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
-  const transportationModes = Array.isArray(transportationModesData?.result) ? transportationModesData.result : Array.isArray(transportationModesData?.data) ? transportationModesData.data : Array.isArray(transportationModesData) ? transportationModesData : [];
+  const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : []), [vendorsData]);
+  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : []), [purchaseOrdersData]);
+  const items = Array.isArray(itemsData?.result) ? itemsData.result : [];
+  const grns = Array.isArray(grnsData?.result) ? grnsData.result : [];
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : [];
+  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : [];
+  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : [];
+  const transportationModes = Array.isArray(transportationModesData?.result) ? transportationModesData.result : [];
 
   const inventoryItems = useMemo(() => {
     return Array.isArray(inventoryData?.result)
@@ -163,6 +164,7 @@ const GRNComp: React.FC = () => {
     formik.setValues({
       header: {
         grnNo: "",
+        vendor_id: "",
         purchaseOrderId: "",
         transportationModeId: "",
         driverName: "",
@@ -358,7 +360,7 @@ const GRNComp: React.FC = () => {
           const uomObj = uoms.find((u: any) => String(u.id) === String(line.uom_id));
           if (uomObj && !isDecimalAllowedForUOM(uomObj)) {
             if (Number(line.receivedQty) % 1 !== 0 || Number(line.acceptedQty) % 1 !== 0 || Number(line.rejectedQty) % 1 !== 0) {
-              toast.error(`Quantities for line ${i + 1} (${uomObj.uom_name || uomObj.name}) must be whole numbers (decimals not permitted).`);
+              toast.error(`Quantities for line ${i + 1} (${uomObj.uom_name}) must be whole numbers (decimals not permitted).`);
               return;
             }
           }
@@ -520,10 +522,10 @@ const GRNComp: React.FC = () => {
         if (typeof newValue === "string" && (newValue.includes(".") || newValue.includes(","))) {
           const intPart = newValue.split(".")[0].split(",")[0];
           newValue = intPart === "" ? "" : Math.floor(Number(intPart)) || 0;
-          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+          toast.error(`Quantity for UOM '${uomObj.uom_name}' cannot contain decimals.`);
         } else if (Number(newValue) % 1 !== 0) {
           newValue = Math.floor(Number(newValue)) || 0;
-          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+          toast.error(`Quantity for UOM '${uomObj.uom_name}' cannot contain decimals.`);
         }
       }
 
@@ -648,6 +650,7 @@ const GRNComp: React.FC = () => {
               locationId: String(l.locationId ?? l.location_id ?? header.location_id ?? header.city_id ?? ""),
               onHand: Number(l.onHand ?? onHandMap[itemId] ?? 0),
               orderedQty: ordQty,
+              remainingQty: Number(l.remainingQty ?? l.remaining_quantity ?? ordQty),
               receivedQty: recQty,
               acceptedQty: Number(l.acceptedQty ?? l.accepted_quantity ?? recQty),
               rejectedQty: Number(l.rejectedQty ?? l.rejected_quantity ?? 0),
@@ -760,8 +763,8 @@ const GRNComp: React.FC = () => {
             isView
               ? `#${grnNoStr}${poNumber && poNumber !== "—" ? ` • ${poNumber}` : ""}`
               : isEdit
-              ? `Edit GRN #${formik.values.header.grnNo || activeHeader.grnNo}${poNumber && poNumber !== "—" ? ` • ${poNumber}` : ""}`
-              : "New Item Receipt"
+                ? `Edit GRN #${formik.values.header.grnNo || activeHeader.grnNo}${poNumber && poNumber !== "—" ? ` • ${poNumber}` : ""}`
+                : "New Item Receipt"
           }
           mode={isView ? "view" : "edit"}
           saveButtonText="Save"
@@ -1035,6 +1038,7 @@ const GRNComp: React.FC = () => {
                   label: "GL Impact",
                   content: (() => {
                     const lines = activeHeader.lineItems || activeHeader.lines || activeHeader.grn_lines || selectedGRN?.lineItems || selectedGRN?.grnDetails || [];
+                    const poLines = getPoLineItems(poObj);
                     const entries: any[] = [];
 
                     lines.forEach((l: any) => {
@@ -1045,7 +1049,7 @@ const GRNComp: React.FC = () => {
 
                       const pol = l.purchaseOrderLine || poLines.find((p: any) => String(p.id) === String(l.purchaseOrderLineId || l.po_line_id));
                       const poQty = Number(pol?.quantity || l.orderedQty || 1);
-                      const unitRate = Number(pol?.rate || l.unitPrice ?? l.unit_price ?? l.rate ?? itemObj?.purchase_price ?? itemObj?.cost_price ?? 0);
+                      const unitRate = Number(pol?.rate ?? l.unitPrice ?? l.unit_price ?? l.rate ?? itemObj?.purchase_price ?? itemObj?.cost_price ?? 0);
                       const grossAmt = Number((qty * unitRate).toFixed(2));
 
                       const discPerUnit = poQty > 0 ? Number(pol?.discount_amount || 0) / poQty : 0;
@@ -1111,154 +1115,152 @@ const GRNComp: React.FC = () => {
         >
           {/* PRIMARY INFORMATION SECTION */}
           <RecordSection title="Primary Information" defaultOpen={true}>
-                {isView ? (
-                  <>
-                    <div className="flex flex-col space-y-0.5">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase">GRN #</span>
-                      <span className="text-xs font-bold text-slate-900">{activeHeader.grnNo || activeHeader.grn_number || `GRN-${selectedGRN?.id}`}</span>
-                    </div>
-                    <div className="flex flex-col space-y-0.5">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase">VENDOR</span>
-                      <span className="text-xs font-semibold text-slate-900">{vendorDisplayName}</span>
-                    </div>
-                    <div className="flex flex-col space-y-0.5">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase">PURCHASE ORDER</span>
-                      <span className="text-xs font-semibold text-sky-700">{poNumber}</span>
-                    </div>
-                    <div className="flex flex-col space-y-0.5">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase">RECEIPT DATE</span>
-                      <span className="text-xs text-slate-800">{activeHeader.grnDate || activeHeader.receipt_date ? new Date(activeHeader.grnDate || activeHeader.receipt_date).toLocaleDateString() : "—"}</span>
-                    </div>
-                    <div className="flex flex-col space-y-0.5">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase">MEMO</span>
-                      <span className="text-xs text-slate-800">{activeHeader.memo || "—"}</span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex flex-col space-y-1">
-                      <label className="text-[11px] font-semibold text-[#475569] uppercase">GRN #</label>
-                      <input
-                        type="text"
-                        name="header.grnNo"
-                        placeholder="Auto-generated if empty"
-                        value={formik.values.header.grnNo}
-                        onChange={formik.handleChange}
-                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
-                      />
-                    </div>
+            {isView ? (
+              <>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">GRN #</span>
+                  <span className="text-xs font-bold text-slate-900">{activeHeader.grnNo || activeHeader.grn_number || `GRN-${selectedGRN?.id}`}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">VENDOR</span>
+                  <span className="text-xs font-semibold text-slate-900">{vendorDisplayName}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">PURCHASE ORDER</span>
+                  <span className="text-xs font-semibold text-sky-700">{poNumber}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">RECEIPT DATE</span>
+                  <span className="text-xs text-slate-800">{activeHeader.grnDate || activeHeader.receipt_date ? new Date(activeHeader.grnDate || activeHeader.receipt_date).toLocaleDateString() : "—"}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">MEMO</span>
+                  <span className="text-xs text-slate-800">{activeHeader.memo || "—"}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">GRN #</label>
+                  <input
+                    type="text"
+                    name="header.grnNo"
+                    placeholder="Auto-generated if empty"
+                    value={formik.values.header.grnNo}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
 
-                    <div className="flex flex-col space-y-1">
-                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
-                        VENDOR <span className="text-amber-600">*</span>
-                      </label>
-                      {searchParams.get("poId") || searchParams.get("po_id") ? (
-                        <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-slate-800 flex items-center select-none">
-                          {vendorDisplayName}
-                        </div>
-                      ) : (
-                        <>
-                          <select
-                            name="header.vendor_id"
-                            value={formik.values.header.vendor_id || ""}
-                            onChange={(e) => {
-                              const newVendorId = e.target.value;
-                              formik.setFieldValue("header.vendor_id", newVendorId);
-                              if (selectedPoId) {
-                                const currentPo = purchaseOrders.find((po: any) => String(po.id) === String(selectedPoId));
-                                const poVendorId = currentPo?.vendor_id || currentPo?.vendorId || currentPo?.vendor?.id;
-                                if (newVendorId && String(poVendorId) !== String(newVendorId)) {
-                                  formik.setFieldValue("header.purchaseOrderId", "");
-                                  formik.setFieldValue("lineItems", [createDefaultLineItem()]);
-                                }
-                              }
-                            }}
-                            onBlur={formik.handleBlur}
-                            className={`h-7 text-xs bg-white border rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold text-slate-800 ${
-                              (formik.touched.header?.vendor_id || formik.submitCount > 0) && formik.errors.header?.vendor_id
-                                ? "border-red-500 bg-red-50"
-                                : "border-slate-300"
-                            }`}
-                          >
-                            <option value="">Select Vendor...</option>
-                            {vendors.map((v: any) => (
-                              <option key={v.id} value={v.id}>
-                                {getVendorDisplayName(v)}
-                              </option>
-                            ))}
-                          </select>
-                          {(formik.touched.header?.vendor_id || formik.submitCount > 0) && formik.errors.header?.vendor_id && (
-                            <span className="text-red-600 text-[10px]">{formik.errors.header.vendor_id}</span>
-                          )}
-                        </>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    VENDOR <span className="text-amber-600">*</span>
+                  </label>
+                  {searchParams.get("poId") || searchParams.get("po_id") ? (
+                    <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-slate-800 flex items-center select-none">
+                      {vendorDisplayName}
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        name="header.vendor_id"
+                        value={formik.values.header.vendor_id || ""}
+                        onChange={(e) => {
+                          const newVendorId = e.target.value;
+                          formik.setFieldValue("header.vendor_id", newVendorId);
+                          if (selectedPoId) {
+                            const currentPo = purchaseOrders.find((po: any) => String(po.id) === String(selectedPoId));
+                            const poVendorId = currentPo?.vendor_id || currentPo?.vendorId || currentPo?.vendor?.id;
+                            if (newVendorId && String(poVendorId) !== String(newVendorId)) {
+                              formik.setFieldValue("header.purchaseOrderId", "");
+                              formik.setFieldValue("lineItems", [createDefaultLineItem()]);
+                            }
+                          }
+                        }}
+                        onBlur={formik.handleBlur}
+                        className={`h-7 text-xs bg-white border rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold text-slate-800 ${(formik.touched.header?.vendor_id || formik.submitCount > 0) && formik.errors.header?.vendor_id
+                          ? "border-red-500 bg-red-50"
+                          : "border-slate-300"
+                          }`}
+                      >
+                        <option value="">Select Vendor...</option>
+                        {vendors.map((v: any) => (
+                          <option key={v.id} value={v.id}>
+                            {getVendorDisplayName(v)}
+                          </option>
+                        ))}
+                      </select>
+                      {(formik.touched.header?.vendor_id || formik.submitCount > 0) && formik.errors.header?.vendor_id && (
+                        <span className="text-red-600 text-[10px]">{formik.errors.header.vendor_id}</span>
                       )}
-                    </div>
+                    </>
+                  )}
+                </div>
 
-                    <div className="flex flex-col space-y-1">
-                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
-                        PURCHASE ORDER REFERENCE <span className="text-amber-600">*</span>
-                      </label>
-                      {searchParams.get("poId") || searchParams.get("po_id") ? (
-                        <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-sky-800 flex items-center select-none">
-                          {poNumber}
-                        </div>
-                      ) : (
-                        <>
-                          <select
-                            name="header.purchaseOrderId"
-                            value={formik.values.header.purchaseOrderId || ""}
-                            onChange={(e) => formik.setFieldValue("header.purchaseOrderId", e.target.value)}
-                            onBlur={formik.handleBlur}
-                            className={`h-7 text-xs bg-white border rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold text-sky-800 ${
-                              (formik.touched.header?.purchaseOrderId || formik.submitCount > 0) && formik.errors.header?.purchaseOrderId
-                                ? "border-red-500 bg-red-50"
-                                : "border-slate-300"
-                            }`}
-                          >
-                            <option value="">Select Purchase Order...</option>
-                            {eligiblePurchaseOrders.map((po: any) => {
-                              const remQty = getPoRemainingQtyTotal(po);
-                              return (
-                                <option key={po.id} value={po.id}>
-                                  {po.purchaseNo || po.purchase_no || `PO-${po.id}`} ({getVendorDisplayName(po.vendor)}) — Rem Qty: {remQty}
-                                </option>
-                              );
-                            })}
-                          </select>
-                          {(formik.touched.header?.purchaseOrderId || formik.submitCount > 0) && formik.errors.header?.purchaseOrderId && (
-                            <span className="text-red-600 text-[10px]">{formik.errors.header.purchaseOrderId}</span>
-                          )}
-                        </>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    PURCHASE ORDER REFERENCE <span className="text-amber-600">*</span>
+                  </label>
+                  {searchParams.get("poId") || searchParams.get("po_id") ? (
+                    <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-sky-800 flex items-center select-none">
+                      {poNumber}
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        name="header.purchaseOrderId"
+                        value={formik.values.header.purchaseOrderId || ""}
+                        onChange={(e) => formik.setFieldValue("header.purchaseOrderId", e.target.value)}
+                        onBlur={formik.handleBlur}
+                        className={`h-7 text-xs bg-white border rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold text-sky-800 ${(formik.touched.header?.purchaseOrderId || formik.submitCount > 0) && formik.errors.header?.purchaseOrderId
+                          ? "border-red-500 bg-red-50"
+                          : "border-slate-300"
+                          }`}
+                      >
+                        <option value="">Select Purchase Order...</option>
+                        {eligiblePurchaseOrders.map((po: any) => {
+                          const remQty = getPoRemainingQtyTotal(po);
+                          return (
+                            <option key={po.id} value={po.id}>
+                              {po.purchaseNo || po.purchase_no || `PO-${po.id}`} ({getVendorDisplayName(po.vendor)}) — Rem Qty: {remQty}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {(formik.touched.header?.purchaseOrderId || formik.submitCount > 0) && formik.errors.header?.purchaseOrderId && (
+                        <span className="text-red-600 text-[10px]">{formik.errors.header.purchaseOrderId}</span>
                       )}
-                    </div>
+                    </>
+                  )}
+                </div>
 
-                    <div className="flex flex-col space-y-1">
-                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
-                        RECEIPT DATE <span className="text-amber-600">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        name="header.grnDate"
-                        value={formik.values.header.grnDate}
-                        onChange={formik.handleChange}
-                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
-                      />
-                    </div>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    RECEIPT DATE <span className="text-amber-600">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    name="header.grnDate"
+                    value={formik.values.header.grnDate}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
 
-                    <div className="flex flex-col space-y-1">
-                      <label className="text-[11px] font-semibold text-[#475569] uppercase">MEMO</label>
-                      <input
-                        type="text"
-                        name="header.memo"
-                        placeholder="Enter memo..."
-                        value={formik.values.header.memo || ""}
-                        onChange={formik.handleChange}
-                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
-                      />
-                    </div>
-                  </>
-                )}
-              </RecordSection>
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">MEMO</label>
+                  <input
+                    type="text"
+                    name="header.memo"
+                    placeholder="Enter memo..."
+                    value={formik.values.header.memo || ""}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+              </>
+            )}
+          </RecordSection>
 
           {/* CLASSIFICATION SECTION */}
           <RecordSection title="Classification" defaultOpen={true}>
