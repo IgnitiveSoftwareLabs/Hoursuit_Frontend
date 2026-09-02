@@ -30,6 +30,8 @@ const breadcrumbNameMap: Record<string, string> = {
   '/grn': 'GRN',
   '/purchase-invoice': 'Purchase Bill',
   '/purchase-return': 'Purchase Return',
+  '/return-fulfillment': 'Item Return Fulfillment',
+  '/debit-note': 'Debit Note',
   '/purchase-payment': 'Purchase Payment',
 };
 
@@ -41,6 +43,8 @@ const transactionRoutes = [
   'purchase_invoice',
   'purchase-return',
   'purchase_return',
+  'return-fulfillment',
+  'return_fulfillment',
   'purchase-payment',
   'purchase_payment',
   'sales-order',

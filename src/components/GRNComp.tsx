@@ -16,11 +16,14 @@ import { useGetInventoryQuery } from "../RTK/services/inventoryApi";
 import { usePermissions } from "../Hooks/usePermissions";
 import { useGetVendorsQuery } from "../RTK/services/vendorApi";
 import {
-  useGetPurchaseOrdersQuery,
-  useGetGRNsQuery,
-  useLazyGetGRNByIdQuery,
   useCreateGRNMutation,
   useDeleteGRNMutation,
+  useGetGRNsQuery,
+  useGetPurchaseInvoicesQuery,
+  useGetPurchaseOrdersQuery,
+  useGetPurchasePaymentsQuery,
+  useGetPurchaseReturnsQuery,
+  useLazyGetGRNByIdQuery,
   useUpdateGRNMutation,
   useUpdateGRNStatusMutation,
 } from "../RTK/services/purchaseApi";
@@ -92,11 +95,17 @@ const GRNComp: React.FC = () => {
   const { data: transportationModesData } = useGetTransportationModesQuery(undefined);
   const { data: inventoryData } = useGetInventoryQuery({ limit: 1000 });
   const { data: grnsData, refetch: refetchGRNs } = useGetGRNsQuery({ page: 1, limit: 1000 });
+  const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 1000 });
+  const { data: returnsData } = useGetPurchaseReturnsQuery({});
+  const { data: paymentsData } = useGetPurchasePaymentsQuery({});
 
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : []), [vendorsData]);
   const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : []), [purchaseOrdersData]);
   const items = Array.isArray(itemsData?.result) ? itemsData.result : [];
   const grns = Array.isArray(grnsData?.result) ? grnsData.result : [];
+  const purchaseInvoices = Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : [];
+  const purchaseReturns = Array.isArray(returnsData?.result) ? returnsData.result : Array.isArray(returnsData?.data) ? returnsData.data : Array.isArray(returnsData) ? returnsData : [];
+  const purchasePayments = Array.isArray(paymentsData?.result) ? paymentsData.result : Array.isArray(paymentsData?.data) ? paymentsData.data : Array.isArray(paymentsData) ? paymentsData : [];
   const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : [];
   const classesList = Array.isArray(classesData?.result) ? classesData.result : [];
   const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : [];
@@ -516,7 +525,12 @@ const GRNComp: React.FC = () => {
     let newValue = value;
     const currentLine = lineItems[index];
 
-    if (field === "receivedQty" && newValue !== "") {
+    if (field === "receivedQty") {
+      if (newValue === "") {
+        lineItems[index] = { ...currentLine, receivedQty: "", acceptedQty: 0, rejectedQty: 0 };
+        formik.setFieldValue("lineItems", lineItems);
+        return;
+      }
       const uomObj = uoms.find((u: any) => String(u.id) === String(currentLine.uom_id));
       if (uomObj && !isDecimalAllowedForUOM(uomObj)) {
         if (typeof newValue === "string" && (newValue.includes(".") || newValue.includes(","))) {
@@ -530,58 +544,67 @@ const GRNComp: React.FC = () => {
       }
 
       const maxRec = Number(currentLine.remainingQty != null && Number(currentLine.remainingQty) >= 0 ? currentLine.remainingQty : currentLine.orderedQty || 0);
-      const numVal = Number(newValue);
-      if (numVal < 0) {
-        newValue = 0;
-      } else if (maxRec > 0 && numVal > maxRec) {
+      let numVal = Math.max(0, Number(newValue));
+      if (maxRec > 0 && numVal > maxRec) {
+        numVal = maxRec;
         newValue = maxRec;
         toast.error(`Received Quantity (${numVal}) cannot exceed Remaining Open Quantity (${maxRec}).`);
+      }
+
+      const currentRejected = Math.max(0, Number(currentLine.rejectedQty || 0));
+      let newAccepted = numVal;
+      let newRejected = 0;
+      if (currentRejected > 0 && currentRejected <= numVal) {
+        newRejected = currentRejected;
+        newAccepted = Number((numVal - currentRejected).toFixed(2));
+      } else {
+        newAccepted = numVal;
+        newRejected = 0;
       }
 
       const updatedLine = {
         ...currentLine,
         receivedQty: newValue,
-        acceptedQty: Math.max(0, Number(newValue || 0) - Number(currentLine.rejectedQty || 0)),
+        acceptedQty: newAccepted,
+        rejectedQty: newRejected,
       };
       lineItems[index] = updatedLine;
       formik.setFieldValue("lineItems", lineItems);
       return;
     }
 
-    if (field === "acceptedQty" && newValue !== "") {
-      const maxAcc = Number(currentLine.receivedQty || 0);
-      const numVal = Number(newValue);
-      if (numVal < 0) {
-        newValue = 0;
-      } else if (maxAcc > 0 && numVal > maxAcc) {
-        newValue = maxAcc;
-        toast.error(`Accepted Quantity (${numVal}) cannot exceed Received Quantity (${maxAcc}).`);
+    if (field === "acceptedQty") {
+      const recQty = Math.max(0, Number(currentLine.receivedQty || 0));
+      if (newValue === "") {
+        lineItems[index] = { ...currentLine, acceptedQty: "", rejectedQty: recQty };
+        formik.setFieldValue("lineItems", lineItems);
+        return;
       }
-      const curRej = Number(currentLine.rejectedQty || 0);
-      let adjustedRej = curRej;
-      if (Number(newValue) + curRej > maxAcc) {
-        adjustedRej = Math.max(0, maxAcc - Number(newValue));
+      let numVal = Math.max(0, Number(newValue));
+      if (numVal > recQty) {
+        numVal = recQty;
+        toast.error(`Accepted Quantity (${numVal}) cannot exceed Received Quantity (${recQty}).`);
       }
-      lineItems[index] = { ...currentLine, acceptedQty: newValue, rejectedQty: adjustedRej };
+      const newRejected = Math.max(0, Number((recQty - numVal).toFixed(2)));
+      lineItems[index] = { ...currentLine, acceptedQty: numVal, rejectedQty: newRejected };
       formik.setFieldValue("lineItems", lineItems);
       return;
     }
 
-    if (field === "rejectedQty" && newValue !== "") {
-      const maxRej = Number(currentLine.receivedQty || 0);
-      const numVal = Number(newValue);
-      if (numVal < 0) {
-        newValue = 0;
-      } else if (maxRej > 0 && numVal > maxRej) {
-        newValue = maxRej;
-        toast.error(`Rejected Quantity (${numVal}) cannot exceed Received Quantity (${maxRej}).`);
+    if (field === "rejectedQty") {
+      const recQty = Math.max(0, Number(currentLine.receivedQty || 0));
+      if (newValue === "") {
+        lineItems[index] = { ...currentLine, rejectedQty: "", acceptedQty: recQty };
+        formik.setFieldValue("lineItems", lineItems);
+        return;
       }
-      const curAcc = Number(currentLine.acceptedQty || 0);
-      let adjustedAcc = curAcc;
-      if (Number(newValue) + curAcc > maxRej) {
-        adjustedAcc = Math.max(0, maxRej - Number(newValue));
+      let numVal = Math.max(0, Number(newValue));
+      if (numVal > recQty) {
+        numVal = recQty;
+        toast.error(`Rejected Quantity (${numVal}) cannot exceed Received Quantity (${recQty}).`);
       }
-      lineItems[index] = { ...currentLine, rejectedQty: newValue, acceptedQty: adjustedAcc };
+      const newAccepted = Math.max(0, Number((recQty - numVal).toFixed(2)));
+      lineItems[index] = { ...currentLine, rejectedQty: numVal, acceptedQty: newAccepted };
       formik.setFieldValue("lineItems", lineItems);
       return;
     }
@@ -608,10 +631,27 @@ const GRNComp: React.FC = () => {
         toast.error("GRN details not found");
         return;
       }
+
+      const header = item.header ?? item;
+      const grnStatus = String(header.status ?? "DRAFT").toUpperCase();
+      const hasBill = purchaseInvoices.some((inv: any) => {
+        const invGrnId = String(inv.grnHeaderId || inv.grn_header_id || inv.header?.grnHeaderId || "");
+        const lines = inv.lineItems || inv.purchaseInvoiceLines || inv.lines || [];
+        const hasLineMatch = Array.isArray(lines) && lines.some((l: any) => String(l.grnLineId) !== "" && String(l.grnHeaderId || invGrnId) === String(id));
+        return (invGrnId === String(id) || hasLineMatch) && String(inv.status || "").toUpperCase() !== "CANCELLED";
+      });
+      const hasReturn = purchaseReturns.some((pr: any) => {
+        const prGrnId = String(pr.grnHeaderId || pr.grn_header_id || pr.grnId || "");
+        return prGrnId === String(id) && String(pr.status || "").toUpperCase() !== "CANCELLED";
+      });
+
+      if (grnStatus !== "DRAFT" || hasBill || hasReturn) {
+        toast.error("Cannot edit a GRN that has been received, billed, or returned.");
+        return;
+      }
       setIsEdit(true);
       setEditId(id);
 
-      const header = item.header ?? item;
       const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
       const poIdVal = String(header.purchaseOrderId ?? header.po_header_id ?? "");
       const poObj = purchaseOrders.find((po: any) => String(po.id) === poIdVal);
@@ -755,6 +795,25 @@ const GRNComp: React.FC = () => {
 
     const grnNoStr = activeHeader.grnNo || activeHeader.grn_number || `GRN-${selectedGRN?.id || "NEW"}`;
 
+    const currentGrnId = String(selectedGRN?.id || activeHeader?.id || "");
+    const isGrnDraft = String(activeHeader.status || selectedGRN?.status || "DRAFT").toUpperCase() === "DRAFT";
+
+    const matchingBill = purchaseInvoices.find((inv: any) => {
+      const invGrnId = String(inv.grnHeaderId || inv.grn_header_id || inv.header?.grnHeaderId || "");
+      const lines = inv.lineItems || inv.purchaseInvoiceLines || inv.lines || [];
+      const hasLineMatch = Array.isArray(lines) && lines.some((l: any) => String(l.grnLineId) !== "" && String(l.grnHeaderId || invGrnId) === currentGrnId);
+      return (invGrnId === currentGrnId || hasLineMatch) && String(inv.status || "").toUpperCase() !== "CANCELLED";
+    });
+    const isBillCompleted = Boolean(matchingBill);
+
+    const matchingReturn = purchaseReturns.find((pr: any) => {
+      const prGrnId = String(pr.grnHeaderId || pr.grn_header_id || pr.grnId || "");
+      const prBillId = matchingBill ? String(matchingBill.id) : "";
+      const linkedBillReturn = prBillId && String(pr.purchaseInvoiceHeaderId || pr.purchase_invoice_header_id || pr.billId) === prBillId;
+      return (prGrnId === currentGrnId || linkedBillReturn) && String(pr.status || "").toUpperCase() !== "CANCELLED";
+    });
+    const isReturnCompleted = Boolean(matchingReturn);
+
     return (
       <form onSubmit={formik.handleSubmit}>
         <RecordPageLayout
@@ -769,7 +828,11 @@ const GRNComp: React.FC = () => {
           mode={isView ? "view" : "edit"}
           saveButtonText="Save"
           onSave={() => handleSubmitWithStatus("DRAFT")}
-          onEdit={() => { if (selectedGRN) handleEdit(selectedGRN.id); }}
+          onEdit={
+            isView && selectedGRN && isGrnDraft && !isBillCompleted && !isReturnCompleted && canUpdate("grn")
+              ? () => handleEdit(selectedGRN.id)
+              : undefined
+          }
           onBack={() => { setViewMode("list"); setSearchParams({}); }}
           onCancel={() => { setViewMode("list"); setSearchParams({}); }}
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
@@ -777,7 +840,7 @@ const GRNComp: React.FC = () => {
           customActions={
             isView && selectedGRN ? (
               <div className="flex items-center space-x-1.5">
-                {String(selectedGRN.status || "").toUpperCase() === "DRAFT" ? (
+                {isGrnDraft ? (
                   <button
                     type="button"
                     onClick={() => handleReceiveStatusUpdate(selectedGRN.id)}
@@ -788,20 +851,24 @@ const GRNComp: React.FC = () => {
                   </button>
                 ) : (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/purchase-invoice?grnId=${selectedGRN.id}`)}
-                      className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                    >
-                      Bill
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/purchase-return?grnId=${selectedGRN.id}`)}
-                      className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                    >
-                      Return
-                    </button>
+                    {!isBillCompleted && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/purchase-invoice?grnId=${selectedGRN.id}`)}
+                        className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                      >
+                        Bill
+                      </button>
+                    )}
+                    {!isReturnCompleted && (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/purchase-return?grnId=${selectedGRN.id}`)}
+                        className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                      >
+                        Return
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -900,7 +967,7 @@ const GRNComp: React.FC = () => {
                                   max={remaining}
                                   value={line.receivedQty}
                                   onKeyDown={(e) => {
-                                    if (!allowsDecimals && (e.key === "." || e.key === "," || e.key === "e" || e.key === "E" || e.key === "-")) {
+                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+" || (!allowsDecimals && (e.key === "." || e.key === ","))) {
                                       e.preventDefault();
                                     }
                                   }}
@@ -912,10 +979,16 @@ const GRNComp: React.FC = () => {
                                 <input
                                   type="number"
                                   disabled={isView}
+                                  step={allowsDecimals ? "any" : "1"}
                                   min="0"
                                   max={line.receivedQty}
                                   value={line.acceptedQty}
-                                  onChange={(e) => updateGrnLineField(idx, "acceptedQty", Number(e.target.value) || 0)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+" || (!allowsDecimals && (e.key === "." || e.key === ","))) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                  onChange={(e) => updateGrnLineField(idx, "acceptedQty", e.target.value)}
                                   className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 font-semibold text-emerald-700"
                                 />
                               </td>
@@ -923,10 +996,16 @@ const GRNComp: React.FC = () => {
                                 <input
                                   type="number"
                                   disabled={isView}
+                                  step={allowsDecimals ? "any" : "1"}
                                   min="0"
                                   max={line.receivedQty}
                                   value={line.rejectedQty}
-                                  onChange={(e) => updateGrnLineField(idx, "rejectedQty", Number(e.target.value) || 0)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+" || (!allowsDecimals && (e.key === "." || e.key === ","))) {
+                                      e.preventDefault();
+                                    }
+                                  }}
+                                  onChange={(e) => updateGrnLineField(idx, "rejectedQty", e.target.value)}
                                   className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 text-red-600"
                                 />
                               </td>
@@ -1456,6 +1535,17 @@ const GRNComp: React.FC = () => {
                 const poRef = grn.purchaseOrder?.purchaseNo || (grn.po_header_id || grn.purchaseOrderId ? `PO-${grn.po_header_id || grn.purchaseOrderId}` : "—");
                 const grnNoStr = grn.grnNo || grn.grn_number || `GRN-${grn.id}`;
                 const isGrnDraft = String(grn.status || "").toUpperCase() === "DRAFT";
+                const hasBill = purchaseInvoices.some((inv: any) => {
+                  const invGrnId = String(inv.grnHeaderId || inv.grn_header_id || inv.header?.grnHeaderId || "");
+                  const lines = inv.lineItems || inv.purchaseInvoiceLines || inv.lines || [];
+                  const hasLineMatch = Array.isArray(lines) && lines.some((l: any) => String(l.grnLineId) !== "" && String(l.grnHeaderId || invGrnId) === String(grn.id));
+                  return (invGrnId === String(grn.id) || hasLineMatch) && String(inv.status || "").toUpperCase() !== "CANCELLED";
+                });
+                const hasReturn = purchaseReturns.some((pr: any) => {
+                  const prGrnId = String(pr.grnHeaderId || pr.grn_header_id || pr.grnId || "");
+                  return prGrnId === String(grn.id) && String(pr.status || "").toUpperCase() !== "CANCELLED";
+                });
+                const isEditable = isGrnDraft && !hasBill && !hasReturn && canUpdate("grn");
 
                 return (
                   <tr key={grn.id} className="hover:bg-sky-50/50 transition-colors">
@@ -1464,10 +1554,14 @@ const GRNComp: React.FC = () => {
                         <button onClick={() => handleView(grn.id)} className="text-sky-700 hover:underline cursor-pointer">
                           View
                         </button>
-                        {isGrnDraft && canUpdate("grn") && (
+                        {isEditable ? (
                           <button onClick={() => handleEdit(grn.id)} className="text-sky-700 hover:underline cursor-pointer">
                             Edit
                           </button>
+                        ) : (
+                          <span className="text-slate-300 select-none cursor-not-allowed" title="Cannot edit received, billed, or returned GRN">
+                            Edit
+                          </span>
                         )}
                       </div>
                     </td>

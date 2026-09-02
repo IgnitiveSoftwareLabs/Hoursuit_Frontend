@@ -340,9 +340,15 @@ const transactionItems: MenuItem[] = [
         permission: { module: "purchase_return", action: "read" },
       },
       {
-        text: "Debit Note",
+        text: "Item Fulfillment (Vendor Return)",
+        icon: <LocalShippingRoundedIcon />,
+        path: "/return-fulfillment",
+        permission: { module: "purchase_return", action: "read" },
+      },
+      {
+        text: "Debit Note (Vendor Credit)",
         icon: <ReceiptRoundedIcon />,
-        path: "/finance/debit-notes",
+        path: "/debit-note",
         permission: { module: "purchase_return", action: "read" },
       },
     ],

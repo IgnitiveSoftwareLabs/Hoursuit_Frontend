@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Add, Delete, Edit, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
+import { Add, Delete, Edit, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp, ReceiptLong, LocalShipping, AssignmentReturn } from "@mui/icons-material";
 import { useFormik } from "formik";
 import toast from "react-hot-toast";
 import * as Yup from "yup";
@@ -46,7 +46,7 @@ export default function DebitNoteComp() {
   // Eager Queries
   const { data: debitNotesData, refetch: refetchDebitNotes } = useGetDebitNotesQuery({ page: 1, limit: 50 });
   const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 });
-  const { data: purchaseReturnsData } = useGetPurchaseReturnsQuery({ page: 1, limit: 100 });
+  const { data: purchaseReturnsData, refetch: refetchPurchaseReturns } = useGetPurchaseReturnsQuery({ page: 1, limit: 100 });
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
   const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
   const { data: subsidiariesData } = useGetSubsidiariesQuery(undefined);
@@ -59,7 +59,7 @@ export default function DebitNoteComp() {
   const [updateDebitNote, { isLoading: isUpdating }] = useUpdateDebitNoteMutation();
   const [deleteDebitNote] = useDeleteDebitNoteMutation();
 
-  const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
+  const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
   const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : []), [invoicesData]);
   const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : Array.isArray(purchaseReturnsData) ? purchaseReturnsData : []), [purchaseReturnsData]);
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
@@ -76,6 +76,11 @@ export default function DebitNoteComp() {
       vendorId: "",
       purchaseInvoiceHeaderId: "",
       debitNoteDate: new Date().toISOString().slice(0, 10),
+      subtotal: 0,
+      discountPercent: 0,
+      discountAmount: 0,
+      taxPercent: 0,
+      taxAmount: 0,
       amount: 0,
       accountId: "",
       subsidiary_id: "",
@@ -91,16 +96,26 @@ export default function DebitNoteComp() {
     validationSchema: Yup.object().shape({
       vendorId: Yup.string().required("Vendor is required"),
       debitNoteDate: Yup.string().required("Date is required"),
-      amount: Yup.number().positive("Amount must be > 0").required("Amount is required"),
+      amount: Yup.number().min(0, "Amount must be >= 0").required("Amount is required"),
     }),
     onSubmit: async (values) => {
       try {
         const payload = {
           header: {
             ...values,
+            subtotal: Number(values.subtotal || 0),
+            discount_amount: Number(values.discountAmount || 0),
+            tax_amount: Number(values.taxAmount || 0),
+            total_amount: Number(values.amount || 0),
             user_id: userId,
           },
+          subtotal: Number(values.subtotal || 0),
+          discount_amount: Number(values.discountAmount || 0),
+          tax_amount: Number(values.taxAmount || 0),
+          total_amount: Number(values.amount || 0),
+          amount: Number(values.amount || 0),
           details: [],
+          lines: [],
         };
 
         if (isEdit && editId) {
@@ -127,6 +142,41 @@ export default function DebitNoteComp() {
     },
   });
 
+  const handleSubtotalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value) || 0;
+    formik.setFieldValue("subtotal", val);
+    const disc = Number(formik.values.discountAmount) || 0;
+    const tax = Number(formik.values.taxAmount) || 0;
+    const net = Math.max(0, Number((val - disc + tax).toFixed(2)));
+    formik.setFieldValue("amount", net);
+  };
+
+  const handleDiscountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const disc = Number(e.target.value) || 0;
+    formik.setFieldValue("discountAmount", disc);
+    const sub = Number(formik.values.subtotal) || 0;
+    const tax = Number(formik.values.taxAmount) || 0;
+    const net = Math.max(0, Number((sub - disc + tax).toFixed(2)));
+    formik.setFieldValue("amount", net);
+  };
+
+  const handleTaxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const tax = Number(e.target.value) || 0;
+    formik.setFieldValue("taxAmount", tax);
+    const sub = Number(formik.values.subtotal) || 0;
+    const disc = Number(formik.values.discountAmount) || 0;
+    const net = Math.max(0, Number((sub - disc + tax).toFixed(2)));
+    formik.setFieldValue("amount", net);
+  };
+
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const net = Number(e.target.value) || 0;
+    formik.setFieldValue("amount", net);
+    if (!formik.values.subtotal || Number(formik.values.subtotal) === 0) {
+      formik.setFieldValue("subtotal", net);
+    }
+  };
+
   useEffect(() => {
     const urlAction = searchParams.get("action");
     const urlId = searchParams.get("id");
@@ -134,6 +184,7 @@ export default function DebitNoteComp() {
     const invoiceId = searchParams.get("invoiceId");
 
     if (returnId) {
+      if (refetchPurchaseReturns) refetchPurchaseReturns();
       setViewMode("form");
       setIsEdit(false);
       const retObj = purchaseReturns.find((r: any) => String(r.id) === String(returnId));
@@ -152,10 +203,38 @@ export default function DebitNoteComp() {
         if (header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id) {
           formik.setFieldValue("purchaseInvoiceHeaderId", String(header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id));
         }
-        const totalAmt = Number(header.totalAmount || header.total_amount || 0);
-        if (totalAmt > 0) {
-          formik.setFieldValue("amount", totalAmt);
+
+        const retLines = retObj.details || retObj.lineItems || retObj.purchaseReturnLines || retObj.purchase_return_lines || [];
+        let subtotal = Number(header.subtotal || 0);
+        let discountAmount = Number(header.discountAmount || header.discount_amount || 0);
+        let taxAmount = Number(header.taxAmount || header.tax_amount || 0);
+        let totalAmt = Number(header.totalAmount || header.total_amount || 0);
+
+        if (retLines.length > 0) {
+          if (subtotal === 0) {
+            subtotal = retLines.reduce((acc: number, l: any) => {
+              const q = Number(l.returnQty || l.return_quantity || l.quantity || 0);
+              const p = Number(l.unitPrice || l.unit_price || l.rate || 0);
+              return acc + (q * p);
+            }, 0);
+          }
+          if (discountAmount === 0) {
+            discountAmount = retLines.reduce((acc: number, l: any) => acc + Number(l.discountAmount || l.discount_amount || 0), 0);
+          }
+          if (taxAmount === 0) {
+            taxAmount = retLines.reduce((acc: number, l: any) => acc + Number(l.taxAmount || l.tax_amount || 0), 0);
+          }
+          if (totalAmt === 0) {
+            totalAmt = Number((subtotal - discountAmount + taxAmount).toFixed(2));
+          }
         }
+
+        formik.setFieldValue("subtotal", Number(subtotal.toFixed(2)));
+        formik.setFieldValue("discountAmount", Number(discountAmount.toFixed(2)));
+        formik.setFieldValue("taxAmount", Number(taxAmount.toFixed(2)));
+        const finalNet = totalAmt > 0 ? totalAmt : Math.max(0, Number((subtotal - discountAmount + taxAmount).toFixed(2)));
+        formik.setFieldValue("amount", finalNet);
+
         if (header.subsidiary_id || header.subsidiaryId) {
           formik.setFieldValue("subsidiary_id", String(header.subsidiary_id || header.subsidiaryId));
         }
@@ -179,10 +258,21 @@ export default function DebitNoteComp() {
           formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
         }
         formik.setFieldValue("purchaseInvoiceHeaderId", String(invoiceId));
+
+        const sub = Number(header.subtotal || 0);
+        const disc = Number(header.discountAmount || header.discount_amount || 0);
+        const tax = Number(header.taxAmount || header.tax_amount || 0);
+        const total = Number(header.totalAmount || header.total_amount || 0);
+
+        formik.setFieldValue("subtotal", Number(sub.toFixed(2)));
+        formik.setFieldValue("discountAmount", Number(disc.toFixed(2)));
+        formik.setFieldValue("taxAmount", Number(tax.toFixed(2)));
+        formik.setFieldValue("amount", total > 0 ? total : Math.max(0, Number((sub - disc + tax).toFixed(2))));
       }
     } else if (urlAction === "create") {
-      setViewMode("form");
-      setIsEdit(false);
+      toast.error("Vendor Credits must be initiated from a fulfilled Purchase Return or Invoice.");
+      setViewMode("list");
+      setSearchParams({});
     } else if (urlId && urlAction === "view") {
       const dn = debitNotes.find((d: any) => String(d.id) === String(urlId));
       if (dn) {
@@ -220,12 +310,22 @@ export default function DebitNoteComp() {
       const header = item.header ?? item;
       const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
 
+      const sub = Number(header.subtotal || 0);
+      const disc = Number(header.discountAmount || header.discount_amount || 0);
+      const tax = Number(header.taxAmount || header.tax_amount || 0);
+      const amt = Number(header.amount || header.totalAmount || header.total_amount || 0);
+
       formik.setValues({
         debitNoteNumber: header.debitNoteNumber ?? header.debit_note_number ?? "",
         vendorId: String(header.vendorId ?? header.vendor_id ?? ""),
         purchaseInvoiceHeaderId: String(header.purchaseInvoiceHeaderId ?? header.purchase_invoice_header_id ?? ""),
         debitNoteDate: formatDate(header.debitNoteDate ?? header.debit_note_date) || new Date().toISOString().slice(0, 10),
-        amount: Number(header.amount ?? 0),
+        subtotal: sub > 0 ? sub : (amt > 0 ? amt : 0),
+        discountPercent: Number(header.discountPercent ?? header.discount_percent ?? 0),
+        discountAmount: disc,
+        taxPercent: Number(header.taxPercent ?? header.tax_percent ?? 0),
+        taxAmount: tax,
+        amount: amt > 0 ? amt : Math.max(0, sub - disc + tax),
         accountId: String(header.accountId ?? header.account_id ?? ""),
         subsidiary_id: String(header.subsidiary_id ?? ""),
         class_id: String(header.class_id ?? ""),
@@ -276,6 +376,36 @@ export default function DebitNoteComp() {
     return v.company_name || [v.salutation, v.first_name, v.last_name].filter(Boolean).join(" ");
   };
 
+  // Lifecycle navigation component
+  const P2PLifecycleNav = () => (
+    <div className="flex items-center space-x-1.5 bg-slate-200/90 p-1 rounded-sm text-xs font-semibold">
+      <button
+        type="button"
+        onClick={() => navigate("/purchase-return")}
+        className="px-3 py-1 rounded-xs text-slate-700 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer flex items-center space-x-1"
+      >
+        <AssignmentReturn className="!w-3.5 !h-3.5 text-slate-600" />
+        <span>Return Authorizations</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate("/return-fulfillment")}
+        className="px-3 py-1 rounded-xs text-slate-700 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer flex items-center space-x-1"
+      >
+        <LocalShipping className="!w-3.5 !h-3.5 text-slate-600" />
+        <span>Item Fulfillments</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => { setViewMode("list"); setIsEdit(false); setSearchParams({}); }}
+        className="px-3 py-1 rounded-xs bg-[#244b5a] text-white shadow-2xs font-bold transition-colors cursor-pointer flex items-center space-x-1"
+      >
+        <ReceiptLong className="!w-3.5 !h-3.5 text-sky-200" />
+        <span>Vendor Credits</span>
+      </button>
+    </div>
+  );
+
   const getVendorDisplayName = (vendorObj: any) => {
     if (!vendorObj) return "—";
     const code = vendorObj.entity_id ? `${vendorObj.entity_id} ` : "";
@@ -297,9 +427,87 @@ export default function DebitNoteComp() {
     const currencyObj = currencies.find((c: any) => String(c.id) === String(activeHeader.currency_id));
     const accountObj = accounts.find((a: any) => String(a.id) === String(activeHeader.accountId || activeHeader.account_id));
 
-    const totalAmount = Number(activeHeader.amount || 0);
+    const activeSubtotal = Number(activeHeader.subtotal || 0);
+    const activeDiscount = Number(activeHeader.discountAmount || activeHeader.discount_amount || 0);
+    const activeTax = Number(activeHeader.taxAmount || activeHeader.tax_amount || 0);
+    const totalAmount = Number(activeHeader.amount || activeHeader.totalAmount || activeHeader.total_amount || (activeSubtotal - activeDiscount + activeTax) || 0);
+    const resolvedSubtotal = activeSubtotal > 0 ? activeSubtotal : (totalAmount + activeDiscount - activeTax > 0 ? totalAmount + activeDiscount - activeTax : totalAmount);
 
     const dnNoStr = activeHeader.debitNoteNumber || activeHeader.debit_note_number || `DN-${selectedDebitNote?.id || "NEW"}`;
+
+    const findAccount = (keywords: string[], typeKeywords: string[], defaultName: string, defaultCode: string) => {
+      const byName = accounts.find((a: any) =>
+        keywords.some((k) => (a.account_name || a.name || "").toLowerCase().includes(k.toLowerCase()))
+      );
+      if (byName) return { name: byName.account_name || byName.name, code: byName.account_number || byName.account_code || byName.code || defaultCode };
+
+      const byType = accounts.find((a: any) =>
+        typeKeywords.some((k) => (a.accountType?.account_type_name || a.account_type || "").toLowerCase().includes(k.toLowerCase()))
+      );
+      if (byType) return { name: byType.account_name || byType.name, code: byType.account_number || byType.account_code || byType.code || defaultCode };
+
+      return { name: defaultName, code: defaultCode };
+    };
+
+    const apAcc = accountObj
+      ? { name: accountObj.account_name || accountObj.name, code: accountObj.account_number || accountObj.account_code || "2000" }
+      : findAccount(["Accounts Payable", "Trade Creditors", "Creditors", "Payable"], ["Accounts Payable", "Current Liability", "Liability"], "Accounts Payable (AP)", "2000");
+
+    const clearingAcc = findAccount(
+      ["Purchase Return Clearing", "Return Clearing", "GRNI", "Accrued Purchases", "Clearing"],
+      ["Asset", "Current Asset", "Liability", "Current Liability"],
+      "Accrued Purchases / Vendor Return Clearing",
+      "2200"
+    );
+
+    const taxAcc = findAccount(
+      ["Input Tax", "Input GST", "Tax Receivable", "Tax Credit", "GST Input", "Duties & Taxes"],
+      ["Tax", "Current Asset", "Asset"],
+      "Input Tax (GST) Receivable",
+      "1400"
+    );
+
+    const discAcc = findAccount(
+      ["Purchase Discount", "Discount Received", "Discount Income", "Discount"],
+      ["Income", "Expense", "Direct Income"],
+      "Purchase Discount / Discount Received",
+      "4200"
+    );
+
+    const glImpactEntries = [
+      // 1. DEBIT: Accounts Payable (Reduces liability)
+      {
+        accountCode: apAcc.code,
+        accountName: apAcc.name,
+        debit: totalAmount,
+        credit: 0,
+        memo: `Debit AP - Vendor Credit #${dnNoStr} (${vendorName})`,
+      },
+      // 2. DEBIT: Purchase Discount Reversal (if discount exists)
+      ...(activeDiscount > 0 ? [{
+        accountCode: discAcc.code,
+        accountName: discAcc.name,
+        debit: activeDiscount,
+        credit: 0,
+        memo: `Purchase Discount Reversal - Vendor Credit #${dnNoStr}`,
+      }] : []),
+      // 3. CREDIT: Purchase Return Clearing (Offsets fulfillment accrual)
+      {
+        accountCode: clearingAcc.code,
+        accountName: clearingAcc.name,
+        debit: 0,
+        credit: resolvedSubtotal > 0 ? resolvedSubtotal : totalAmount,
+        memo: `Vendor Return Clearing Offset - #${dnNoStr}`,
+      },
+      // 4. CREDIT: Input Tax Reversal (if tax exists)
+      ...(activeTax > 0 ? [{
+        accountCode: taxAcc.code,
+        accountName: taxAcc.name,
+        debit: 0,
+        credit: activeTax,
+        memo: `Input Tax (GST) Reversal - Vendor Credit #${dnNoStr}`,
+      }] : []),
+    ];
 
     return (
       <form onSubmit={formik.handleSubmit}>
@@ -313,6 +521,23 @@ export default function DebitNoteComp() {
           onCancel={() => { setViewMode("list"); setSearchParams({}); }}
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
+          customActions={
+            isView && String(activeHeader.status || activeHeader.document_status || "").toUpperCase() === "DRAFT" ? (
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleEdit(selectedDebitNote.id);
+                    formik.setFieldValue("status", "APPROVED");
+                  }}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
+                >
+                  <ReceiptLong className="!w-4 !h-4" />
+                  <span>Approve & Post to GL</span>
+                </button>
+              </div>
+            ) : undefined
+          }
           isSaving={isCreating || isUpdating}
           subTabs={[
             {
@@ -326,6 +551,24 @@ export default function DebitNoteComp() {
                   <div className="text-slate-600">
                     Vendor: <span className="font-bold text-slate-900">{vendorName}</span> | Reason: <span className="font-medium text-slate-800">{activeHeader.reason || "Standard Debit Adjustment"}</span>
                   </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-200">
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-slate-500 block">Subtotal</span>
+                      <span className="font-mono font-bold text-slate-800">₹{resolvedSubtotal.toFixed(2)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-slate-500 block">Discount</span>
+                      <span className="font-mono font-bold text-amber-700">₹{activeDiscount.toFixed(2)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-slate-500 block">Tax (GST)</span>
+                      <span className="font-mono font-bold text-sky-700">₹{activeTax.toFixed(2)}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] uppercase font-semibold text-slate-500 block">Net Credit Total</span>
+                      <span className="font-mono font-bold text-emerald-700">₹{totalAmount.toFixed(2)}</span>
+                    </div>
+                  </div>
                 </div>
               ),
             },
@@ -337,22 +580,7 @@ export default function DebitNoteComp() {
                     content: (
                       <GLImpactSubtab
                         documentNumber={dnNoStr}
-                        entries={[
-                          {
-                            accountCode: accountObj?.account_number || "2100",
-                            accountName: accountObj?.account_name || "Accounts Payable (AP)",
-                            debit: totalAmount,
-                            credit: 0,
-                            memo: `Debit AP - Vendor Credit #${dnNoStr}`,
-                          },
-                          {
-                            accountCode: "2200",
-                            accountName: "Accrued Purchases / Vendor Return Clearing",
-                            debit: 0,
-                            credit: totalAmount,
-                            memo: `Apply Credit adjustment for ${vendorName}`,
-                          },
-                        ]}
+                        entries={glImpactEntries}
                       />
                     ),
                   },
@@ -379,12 +607,44 @@ export default function DebitNoteComp() {
                       <span className="text-xs text-slate-800">{activeHeader.debitNoteDate || activeHeader.debit_note_date ? new Date(activeHeader.debitNoteDate || activeHeader.debit_note_date).toLocaleDateString() : "—"}</span>
                     </div>
                     <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">STATUS</span>
+                      <div>
+                        <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
+                          String(activeHeader.status || activeHeader.document_status || "APPROVED").toUpperCase() === "DRAFT"
+                            ? "bg-amber-100 text-amber-800 border-amber-200"
+                            : "bg-emerald-100 text-emerald-800 border-emerald-200"
+                        }`}>
+                          {activeHeader.status || activeHeader.document_status || "APPROVED"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
                       <span className="text-[10px] font-semibold text-slate-500 uppercase">ACCOUNT</span>
                       <span className="text-xs font-semibold text-slate-900">{accountObj?.account_name || "Purchase Returns / AP"}</span>
                     </div>
                     <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">SUBTOTAL (₹)</span>
+                      <span className="text-xs font-mono font-semibold text-slate-900">₹{resolvedSubtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">DISCOUNT AMOUNT (₹)</span>
+                      <span className="text-xs font-mono font-semibold text-amber-700">₹{activeDiscount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">TAX AMOUNT (₹)</span>
+                      <span className="text-xs font-mono font-semibold text-sky-700">₹{activeTax.toFixed(2)}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">NET CREDIT AMOUNT (₹)</span>
+                      <span className="text-xs font-mono font-bold text-emerald-700">₹{totalAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
                       <span className="text-[10px] font-semibold text-slate-500 uppercase">REASON</span>
                       <span className="text-xs text-slate-800">{activeHeader.reason || "—"}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">REMARKS</span>
+                      <span className="text-xs text-slate-800">{activeHeader.remarks || "—"}</span>
                     </div>
                   </>
                 ) : (
@@ -435,20 +695,81 @@ export default function DebitNoteComp() {
                         className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
                       />
                     </div>
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                        STATUS <span className="text-amber-600">*</span>
+                      </label>
+                      <select
+                        name="status"
+                        value={formik.values.status}
+                        onChange={formik.handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-semibold text-slate-800"
+                      >
+                        <option value="APPROVED">APPROVED (Posting to GL)</option>
+                        <option value="DRAFT">DRAFT (Non-Posting)</option>
+                        <option value="PENDING_APPROVAL">PENDING APPROVAL</option>
+                        <option value="CANCELLED">CANCELLED</option>
+                      </select>
+                    </div>
 
                     <div className="flex flex-col space-y-1">
                       <label className="text-[11px] font-semibold text-[#475569] uppercase">
-                        CREDIT AMOUNT (₹) <span className="text-amber-600">*</span>
+                        SUBTOTAL / GROSS (₹)
                       </label>
                       <input
                         type="number"
                         step="any"
-                        min="0.01"
+                        min="0"
+                        name="subtotal"
+                        value={formik.values.subtotal}
+                        onChange={handleSubtotalChange}
+                        className="h-7 text-xs border border-slate-300 rounded-xs px-2 text-right font-mono bg-white focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                        DISCOUNT AMOUNT (₹)
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        name="discountAmount"
+                        value={formik.values.discountAmount}
+                        onChange={handleDiscountChange}
+                        className="h-7 text-xs border border-slate-300 rounded-xs px-2 text-right font-mono bg-white focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                        TAX (GST) AMOUNT (₹)
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        name="taxAmount"
+                        value={formik.values.taxAmount}
+                        onChange={handleTaxChange}
+                        className="h-7 text-xs border border-slate-300 rounded-xs px-2 text-right font-mono bg-white focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                        NET CREDIT AMOUNT (₹) <span className="text-amber-600">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
                         name="amount"
                         value={formik.values.amount}
-                        onChange={formik.handleChange}
+                        onChange={handleAmountChange}
                         onBlur={formik.handleBlur}
-                        className={`h-7 text-xs border rounded-xs px-2 text-right font-mono focus:outline-none focus:border-sky-500 ${
+                        className={`h-7 text-xs border rounded-xs px-2 text-right font-mono font-bold text-emerald-800 focus:outline-none focus:border-sky-500 ${
                           formik.touched.amount && formik.errors.amount ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
                         }`}
                       />
@@ -482,21 +803,49 @@ export default function DebitNoteComp() {
                         className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
                       />
                     </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">REMARKS</label>
+                      <input
+                        type="text"
+                        name="remarks"
+                        placeholder="Internal memo or notes..."
+                        value={formik.values.remarks}
+                        onChange={formik.handleChange}
+                        className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
                   </>
                 )}
               </RecordSection>
             </div>
 
             {/* Summary Card */}
-            <div className="w-full lg:w-64 self-start">
+            <div className="w-full lg:w-72 self-start">
               <div className="border border-slate-300 rounded-xs overflow-hidden shadow-2xs">
                 <div className="bg-[#78a4b7] text-white px-3 py-1.5 text-xs font-bold uppercase tracking-wider">
                   Credit Summary
                 </div>
                 <div className="p-3 space-y-2 text-xs font-mono">
-                  <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1 text-sm">
+                  <div className="flex justify-between text-slate-700">
+                    <span className="uppercase text-[10px] font-semibold text-slate-500">SUBTOTAL</span>
+                    <span>₹{resolvedSubtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                  {activeDiscount > 0 && (
+                    <div className="flex justify-between text-amber-700">
+                      <span className="uppercase text-[10px] font-semibold text-slate-500">DISCOUNT (-)</span>
+                      <span>-₹{activeDiscount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  {activeTax > 0 && (
+                    <div className="flex justify-between text-sky-700">
+                      <span className="uppercase text-[10px] font-semibold text-slate-500">TAX (GST) (+)</span>
+                      <span>+₹{activeTax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold text-slate-900 border-t border-slate-200 pt-1.5 text-sm">
                     <span className="uppercase text-[11px]">NET CREDIT</span>
-                    <span className="text-emerald-700">₹{totalAmount.toFixed(2)}</span>
+                    <span className="text-emerald-700">₹{totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                   </div>
                 </div>
               </div>
@@ -632,52 +981,31 @@ export default function DebitNoteComp() {
   const filteredNotes = debitNotes.filter((note: any) => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase().trim();
-    const dnNoStr = String(note.debitNoteNumber || note.debit_note_number || `DN-${note.id}`).toLowerCase();
+    const dnNoStr = String(note.debitNoteNumber || note.debit_note_number || note.creditNoteNumber || note.credit_note_number || `DN-${note.id}`).toLowerCase();
     const vName = getVendorDisplayName(note.vendor).toLowerCase();
     return dnNoStr.includes(term) || vName.includes(term);
   });
 
   return (
     <div className="flex flex-col space-y-3 p-4 bg-[#f3f6f9] min-h-screen font-sans text-slate-800">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-1 border-b border-slate-300">
-        <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">Debit Notes (Vendor Credits)</h1>
-        <div className="flex items-center space-x-2 text-xs font-semibold">
-          <button onClick={() => setViewMode("list")} className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1">
-            <ListIcon className="!w-3.5 !h-3.5" />
-            <span>List</span>
-          </button>
-          <span className="text-slate-300">|</span>
-          <button onClick={() => setViewMode("list")} className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1">
-            <Search className="!w-3.5 !h-3.5" />
-            <span>Search</span>
-          </button>
+      {/* Header with Navigation Pills */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-1 border-b border-slate-300 gap-2">
+        <div className="flex items-center space-x-3">
+          <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">Debit Notes (Vendor Credits)</h1>
         </div>
+        <P2PLifecycleNav />
       </div>
 
-      {/* Button Bar */}
+      {/* Button Bar without standalone create */}
       <div className="bg-white p-3 border border-slate-300 rounded-xs shadow-2xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center space-x-3 text-xs">
           <span className="uppercase text-[10px] font-bold text-slate-500">VIEW</span>
           <select className="h-7 px-3 text-xs bg-white border border-slate-300 rounded-xs font-medium focus:outline-none focus:border-sky-600">
             <option>All Debit Notes</option>
           </select>
-          {canCreate("debit_note") && (
-            <button
-              type="button"
-              onClick={() => {
-                setViewMode("form");
-                setIsEdit(false);
-                setEditId(null);
-                formik.resetForm();
-                setSearchParams({ action: "create" });
-              }}
-              className="bg-[#0070d2] hover:bg-blue-700 text-white font-bold text-xs px-4 py-1.5 rounded-xs border border-blue-800 shadow-2xs transition-colors flex items-center space-x-1 cursor-pointer"
-            >
-              <Add className="!w-4 !h-4" />
-              <span>+ New Debit Note</span>
-            </button>
-          )}
+        </div>
+        <div className="text-xs text-slate-500 italic">
+          Vendor Credits are generated directly from fulfilled Purchase Returns or Invoices.
         </div>
       </div>
 
@@ -716,26 +1044,34 @@ export default function DebitNoteComp() {
           <thead className="bg-[#e5eff5] border-b border-slate-300 text-[#244b5a] font-bold uppercase text-[10px] tracking-wider">
             <tr>
               <th className="p-2 border-r border-slate-300 w-24 text-center">EDIT | VIEW</th>
-              <th className="p-2 border-r border-slate-300 w-24">INTERNAL ID</th>
-              <th className="p-2 border-r border-slate-300 min-w-[130px]">DEBIT NOTE NUMBER</th>
-              <th className="p-2 border-r border-slate-300 min-w-[180px]">VENDOR</th>
-              <th className="p-2 border-r border-slate-300 w-28">DATE</th>
-              <th className="p-2 border-r border-slate-300 w-28 text-right">AMOUNT (₹)</th>
-              <th className="p-2 border-r border-slate-300 w-28 text-center">STATUS</th>
-              <th className="p-2 w-20 text-center">ACTIONS</th>
+              <th className="p-2 border-r border-slate-300 w-20">ID</th>
+              <th className="p-2 border-r border-slate-300 min-w-[130px]">DEBIT NOTE #</th>
+              <th className="p-2 border-r border-slate-300 min-w-[170px]">VENDOR</th>
+              <th className="p-2 border-r border-slate-300 w-24">DATE</th>
+              <th className="p-2 border-r border-slate-300 w-24 text-right">SUBTOTAL (₹)</th>
+              <th className="p-2 border-r border-slate-300 w-24 text-right">DISCOUNT (₹)</th>
+              <th className="p-2 border-r border-slate-300 w-24 text-right">TAX (₹)</th>
+              <th className="p-2 border-r border-slate-300 w-28 text-right">NET AMOUNT (₹)</th>
+              <th className="p-2 border-r border-slate-300 w-24 text-center">STATUS</th>
+              <th className="p-2 w-16 text-center">ACTIONS</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
             {filteredNotes.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-8 text-center text-slate-500 font-medium italic">
+                <td colSpan={11} className="p-8 text-center text-slate-500 font-medium italic">
                   {searchTerm ? "No matching debit notes found." : "No Debit Notes found. Click '+ New Debit Note' to create one."}
                 </td>
               </tr>
             ) : (
               filteredNotes.map((note: any) => {
-                const dnNoStr = note.debitNoteNumber || note.debit_note_number || `DN-${note.id}`;
+                const dnNoStr = note.debitNoteNumber || note.debit_note_number || note.creditNoteNumber || note.credit_note_number || `DN-${note.id}`;
                 const vendorName = getVendorDisplayName(note.vendor);
+                const sub = Number(note.subtotal || 0);
+                const disc = Number(note.discountAmount || note.discount_amount || 0);
+                const tax = Number(note.taxAmount || note.tax_amount || 0);
+                const amt = Number(note.amount || note.totalAmount || note.total_amount || 0);
+                const displaySub = sub > 0 ? sub : (amt > 0 ? amt + disc - tax : amt);
 
                 return (
                   <tr key={note.id} className="hover:bg-sky-50/50 transition-colors">
@@ -760,10 +1096,19 @@ export default function DebitNoteComp() {
                     </td>
                     <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">{vendorName}</td>
                     <td className="p-2 border-r border-slate-200 text-slate-700">
-                      {note.debitNoteDate || note.debit_note_date ? new Date(note.debitNoteDate || note.debit_note_date).toLocaleDateString() : "—"}
+                      {note.debitNoteDate || note.debit_note_date || note.creditDate || note.credit_date ? new Date(note.debitNoteDate || note.debit_note_date || note.creditDate || note.credit_date).toLocaleDateString() : "—"}
                     </td>
-                    <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900">
-                      ₹{Number(note.amount || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700">
+                      ₹{displaySub.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-right font-mono text-amber-700">
+                      {disc > 0 ? `₹${disc.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-right font-mono text-sky-700">
+                      {tax > 0 ? `₹${tax.toLocaleString("en-IN", { minimumFractionDigits: 2 })}` : "—"}
+                    </td>
+                    <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-emerald-800">
+                      ₹{amt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                     </td>
                     <td className="p-2 border-r border-slate-200 text-center">
                       <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800 border border-emerald-200">

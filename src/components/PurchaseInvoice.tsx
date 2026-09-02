@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Add, Delete, Edit, Payments, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
 import { useFormik } from "formik";
@@ -22,10 +22,13 @@ import { usePermissions } from "../Hooks/usePermissions";
 import {
   useCreatePurchaseInvoiceMutation,
   useDeletePurchaseInvoiceMutation,
+  useGetDebitNotesQuery,
   useGetGRNsQuery,
   useGetPurchaseInvoiceByIdQuery,
   useGetPurchaseInvoicesQuery,
   useGetPurchaseOrdersQuery,
+  useGetPurchasePaymentsQuery,
+  useGetPurchaseReturnsQuery,
   useUpdatePurchaseInvoiceMutation,
 } from "../RTK/services/purchaseApi";
 
@@ -140,25 +143,31 @@ const PurchaseInvoiceComp: React.FC = () => {
   const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
   const { data: paymentMethodsData } = useGetPaymentMethodsQuery({ page: 1, limit: 100 });
   const { data: paymentTermsData } = useGetPaymentTermsQuery();
+  const { data: paymentsData } = useGetPurchasePaymentsQuery({});
+  const { data: returnsData } = useGetPurchaseReturnsQuery({});
+  const { data: debitNotesData } = useGetDebitNotesQuery({});
 
   const [createPurchaseInvoice, { isLoading: isCreating }] = useCreatePurchaseInvoiceMutation();
   const [updatePurchaseInvoice, { isLoading: isUpdating }] = useUpdatePurchaseInvoiceMutation();
   const [deletePurchaseInvoice] = useDeletePurchaseInvoiceMutation();
 
-  const purchaseInvoices = Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : Array.isArray(purchaseInvoicesData?.data) ? purchaseInvoicesData.data : Array.isArray(purchaseInvoicesData) ? purchaseInvoicesData : [];
-  const purchaseOrders = Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : [];
-  const grns = Array.isArray(grnsData?.result) ? grnsData.result : Array.isArray(grnsData?.data) ? grnsData.data : Array.isArray(grnsData) ? grnsData : [];
-  const vendors = Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : [];
-  const items = Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : Array.isArray(itemsData) ? itemsData : [];
-  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
-  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
-  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
-  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
-  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : Array.isArray(currenciesData?.data) ? currenciesData.data : Array.isArray(currenciesData) ? currenciesData : [];
-  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
-  const chartOfAccounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : [];
-  const paymentMethods = Array.isArray(paymentMethodsData?.result) ? paymentMethodsData.result : Array.isArray(paymentMethodsData?.data) ? paymentMethodsData.data : Array.isArray(paymentMethodsData) ? paymentMethodsData : [];
-  const paymentTerms = Array.isArray(paymentTermsData?.result) ? paymentTermsData.result : Array.isArray((paymentTermsData as any)?.data) ? (paymentTermsData as any).data : Array.isArray(paymentTermsData) ? paymentTermsData : [];
+  const purchaseInvoices = Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : [];
+  const purchaseOrders = Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : [];
+  const grns = Array.isArray(grnsData?.result) ? grnsData.result : [];
+  const vendors = Array.isArray(vendorsData?.result) ? vendorsData.result : [];
+  const items = Array.isArray(itemsData?.result) ? itemsData.result : [];
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : [];
+  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : [];
+  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : [];
+  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : [];
+  const chartOfAccounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : [];
+  const paymentMethods = Array.isArray(paymentMethodsData?.result) ? paymentMethodsData.result : [];
+  const paymentTerms = Array.isArray(paymentTermsData?.result) ? paymentTermsData.result : [];
+  const purchasePayments = Array.isArray(paymentsData?.result) ? paymentsData.result : Array.isArray(paymentsData?.data) ? paymentsData.data : Array.isArray(paymentsData) ? paymentsData : [];
+  const purchaseReturns = Array.isArray(returnsData?.result) ? returnsData.result : Array.isArray(returnsData?.data) ? returnsData.data : Array.isArray(returnsData) ? returnsData : [];
+  const debitNotes = Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData) ? debitNotesData : [];
 
   const formik = useFormik({
     initialValues: {
@@ -213,7 +222,7 @@ const PurchaseInvoiceComp: React.FC = () => {
           const line = values.lineItems[i];
           const uomObj = uoms.find((u: any) => String(u.id) === String(line.uom_id));
           if (uomObj && !isDecimalAllowedForUOM(uomObj) && Number(line.quantity) % 1 !== 0) {
-            toast.error(`Quantity for line ${i + 1} (${uomObj.uom_name || uomObj.name}) must be a whole number.`);
+            toast.error(`Quantity for line ${i + 1} (${uomObj.uom_name}) must be a whole number.`);
             return;
           }
         }
@@ -325,14 +334,27 @@ const PurchaseInvoiceComp: React.FC = () => {
     }
   }, [formik.values.header.vendorId, vendors, currencies, chartOfAccounts]);
 
+  const getNextBillNumber = useCallback(() => {
+    const maxNum = purchaseInvoices.reduce((max: number, inv: any) => {
+      const numStr = String(inv.invoiceNumber || inv.invoice_number || inv.vendorInvoiceNumber || inv.vendor_invoice_number || "");
+      const match = numStr.match(/VB-\d{4}-(\d+)/);
+      if (match) {
+        return Math.max(max, parseInt(match[1], 10));
+      }
+      return max;
+    }, 0);
+    const nextSeq = Math.max(purchaseInvoices.length, maxNum) + 1;
+    return `VB-${new Date().getFullYear()}-${String(nextSeq).padStart(4, "0")}`;
+  }, [purchaseInvoices]);
+
   // Auto-generate Vendor Bill Number if empty
   useEffect(() => {
     if (viewMode === "form" && !isEdit && !formik.values.header.vendorInvoiceNumber) {
-      const generatedBillNo = `VB-${new Date().getFullYear()}-${String(purchaseInvoices.length + 1).padStart(4, "0")}`;
+      const generatedBillNo = getNextBillNumber();
       formik.setFieldValue("header.vendorInvoiceNumber", generatedBillNo);
       formik.setFieldValue("header.invoiceNumber", generatedBillNo);
     }
-  }, [viewMode, isEdit, purchaseInvoices.length]);
+  }, [viewMode, isEdit, getNextBillNumber, formik.values.header.vendorInvoiceNumber]);
 
   // Auto-populate all details (PO, Vendor, Items, Location, Memo, Subsidiary) when GRN is selected
   const lastProcessedGrnIdRef = React.useRef<string | null>(null);
@@ -607,17 +629,27 @@ const PurchaseInvoiceComp: React.FC = () => {
     let newValue = value;
 
     if (key === "quantity" && newValue !== "") {
+      if (Number(newValue) < 0) newValue = 0;
       const uomObj = uoms.find((u: any) => String(u.id) === String(updated[index].uom_id));
       if (uomObj && !isDecimalAllowedForUOM(uomObj)) {
         if (typeof newValue === "string" && (newValue.includes(".") || newValue.includes(","))) {
           const intPart = newValue.split(".")[0].split(",")[0];
           newValue = intPart === "" ? "" : Math.floor(Number(intPart)) || 0;
-          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+          toast.error(`Quantity for UOM '${uomObj.uom_name}' cannot contain decimals.`);
         } else if (Number(newValue) % 1 !== 0) {
           newValue = Math.floor(Number(newValue)) || 0;
-          toast.error(`Quantity for UOM '${uomObj.uom_name || uomObj.name}' cannot contain decimals.`);
+          toast.error(`Quantity for UOM '${uomObj.uom_name}' cannot contain decimals.`);
         }
       }
+    }
+
+    if (key === "unitPrice" && newValue !== "") {
+      if (Number(newValue) < 0) newValue = 0;
+    }
+
+    if (key === "discountPercent" && newValue !== "") {
+      if (Number(newValue) < 0) newValue = 0;
+      if (Number(newValue) > 100) newValue = 100;
     }
 
     const nextLine = { ...updated[index], [key]: newValue };
@@ -683,8 +715,20 @@ const PurchaseInvoiceComp: React.FC = () => {
 
     const header = inv.header || inv;
     const invStatus = String(header.status || "").toUpperCase();
-    if (invStatus !== "DRAFT") {
-      toast.error(`Only DRAFT Vendor Bills can be edited. Current status: ${invStatus}`);
+
+    const hasPayments = purchasePayments.some((p: any) => {
+      const pBillId = String(p.purchaseInvoiceHeaderId || p.purchase_invoice_header_id || p.invoiceId || p.invoice_id || p.billId || "");
+      const lines = p.lines || p.purchasePaymentLines || p.details || [];
+      const hasLineMatch = Array.isArray(lines) && lines.some((pl: any) => String(pl.purchaseInvoiceHeaderId || pl.invoiceId || pl.billId) === String(id));
+      return (pBillId === String(id) || hasLineMatch) && String(p.status || "").toUpperCase() !== "CANCELLED";
+    });
+    const hasReturn = purchaseReturns.some((pr: any) => {
+      const prBillId = String(pr.purchaseInvoiceHeaderId || pr.purchase_invoice_header_id || pr.purchase_invoice_id || pr.billId || pr.invoiceId || "");
+      return prBillId === String(id) && String(pr.status || "").toUpperCase() !== "CANCELLED";
+    });
+
+    if (invStatus !== "DRAFT" || hasPayments || hasReturn) {
+      toast.error("Cannot edit a Vendor Bill that is approved, paid, or has an authorized return.");
       return;
     }
     const lines = inv.lineItems || inv.purchaseInvoiceLines || [];
@@ -810,6 +854,40 @@ const PurchaseInvoiceComp: React.FC = () => {
 
     const isDraftBill = String(activeHeader.status || (selectedInvoice?.header || selectedInvoice)?.status || "").toUpperCase() === "DRAFT";
 
+    const currentBillId = String(selectedInvoice?.id || selectedInvoice?.header?.id || activeHeader?.id || "");
+
+    const totalPaidForBill = purchasePayments
+      .filter((p: any) => {
+        const pBillId = String(p.purchaseInvoiceHeaderId || p.purchase_invoice_header_id || p.invoiceId || p.invoice_id || p.billId || "");
+        const lines = p.lines || p.purchasePaymentLines || p.details || [];
+        const hasLineMatch = Array.isArray(lines) && lines.some((pl: any) => String(pl.purchaseInvoiceHeaderId || pl.invoiceId || pl.billId) === currentBillId);
+        return (pBillId === currentBillId || hasLineMatch) && String(p.status || "").toUpperCase() !== "CANCELLED";
+      })
+      .reduce((sum: number, p: any) => sum + Number(p.paymentAmount || p.amount || p.totalAmount || 0), 0);
+
+    const isPaymentCompleted =
+      String(activeHeader.status || "").toUpperCase() === "PAID" ||
+      (Number(activeHeader.balanceAmount || 0) <= 0 && Number(activeHeader.paidAmount || 0) > 0) ||
+      (totalPaidForBill > 0 && totalPaidForBill >= activeBillTotal);
+
+    const matchingReturn = purchaseReturns.find((pr: any) => {
+      const prBillId = String(pr.purchaseInvoiceHeaderId || pr.purchase_invoice_header_id || pr.purchase_invoice_id || pr.billId || pr.invoiceId || "");
+      return prBillId === currentBillId && String(pr.status || "").toUpperCase() !== "CANCELLED";
+    });
+    const isReturnCompleted = Boolean(matchingReturn);
+
+    const matchingDebitNote = debitNotes.find((dn: any) => {
+      const dnBillId = String(dn.purchaseInvoiceHeaderId || dn.purchase_invoice_header_id || dn.invoiceId || dn.billId || "");
+      const dnReturnId = String(dn.purchase_return_id || dn.purchaseReturnId || dn.returnId || "");
+      const isLinkedThroughReturn = matchingReturn && dnReturnId === String(matchingReturn.id);
+      return (dnBillId === currentBillId || isLinkedThroughReturn) && String(dn.status || "").toUpperCase() !== "CANCELLED";
+    });
+
+    const isVendorCreditCompleted = Boolean(
+      matchingDebitNote ||
+      (matchingReturn && String(matchingReturn.status || "").toUpperCase() === "RETURNED")
+    );
+
     if (isView && isSingleLoading && !selectedInvoice) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
@@ -827,7 +905,12 @@ const PurchaseInvoiceComp: React.FC = () => {
           mode={isView ? "view" : "edit"}
           onSave={() => formik.handleSubmit()}
           onEdit={
-            selectedInvoice && String((selectedInvoice.header || selectedInvoice).status || "").toUpperCase() === "DRAFT" && canUpdate("purchase_invoice")
+            selectedInvoice &&
+              String((selectedInvoice.header || selectedInvoice).status || "").toUpperCase() === "DRAFT" &&
+              !isPaymentCompleted &&
+              !isReturnCompleted &&
+              !isVendorCreditCompleted &&
+              canUpdate("purchase_invoice")
               ? () => handleEdit(selectedInvoice.id || selectedInvoice.header?.id)
               : undefined
           }
@@ -836,29 +919,35 @@ const PurchaseInvoiceComp: React.FC = () => {
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
           customActions={
-            isView && selectedInvoice && !isDraftBill ? (
+            isView && selectedInvoice && !isDraftBill && (!isPaymentCompleted || !isReturnCompleted || !isVendorCreditCompleted) ? (
               <div className="flex items-center space-x-1.5">
-                <button
-                  type="button"
-                  onClick={() => navigate(`/purchase-payment?billId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
-                  className="bg-[#0070d2] hover:bg-blue-700 text-white text-xs font-bold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
-                >
-                  <span>Make Payment</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/purchase-return?billId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
-                  className="bg-red-700 hover:bg-red-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                >
-                  Authorize Return
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/debit-note?invoiceId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
-                  className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                >
-                  Debit Note
-                </button>
+                {!isPaymentCompleted && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/purchase-payment?billId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
+                    className="bg-[#0070d2] hover:bg-blue-700 text-white text-xs font-bold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
+                  >
+                    <span>Make Payment</span>
+                  </button>
+                )}
+                {!isReturnCompleted && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/purchase-return?billId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
+                    className="bg-red-700 hover:bg-red-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                  >
+                    Authorize Return
+                  </button>
+                )}
+                {!isVendorCreditCompleted && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/debit-note?invoiceId=${selectedInvoice.id || selectedInvoice.header?.id}`)}
+                    className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                  >
+                    Debit Note
+                  </button>
+                )}
               </div>
             ) : undefined
           }
@@ -923,9 +1012,8 @@ const PurchaseInvoiceComp: React.FC = () => {
                                   disabled={isPoLinked}
                                   value={line.itemId}
                                   onChange={(e) => updateLineItem(idx, "itemId", e.target.value)}
-                                  className={`w-full h-7 px-2 text-xs border border-slate-300 rounded-xs font-medium text-slate-800 ${
-                                    isPoLinked ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
-                                  }`}
+                                  className={`w-full h-7 px-2 text-xs border border-slate-300 rounded-xs font-medium text-slate-800 ${isPoLinked ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
+                                    }`}
                                 >
                                   <option value="">Select Item...</option>
                                   {items.map((i: any) => (
@@ -943,14 +1031,13 @@ const PurchaseInvoiceComp: React.FC = () => {
                                   min={allowsDecimals ? "0.01" : "1"}
                                   value={line.quantity}
                                   onKeyDown={(e) => {
-                                    if (!allowsDecimals && (e.key === "." || e.key === "," || e.key === "e" || e.key === "E" || e.key === "-")) {
+                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+" || (!allowsDecimals && (e.key === "." || e.key === ","))) {
                                       e.preventDefault();
                                     }
                                   }}
                                   onChange={(e) => updateLineItem(idx, "quantity", e.target.value)}
-                                  className={`w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono font-bold text-slate-800 ${
-                                    isPoLinked ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
-                                  }`}
+                                  className={`w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono font-bold text-slate-800 ${isPoLinked ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
+                                    }`}
                                 />
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
@@ -960,6 +1047,11 @@ const PurchaseInvoiceComp: React.FC = () => {
                                   step="any"
                                   min="0"
                                   value={line.unitPrice}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+") {
+                                      e.preventDefault();
+                                    }
+                                  }}
                                   onChange={(e) => updateLineItem(idx, "unitPrice", e.target.value)}
                                   className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono bg-slate-100 font-semibold text-slate-800 cursor-not-allowed"
                                 />
@@ -969,7 +1061,13 @@ const PurchaseInvoiceComp: React.FC = () => {
                                   type="number"
                                   step="any"
                                   min="0"
+                                  max="100"
                                   value={line.discountPercent}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+") {
+                                      e.preventDefault();
+                                    }
+                                  }}
                                   onChange={(e) => updateLineItem(idx, "discountPercent", e.target.value)}
                                   className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
                                 />
@@ -978,22 +1076,10 @@ const PurchaseInvoiceComp: React.FC = () => {
                                 ₹{Number(line.discountAmount || 0).toFixed(2)}
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
-                                {isPoLinked ? (
-                                  <div className="flex items-center justify-end space-x-1 bg-slate-100 border border-slate-200 rounded-xs px-2 py-1 text-xs text-slate-700 select-none">
-                                    <span className="font-mono font-semibold">{Number(line.taxPercent || 0)}%</span>
-                                    <span className="text-[10px] text-amber-800 bg-amber-100 px-1 py-0.2 rounded-xs font-bold" title="Tax Rate is strictly locked from Purchase Order">🔒</span>
-                                  </div>
-                                ) : (
-                                  <input
-                                    type="number"
-                                    step="any"
-                                    min="0"
-                                    max="100"
-                                    value={line.taxPercent}
-                                    onChange={(e) => updateLineItem(idx, "taxPercent", e.target.value)}
-                                    className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
-                                  />
-                                )}
+                                <div className="flex items-center justify-end space-x-1 bg-slate-100 border border-slate-200 rounded-xs px-2 py-1 text-xs text-slate-700 select-none">
+                                  <span className="font-mono font-semibold">{Number(line.taxPercent || 0)}%</span>
+                                  <span className="text-[10px] text-amber-800 bg-amber-100 px-1 py-0.2 rounded-xs font-bold" title="Tax Rate is strictly locked from Purchase Order">🔒</span>
+                                </div>
                               </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700 bg-slate-50">
                                 ₹{Number(line.taxAmount || 0).toFixed(2)}
@@ -1019,7 +1105,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                     </table>
                   </div>
 
-                  {!isView && (
+                  {/* {!isView && (
                     <button
                       type="button"
                       onClick={addLine}
@@ -1028,7 +1114,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                       <Add className="!w-4 !h-4" />
                       <span>Add Bill Line</span>
                     </button>
-                  )}
+                  )} */}
                 </div>
               ),
             },
@@ -1140,102 +1226,38 @@ const PurchaseInvoiceComp: React.FC = () => {
                   label: "GL Impact",
                   content: (() => {
                     const isGRNLinked = Boolean(activeHeader.grnHeaderId || activeHeader.grn_header_id || activeHeader.poHeaderId || activeHeader.po_header_id);
-                    const invLines = activeHeader.purchaseInvoiceLines || activeHeader.lines || activeHeader.details || [];
+                    const rawSubtotal = Number(activeHeader.subtotal || activeHeader.sub_total || totals.gross || (activeBillTotal - (activeHeader.taxAmount || 0)));
+                    const discountAmt = Number(activeHeader.discountAmount || activeHeader.discount_amount || totals.discount || 0);
+                    const netSubtotal = Number(Math.max(0, rawSubtotal - discountAmt).toFixed(2));
+                    const taxAmt = Number(activeHeader.taxAmount || activeHeader.tax_amount || totals.tax || 0);
+                    const finalPayable = Number((netSubtotal + taxAmt).toFixed(2));
 
-                    const entries: any[] = [];
-                    let totalDebitSum = 0;
-
-                    if (isGRNLinked) {
-                      const subtotal = Number(activeHeader.subtotal || activeHeader.sub_total || (activeBillTotal - (activeHeader.taxAmount || 0))) || activeBillTotal;
-                      totalDebitSum += subtotal;
-                      entries.push({
-                        accountCode: "2200",
-                        accountName: "Accrued Purchases (GRNI Clearing)",
-                        debit: subtotal,
+                    const entries: any[] = [
+                      // 1. Combined DEBIT: Accrued Purchases / Inventory Asset (Net of Trade Discount)
+                      {
+                        accountCode: isGRNLinked ? "2200" : "1100",
+                        accountName: isGRNLinked ? "Accrued Purchases (GRNI Clearing)" : "Purchase Expense / Inventory Asset",
+                        debit: netSubtotal,
                         credit: 0,
-                        memo: `Clear GRN Accrual Liability - Bill #${billNoStr}`,
-                      });
-                    } else {
-                      invLines.forEach((l: any) => {
-                        const itemObj = itemsList.find((i: any) => String(i.id) === String(l.itemId || l.item_id || l.item?.id)) || l.item;
-                        const itemName = itemObj?.item_name || l.item_name || `Item #${l.itemId || l.id}`;
-                        const qty = Number(l.quantity || 0);
-                        const unitPrice = Number(l.unitPrice || l.unit_price || 0);
-                        const discount = Number(l.discountAmount || l.discount_amount || 0);
-                        const lineAmt = Number((qty * unitPrice - discount).toFixed(2));
-
-                        if (lineAmt > 0) {
-                          totalDebitSum += lineAmt;
-                          entries.push({
-                            accountCode: itemObj?.asset_account?.account_number || itemObj?.expense_account?.account_number || "1100",
-                            accountName: itemObj?.asset_account?.account_name || itemObj?.expense_account?.account_name || `Expense/Asset - ${itemName}`,
-                            debit: lineAmt,
-                            credit: 0,
-                            memo: `Direct Bill Inward: ${itemName} (Qty: ${qty} @ ₹${unitPrice})`,
-                          });
-                        }
-                      });
-
-                      if (entries.length === 0) {
-                        const subtotal = Number(activeHeader.subtotal || activeHeader.sub_total || activeBillTotal);
-                        totalDebitSum += subtotal;
-                        entries.push({
-                          accountCode: "1100",
-                          accountName: "Purchase Expense / Inventory Asset",
-                          debit: subtotal,
-                          credit: 0,
-                          memo: `Purchase Bill Subtotal #${billNoStr}`,
-                        });
-                      }
-                    }
-
-                    const taxAmt = Number(activeHeader.taxAmount || activeHeader.tax_amount || 0);
-                    if (taxAmt > 0) {
-                      totalDebitSum += taxAmt;
-                      entries.push({
+                        memo: isGRNLinked ? `Clear GRN Accrual Liability - Bill #${billNoStr}` : `Purchase Inward Subtotal - Bill #${billNoStr}`,
+                      },
+                      // 2. Combined DEBIT: GST (Input Tax Credit)
+                      ...(taxAmt > 0 ? [{
                         accountCode: "5010",
-                        accountName: "Input Tax (GST Input Credit)",
+                        accountName: "Input GST",
                         debit: taxAmt,
                         credit: 0,
-                        memo: `Input GST Tax Credit - Bill #${billNoStr}`,
-                      });
-                    }
-
-                    const freightAmt = Number(activeHeader.freightAmount || activeHeader.freight_amount || 0);
-                    if (freightAmt > 0) {
-                      totalDebitSum += freightAmt;
-                      entries.push({
-                        accountCode: "6020",
-                        accountName: "Freight & Shipping Expense",
-                        debit: freightAmt,
-                        credit: 0,
-                        memo: `Shipping Expense - Bill #${billNoStr}`,
-                      });
-                    }
-
-                    const discountAmt = Number(activeHeader.discountAmount || activeHeader.discount_amount || 0);
-                    if (discountAmt > 0 && isGRNLinked) {
-                      entries.push({
-                        accountCode: "4050",
-                        accountName: "Purchase Discount Received",
+                        memo: `Input GST Credit - Bill #${billNoStr}`,
+                      }] : []),
+                      // 3. Combined CREDIT: Accounts Payable (Vendor Payables)
+                      {
+                        accountCode: "2100",
+                        accountName: "Accounts Payable (Vendor Payables)",
                         debit: 0,
-                        credit: discountAmt,
-                        memo: `Vendor Discount - Bill #${billNoStr}`,
-                      });
-                    }
-
-                    const rawCreditVal = Number(activeHeader.totalAmount ?? activeHeader.total_amount ?? activeBillTotal ?? 0);
-                    const finalCreditTarget = Number(rawCreditVal.toFixed(2));
-                    const currentCreditsSum = entries.reduce((acc: number, curr: any) => acc + (curr.credit || 0), 0);
-                    const apCreditNeeded = Number((totalDebitSum - currentCreditsSum).toFixed(2));
-
-                    entries.push({
-                      accountCode: "2100",
-                      accountName: "Accounts Payable (Vendor Payables)",
-                      debit: 0,
-                      credit: apCreditNeeded > 0 ? apCreditNeeded : finalCreditTarget,
-                      memo: `Vendor Payable Liability - ${vendorName}`,
-                    });
+                        credit: finalPayable,
+                        memo: `Vendor Payable Liability - ${vendorName}`,
+                      },
+                    ];
 
                     return <GLImpactSubtab documentNumber={billNoStr} entries={entries} />;
                   })(),
@@ -1291,11 +1313,10 @@ const PurchaseInvoiceComp: React.FC = () => {
                     <div className="flex flex-col space-y-0.5">
                       <span className="text-[10px] font-semibold text-slate-500 uppercase">STATUS</span>
                       <div>
-                        <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
-                          String(activeHeader.status || "").toUpperCase() === "DRAFT"
-                            ? "bg-amber-100 text-amber-800 border-amber-200"
-                            : "bg-emerald-100 text-emerald-800 border-emerald-200"
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${String(activeHeader.status || "").toUpperCase() === "DRAFT"
+                          ? "bg-amber-100 text-amber-800 border-amber-200"
+                          : "bg-emerald-100 text-emerald-800 border-emerald-200"
+                          }`}>
                           {activeHeader.status || "DRAFT"}
                         </span>
                       </div>
@@ -1304,7 +1325,22 @@ const PurchaseInvoiceComp: React.FC = () => {
                 ) : (
                   <>
                     <div className="flex flex-col space-y-1">
-                      <label className="text-[11px] font-semibold text-[#475569] uppercase">VENDOR BILL NUMBER</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-semibold text-[#475569] uppercase">VENDOR BILL NUMBER</label>
+                        {!isEdit && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newNum = getNextBillNumber();
+                              formik.setFieldValue("header.vendorInvoiceNumber", newNum);
+                              formik.setFieldValue("header.invoiceNumber", newNum);
+                            }}
+                            className="text-[10px] text-sky-700 hover:text-sky-900 font-semibold cursor-pointer underline"
+                          >
+                            ↻ Generate New
+                          </button>
+                        )}
+                      </div>
                       <input
                         type="text"
                         name="header.vendorInvoiceNumber"
@@ -1634,16 +1670,27 @@ const PurchaseInvoiceComp: React.FC = () => {
                 const vendorName = getVendorDisplayName(inv.vendor);
 
                 const isDraft = String(inv.status || "").toUpperCase() === "DRAFT";
+                const hasPayments = purchasePayments.some((p: any) => {
+                  const pBillId = String(p.purchaseInvoiceHeaderId || p.purchase_invoice_header_id || p.invoiceId || p.invoice_id || p.billId || "");
+                  const lines = p.lines || p.purchasePaymentLines || p.details || [];
+                  const hasLineMatch = Array.isArray(lines) && lines.some((pl: any) => String(pl.purchaseInvoiceHeaderId || pl.invoiceId || pl.billId) === String(inv.id));
+                  return (pBillId === String(inv.id) || hasLineMatch) && String(p.status || "").toUpperCase() !== "CANCELLED";
+                });
+                const hasReturn = purchaseReturns.some((pr: any) => {
+                  const prBillId = String(pr.purchaseInvoiceHeaderId || pr.purchase_invoice_header_id || pr.purchase_invoice_id || pr.billId || pr.invoiceId || "");
+                  return prBillId === String(inv.id) && String(pr.status || "").toUpperCase() !== "CANCELLED";
+                });
+                const isEditable = isDraft && !hasPayments && !hasReturn && canUpdate("purchase_invoice");
 
                 return (
                   <tr key={inv.id} className="hover:bg-sky-50/50 transition-colors">
                     <td className="p-2 border-r border-slate-200 text-center font-semibold space-x-1">
-                      {isDraft && canUpdate("purchase_invoice") ? (
+                      {isEditable ? (
                         <button onClick={() => handleEdit(inv.id)} className="text-sky-700 hover:underline cursor-pointer">
                           Edit
                         </button>
                       ) : (
-                        <span className="text-slate-300 select-none cursor-not-allowed" title="Only Draft bills can be edited">
+                        <span className="text-slate-300 select-none cursor-not-allowed" title="Cannot edit approved, paid, or returned bill">
                           Edit
                         </span>
                       )}

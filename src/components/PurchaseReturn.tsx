@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Add, Delete, Edit, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
+import { Add, Delete, Edit, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp, AssignmentReturn, LocalShipping, ReceiptLong } from "@mui/icons-material";
 import { useFormik } from "formik";
 import toast from "react-hot-toast";
 import * as Yup from "yup";
@@ -667,6 +667,36 @@ export default function PurchaseReturnComp() {
     return v.company_name || [v.salutation, v.first_name, v.last_name].filter(Boolean).join(" ");
   };
 
+  // Lifecycle navigation component
+  const P2PLifecycleNav = () => (
+    <div className="flex items-center space-x-1.5 bg-slate-200/90 p-1 rounded-sm text-xs font-semibold">
+      <button
+        type="button"
+        onClick={() => { setViewMode("list"); setIsEdit(false); setSearchParams({}); }}
+        className="px-3 py-1 rounded-xs bg-[#244b5a] text-white shadow-2xs font-bold transition-colors cursor-pointer flex items-center space-x-1"
+      >
+        <AssignmentReturn className="!w-3.5 !h-3.5 text-sky-200" />
+        <span>Return Authorizations</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate("/return-fulfillment")}
+        className="px-3 py-1 rounded-xs text-slate-700 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer flex items-center space-x-1"
+      >
+        <LocalShipping className="!w-3.5 !h-3.5 text-slate-600" />
+        <span>Item Fulfillments</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => navigate("/debit-note")}
+        className="px-3 py-1 rounded-xs text-slate-700 hover:bg-white hover:text-slate-900 transition-colors cursor-pointer flex items-center space-x-1"
+      >
+        <ReceiptLong className="!w-3.5 !h-3.5 text-slate-600" />
+        <span>Vendor Credits</span>
+      </button>
+    </div>
+  );
+
   const getVendorDisplayName = (vendorObj: any) => {
     if (!vendorObj) return "—";
     const code = vendorObj.entity_id ? `${vendorObj.entity_id} ` : "";
@@ -899,20 +929,13 @@ export default function PurchaseReturnComp() {
               )}
 
               {/* Step 2: Return (Item Fulfillment) - Only after Authorization, before full fulfillment */}
-              {(["AUTHORIZED", "APPROVED", "PARTIALLY_FULFILLED"].includes(String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase()) || (!isView && !editId)) && (
+              {["AUTHORIZED", "APPROVED", "PARTIALLY_FULFILLED"].includes(String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase()) && (
                 <button
                   type="button"
                   onClick={() => {
                     const retId = selectedReturnId || editId || selectedReturn?.id;
-                    if (isView && retId) {
+                    if (retId) {
                       navigate(`/return-fulfillment?returnId=${retId}`);
-                    } else if (editId) {
-                      pendingActionRef.current = "fulfill";
-                      formik.handleSubmit();
-                    } else {
-                      formik.setFieldValue("header.status", "AUTHORIZED");
-                      pendingActionRef.current = "fulfill";
-                      formik.handleSubmit();
                     }
                   }}
                   className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
@@ -921,18 +944,26 @@ export default function PurchaseReturnComp() {
                 </button>
               )}
 
-              {/* Step 3: Credit (Vendor Credit) - STRICTLY AFTER FULFILLMENT */}
-              {["FULFILLED", "RETURNED"].includes(String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase()) && (
+              {/* Step 3: Credit (Vendor Credit) - STRICTLY AFTER FULFILLMENT, and REMOVED once completed */}
+              {String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase() === "FULFILLED" && (
                 <button
                   type="button"
                   onClick={() => {
                     const retId = selectedReturnId || editId || selectedReturn?.id;
-                    navigate(`/debit-note?returnId=${retId}`);
+                    if (retId) {
+                      navigate(`/debit-note?returnId=${retId}`);
+                    }
                   }}
-                  className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                  className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
                 >
-                  Credit (Vendor Credit)
+                  <ReceiptLong className="!w-3.5 !h-3.5" />
+                  <span>Credit (Vendor Credit)</span>
                 </button>
+              )}
+              {String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase() === "RETURNED" && (
+                <div className="flex items-center space-x-1 bg-teal-50 border border-teal-300 text-teal-800 text-xs px-2.5 py-1 rounded-xs font-semibold">
+                  <span>✓ Vendor Credit Completed</span>
+                </div>
               )}
             </div>
           }
@@ -1376,20 +1407,12 @@ export default function PurchaseReturnComp() {
 
   return (
     <div className="flex flex-col space-y-3 p-4 bg-[#f3f6f9] min-h-screen font-sans text-slate-800">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-1 border-b border-slate-300">
-        <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">Purchase Return Authorizations</h1>
-        <div className="flex items-center space-x-2 text-xs font-semibold">
-          <button onClick={() => setViewMode("list")} className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1">
-            <ListIcon className="!w-3.5 !h-3.5" />
-            <span>List</span>
-          </button>
-          <span className="text-slate-300">|</span>
-          <button onClick={() => setViewMode("list")} className="text-sky-700 hover:underline cursor-pointer flex items-center space-x-1">
-            <Search className="!w-3.5 !h-3.5" />
-            <span>Search</span>
-          </button>
+      {/* Header with Navigation Pills */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-1 border-b border-slate-300 gap-2">
+        <div className="flex items-center space-x-3">
+          <h1 className="text-xl font-bold text-[#1e2d3d] tracking-tight">Purchase Return Authorizations</h1>
         </div>
+        <P2PLifecycleNav />
       </div>
 
       {/* Button Bar */}
