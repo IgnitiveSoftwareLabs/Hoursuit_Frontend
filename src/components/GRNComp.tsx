@@ -840,20 +840,21 @@ const GRNComp: React.FC = () => {
     const poVendor = activeHeader.vendor || poObj?.vendor || vendors.find((v: any) => String(v.id) === String(selectedVendorId));
     const vendorDisplayName = getVendorDisplayName(poVendor);
 
-    const rawSub = activeHeader.subsidiary || subsidiaries.find((s: any) => String(s.id) === String(activeHeader.subsidiary_id));
-    const subsidiaryName = typeof rawSub === "object" && rawSub !== null ? (rawSub.subsidiary_name || rawSub.name || "Ignitive Software Labs") : (typeof rawSub === "string" && rawSub ? rawSub : "Ignitive Software Labs");
+    const poH = poObj?.header ?? poObj;
+    const rawSub = activeHeader.subsidiary || subsidiaries.find((s: any) => String(s.id) === String(activeHeader.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId));
+    const subsidiaryName = typeof rawSub === "object" && rawSub !== null ? (rawSub.subsidiary_name || rawSub.name || "Ignitive Software Labs") : (typeof rawSub === "string" && rawSub ? rawSub : (poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "Ignitive Software Labs"));
 
-    const rawCurr = activeHeader.currency || poObj?.currency || poObj?.currency_code;
+    const rawCurr = activeHeader.currency || poObj?.currency || poObj?.currency_code || poH?.currency;
     const currencyName = typeof rawCurr === "object" && rawCurr !== null ? (rawCurr.currency_code || rawCurr.currency_name || rawCurr.code || "INR") : (typeof rawCurr === "string" && rawCurr ? rawCurr : "INR");
 
-    const rawClass = activeHeader.class || classesList.find((c: any) => String(c.id) === String(activeHeader.class_id));
-    const classNameVal = typeof rawClass === "object" && rawClass !== null ? (rawClass.class_name || rawClass.name || "—") : (typeof rawClass === "string" && rawClass ? rawClass : "—");
+    const rawClass = activeHeader.class || classesList.find((c: any) => String(c.id) === String(activeHeader.class_id || poH?.class_id || poH?.classId));
+    const classNameVal = typeof rawClass === "object" && rawClass !== null ? (rawClass.class_name || rawClass.name || "—") : (typeof rawClass === "string" && rawClass ? rawClass : (poH?.class?.class_name || "—"));
 
-    const rawDept = activeHeader.department || departmentsList.find((d: any) => String(d.id) === String(activeHeader.department_id));
-    const deptNameVal = typeof rawDept === "object" && rawDept !== null ? (rawDept.department_name || rawDept.name || "—") : (typeof rawDept === "string" && rawDept ? rawDept : "—");
+    const rawDept = activeHeader.department || departmentsList.find((d: any) => String(d.id) === String(activeHeader.department_id || poH?.department_id || poH?.departmentId));
+    const deptNameVal = typeof rawDept === "object" && rawDept !== null ? (rawDept.department_name || rawDept.name || "—") : (typeof rawDept === "string" && rawDept ? rawDept : (poH?.department?.department_name || "—"));
 
-    const rawLoc = activeHeader.location || citiesList.find((c: any) => String(c.id) === String(activeHeader.location_id));
-    const locNameVal = typeof rawLoc === "object" && rawLoc !== null ? (rawLoc.city_name || rawLoc.name || "—") : (typeof rawLoc === "string" && rawLoc ? rawLoc : "—");
+    const rawLoc = activeHeader.location || citiesList.find((c: any) => String(c.id) === String(activeHeader.location_id || activeHeader.city_id || poH?.city_id || poH?.cityId || poH?.location_id));
+    const locNameVal = typeof rawLoc === "object" && rawLoc !== null ? (rawLoc.city_name || rawLoc.name || "—") : (typeof rawLoc === "string" && rawLoc ? rawLoc : (poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—"));
 
     const rawTrans = activeHeader.transportationMode || transportationModes.find((t: any) => String(t.id) === String(activeHeader.transportationModeId));
     const transModeVal = typeof rawTrans === "object" && rawTrans !== null ? (rawTrans.mode_name || rawTrans.name || "—") : (typeof rawTrans === "string" && rawTrans ? rawTrans : "—");
@@ -1241,17 +1242,11 @@ const GRNComp: React.FC = () => {
                       if (qty <= 0) return;
 
                       const pol = l.purchaseOrderLine || poLines.find((p: any) => String(p.id) === String(l.purchaseOrderLineId || l.po_line_id));
-                      const poQty = Number(pol?.quantity || l.orderedQty || 1);
                       const unitRate = Number(pol?.rate ?? l.unitPrice ?? l.unit_price ?? l.rate ?? itemObj?.purchase_price ?? itemObj?.cost_price ?? 0);
                       const grossAmt = Number((qty * unitRate).toFixed(2));
 
-                      const discPerUnit = poQty > 0 ? Number(pol?.discount_amount || 0) / poQty : 0;
-                      const lineDiscount = Number((qty * discPerUnit).toFixed(2));
-                      const taxPerUnit = poQty > 0 ? Number(pol?.tax_amount || 0) / poQty : 0;
-                      const lineTax = Number((qty * taxPerUnit).toFixed(2));
-
                       if (grossAmt > 0) {
-                        // 1. DEBIT: Inventory Asset (Gross stock inward)
+                        // 1. DEBIT: Inventory Asset (Gross stock inward - No discount, No Tax)
                         entries.push({
                           accountCode: itemObj?.asset_account?.account_number || "1100",
                           accountName: itemObj?.asset_account?.account_name || `Inventory Asset - ${itemName}`,
@@ -1259,35 +1254,12 @@ const GRNComp: React.FC = () => {
                           credit: 0,
                           memo: `Stock Inward: ${itemName} (Qty: ${qty} @ ₹${unitRate.toFixed(2)})`,
                         });
-
-                        // 2. CREDIT: Purchase Discount (if discount exists)
-                        if (lineDiscount > 0) {
-                          entries.push({
-                            accountCode: "4400",
-                            accountName: "Purchase Discount",
-                            debit: 0,
-                            credit: lineDiscount,
-                            memo: `Purchase Discount: ${itemName} (Qty: ${qty})`,
-                          });
-                        }
-
-                        // 3. DEBIT: Input Tax (GST) (if tax exists)
-                        if (lineTax > 0) {
-                          entries.push({
-                            accountCode: "1300",
-                            accountName: "Input Tax (GST)",
-                            debit: lineTax,
-                            credit: 0,
-                            memo: `Input Tax (GST): ${itemName} (Qty: ${qty})`,
-                          });
-                        }
                       }
                     });
 
-                    // 4. CREDIT: Accrued Purchases (GRNI Liability) for net GRN value
+                    // 2. CREDIT: Accrued Purchases (GRNI Liability) for gross inventory value
                     const totalDebitSum = entries.reduce((acc, e) => acc + Number(e.debit || 0), 0);
-                    const totalCreditSum = entries.reduce((acc, e) => acc + Number(e.credit || 0), 0);
-                    const netGRNI = Number((totalDebitSum - totalCreditSum).toFixed(2));
+                    const netGRNI = Number(totalDebitSum.toFixed(2));
 
                     if (netGRNI > 0) {
                       entries.push({
@@ -1464,8 +1436,8 @@ const GRNComp: React.FC = () => {
                   <span className="text-xs font-semibold text-slate-800">{subsidiaryName}</span>
                 </div>
                 <div className="flex flex-col space-y-0.5">
-                  <span className="text-[10px] font-semibold text-slate-500 uppercase">CURRENCY</span>
-                  <span className="text-xs font-semibold text-slate-800">{currencyName}</span>
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">LOCATION / CITY</span>
+                  <span className="text-xs font-semibold text-slate-800">{locNameVal}</span>
                 </div>
                 <div className="flex flex-col space-y-0.5">
                   <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>

@@ -599,12 +599,29 @@ export default function ReturnFulfillmentComp() {
     const returnIdVal = activeHeader.purchaseReturnHeaderId || selectedFulfillment?.purchaseReturnHeaderId;
     const parentReturn = purchaseReturns.find((r: any) => String(r.id) === String(returnIdVal));
     const parentReturnHeader = parentReturn?.header || parentReturn;
+    const invId = parentReturnHeader?.purchaseInvoiceHeaderId || parentReturnHeader?.purchase_invoice_header_id || parentReturnHeader?.invoiceId;
+    const parentInvoice = invoices.find((i: any) => String(i.id) === String(invId));
+    const invH = parentInvoice?.header ?? parentInvoice;
+    const poId = parentReturnHeader?.purchaseOrderId || parentReturnHeader?.purchase_order_id || invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_header_id;
+    const parentPo = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    const poH = parentPo?.header ?? parentPo;
+
     const returnNumberStr = parentReturnHeader?.returnNumber || parentReturnHeader?.return_number || (returnIdVal ? `RET-${returnIdVal}` : "—");
-    const vendorObj = parentReturnHeader?.vendor || vendors.find((v: any) => String(v.id) === String(parentReturnHeader?.vendorId || parentReturnHeader?.vendor_id || selectedFulfillment?.vendorId));
+    const vendorObj = parentReturnHeader?.vendor || vendors.find((v: any) => String(v.id) === String(parentReturnHeader?.vendorId || parentReturnHeader?.vendor_id || selectedFulfillment?.vendorId || poH?.vendorId));
     const vendorName = getVendorDisplayName(vendorObj);
 
-    const locObj = cities.find((c: any) => String(c.id) === String(activeHeader.location_id || activeHeader.warehouseId));
-    const locNameVal = locObj?.city_name || locObj?.name || "—";
+    const subIdVal = activeHeader.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId || parentReturnHeader?.subsidiary_id || invH?.subsidiary_id || vendorObj?.primary_subsidiary_id;
+    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subIdVal))?.subsidiary_name || poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "—";
+
+    const classIdVal = activeHeader.class_id || poH?.class_id || poH?.classId || parentReturnHeader?.class_id || invH?.class_id;
+    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classIdVal))?.class_name || poH?.class?.class_name || "—";
+
+    const deptIdVal = activeHeader.department_id || poH?.department_id || poH?.departmentId || parentReturnHeader?.department_id || invH?.department_id;
+    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptIdVal))?.department_name || poH?.department?.department_name || "—";
+
+    const locIdVal = activeHeader.location_id || activeHeader.warehouseId || activeHeader.city_id || poH?.city_id || poH?.cityId || poH?.location_id || parentReturnHeader?.location_id || invH?.location_id;
+    const locObj = cities.find((c: any) => String(c.id) === String(locIdVal));
+    const locNameVal = locObj?.city_name || locObj?.name || poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—";
 
     const totalFulfilledQty = activeLines
       .filter((l: any) => isView || l.fulfill)
@@ -1089,6 +1106,75 @@ export default function ReturnFulfillmentComp() {
                         onChange={formik.handleChange}
                         className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
                       />
+                    </div>
+                  </>
+                )}
+              </RecordSection>
+
+              {/* CLASSIFICATION SECTION */}
+              <RecordSection title="Classification" defaultOpen={true}>
+                {isView ? (
+                  <>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">SUBSIDIARY</span>
+                      <span className="text-xs font-semibold text-slate-800">{subsidiaryName}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">LOCATION / CITY</span>
+                      <span className="text-xs font-semibold text-slate-800">{locNameVal}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>
+                      <span className="text-xs font-semibold text-slate-800">{classNameVal}</span>
+                    </div>
+                    <div className="flex flex-col space-y-0.5">
+                      <span className="text-[10px] font-semibold text-slate-500 uppercase">DEPARTMENT</span>
+                      <span className="text-xs font-semibold text-slate-800">{deptNameVal}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">SUBSIDIARY</label>
+                      <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-slate-800 flex items-center select-none">
+                        {subsidiaryName}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                        LOCATION <span className="text-amber-600">*</span>
+                      </label>
+                      <select
+                        name="header.location_id"
+                        value={formik.values.header.location_id}
+                        onChange={handleHeaderLocationChange}
+                        onBlur={formik.handleBlur}
+                        className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 ${
+                          formik.touched.header?.location_id && formik.errors.header?.location_id ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
+                        }`}
+                      >
+                        <option value="">Select Location *...</option>
+                        {cities.map((c: any) => (
+                          <option key={c.id} value={c.id}>
+                            {c.city_name || c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">CLASS</label>
+                      <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-slate-800 flex items-center select-none">
+                        {classNameVal}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col space-y-1">
+                      <label className="text-[11px] font-semibold text-[#475569] uppercase">DEPARTMENT</label>
+                      <div className="h-7 px-2 py-1 bg-slate-100 border border-slate-300 rounded-xs text-xs font-semibold text-slate-800 flex items-center select-none">
+                        {deptNameVal}
+                      </div>
                     </div>
                   </>
                 )}

@@ -461,12 +461,30 @@ export default function DebitNoteComp() {
     const isView = viewMode === "view";
     const activeHeader = isView ? selectedDebitNote?.header || selectedDebitNote || {} : formik.values;
 
-    const vendorObj = vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id));
+    const returnId = activeHeader.purchase_return_id || activeHeader.purchaseReturnId || activeHeader.returnId;
+    const parentReturn = purchaseReturns.find((r: any) => String(r.id) === String(returnId));
+    const retH = parentReturn?.header || parentReturn;
+    const invId = activeHeader.purchaseInvoiceHeaderId || activeHeader.purchase_invoice_header_id || activeHeader.invoiceId || retH?.purchaseInvoiceHeaderId;
+    const parentInvoice = invoices.find((i: any) => String(i.id) === String(invId));
+    const invH = parentInvoice?.header ?? parentInvoice;
+    const poId = activeHeader.purchaseOrderId || activeHeader.purchase_order_id || retH?.purchaseOrderId || invH?.purchaseOrderHeaderId || invH?.poHeaderId;
+    const parentPo = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    const poH = parentPo?.header ?? parentPo;
+
+    const vendorObj = vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id || poH?.vendorId || invH?.vendorId));
     const vendorName = getVendorDisplayName(vendorObj);
-    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(activeHeader.subsidiary_id))?.subsidiary_name || "—";
-    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(activeHeader.class_id))?.class_name || "—";
-    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(activeHeader.department_id))?.department_name || "—";
-    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(activeHeader.location_id))?.city_name || "—";
+
+    const subIdVal = activeHeader.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId || retH?.subsidiary_id || invH?.subsidiary_id || vendorObj?.primary_subsidiary_id;
+    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subIdVal))?.subsidiary_name || poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "—";
+
+    const classIdVal = activeHeader.class_id || poH?.class_id || poH?.classId || retH?.class_id || invH?.class_id;
+    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classIdVal))?.class_name || poH?.class?.class_name || "—";
+
+    const deptIdVal = activeHeader.department_id || poH?.department_id || poH?.departmentId || retH?.department_id || invH?.department_id;
+    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptIdVal))?.department_name || poH?.department?.department_name || "—";
+
+    const locIdVal = activeHeader.location_id || activeHeader.city_id || poH?.city_id || poH?.cityId || poH?.location_id || retH?.location_id || invH?.location_id;
+    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(locIdVal))?.city_name || poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—";
     const currencyObj = currencies.find((c: any) => String(c.id) === String(activeHeader.currency_id));
     const accountObj = accounts.find((a: any) => String(a.id) === String(activeHeader.accountId || activeHeader.account_id));
 
@@ -517,8 +535,9 @@ export default function DebitNoteComp() {
       "4200"
     );
 
+    const clearingAmount = Number((totalAmount - (activeTax > 0 ? activeTax : 0)).toFixed(2));
     const glImpactEntries = [
-      // 1. DEBIT: Accounts Payable (Reduces liability by total net amount)
+      // 1. DEBIT: Accounts Payable (Reduces liability by total net credit amount)
       {
         accountCode: apAcc.code,
         accountName: apAcc.name,
@@ -526,14 +545,30 @@ export default function DebitNoteComp() {
         credit: 0,
         memo: `Debit AP - Vendor Credit #${dnNoStr} (${vendorName})`,
       },
-      // 2. CREDIT: Purchase Return Clearing (Offsets fulfillment accrual for full credit value, no tax line)
-      {
-        accountCode: clearingAcc.code,
-        accountName: clearingAcc.name,
-        debit: 0,
-        credit: totalAmount,
-        memo: `Vendor Return Clearing Offset - #${dnNoStr}`,
-      },
+      // 2. CREDIT: Input Tax (GST) Reversal (if GST exists)
+      ...(activeTax > 0
+        ? [
+            {
+              accountCode: taxAcc.code,
+              accountName: taxAcc.name,
+              debit: 0,
+              credit: activeTax,
+              memo: `Input Tax (GST) Reversal - #${dnNoStr}`,
+            },
+          ]
+        : []),
+      // 3. CREDIT: Purchase Return Clearing (Offsets fulfillment accrual)
+      ...(clearingAmount > 0
+        ? [
+            {
+              accountCode: clearingAcc.code,
+              accountName: clearingAcc.name,
+              debit: 0,
+              credit: clearingAmount,
+              memo: `Vendor Return Clearing Offset - #${dnNoStr}`,
+            },
+          ]
+        : []),
     ];
 
     return (

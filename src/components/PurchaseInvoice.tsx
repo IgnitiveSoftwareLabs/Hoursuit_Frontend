@@ -923,12 +923,17 @@ const PurchaseInvoiceComp: React.FC = () => {
     const activeHeader = isView ? selectedInvoice?.header || selectedInvoice || {} : formik.values.header;
     const activeLines = isView ? selectedInvoice?.lineItems || selectedInvoice?.purchaseInvoiceLines || [] : formik.values.lineItems;
 
-    const vendorObj = vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id));
+    const grnObj = grns.find((g: any) => String(g.id) === String(activeHeader.grnHeaderId || activeHeader.grn_header_id));
+    const poId = activeHeader.purchaseOrderHeaderId || activeHeader.poHeaderId || activeHeader.po_header_id || activeHeader.purchaseOrderId || grnObj?.purchaseOrderId || grnObj?.purchase_order_id;
+    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    const poH = poObj?.header ?? poObj;
+
+    const vendorObj = vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id || poH?.vendorId || poH?.vendor_id));
     const vendorName = getVendorDisplayName(vendorObj);
-    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(activeHeader.subsidiary_id))?.subsidiary_name || "—";
-    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(activeHeader.class_id))?.class_name || "—";
-    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(activeHeader.department_id))?.department_name || "—";
-    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(activeHeader.location_id))?.city_name || "—";
+    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(activeHeader.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId))?.subsidiary_name || poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "—";
+    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(activeHeader.class_id || poH?.class_id || poH?.classId))?.class_name || poH?.class?.class_name || "—";
+    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(activeHeader.department_id || poH?.department_id || poH?.departmentId))?.department_name || poH?.department?.department_name || "—";
+    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(activeHeader.location_id || activeHeader.city_id || poH?.city_id || poH?.cityId || poH?.location_id))?.city_name || poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—";
     const currencyObj = currencies.find((c: any) => String(c.id) === String(activeHeader.currency_id));
 
     const viewSubtotal = activeLines.reduce((acc: number, l: any) => acc + (Number(l.quantity || 0) * Number(l.unitPrice || l.unit_price || 0)), 0);
@@ -1614,6 +1619,14 @@ const PurchaseInvoiceComp: React.FC = () => {
                   <span className="text-[10px] font-semibold text-slate-500 uppercase">LOCATION / CITY</span>
                   <span className="text-xs font-semibold text-slate-800">{locNameVal}</span>
                 </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>
+                  <span className="text-xs font-semibold text-slate-800">{classNameVal}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">DEPARTMENT</span>
+                  <span className="text-xs font-semibold text-slate-800">{deptNameVal}</span>
+                </div>
               </>
             ) : (
               <>
@@ -1648,6 +1661,40 @@ const PurchaseInvoiceComp: React.FC = () => {
                     {citiesList.map((c: any) => (
                       <option key={c.id} value={c.id}>
                         {c.city_name || c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">CLASS</label>
+                  <select
+                    name="header.class_id"
+                    value={formik.values.header.class_id || ""}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Select Class...</option>
+                    {classesList.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.class_name || c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">DEPARTMENT</label>
+                  <select
+                    name="header.department_id"
+                    value={formik.values.header.department_id || ""}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Select Department...</option>
+                    {departmentsList.map((d: any) => (
+                      <option key={d.id} value={d.id}>
+                        {d.department_name || d.name}
                       </option>
                     ))}
                   </select>

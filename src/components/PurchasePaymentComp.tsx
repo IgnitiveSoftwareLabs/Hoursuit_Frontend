@@ -77,15 +77,15 @@ export default function PurchasePaymentComp() {
   const [deletePurchasePayment] = useDeletePurchasePaymentMutation();
   const [triggerGetInvoiceById] = useLazyGetPurchaseInvoiceByIdQuery();
 
-  const payments = useMemo(() => (Array.isArray(paymentsData?.result) ? paymentsData.result : Array.isArray(paymentsData?.data) ? paymentsData.data : Array.isArray(paymentsData) ? paymentsData : []), [paymentsData]);
-  const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : []), [invoicesData]);
-  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
-  const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
-  const bankAccounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : [];
-  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
-  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
-  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
-  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
+  const payments = useMemo(() => (Array.isArray(paymentsData?.result) ? paymentsData.result : []), [paymentsData]);
+  const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : []), [invoicesData]);
+  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : []), [purchaseOrdersData]);
+  const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : []), [vendorsData]);
+  const bankAccounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : [];
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : [];
+  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : [];
 
   // Filter 1: A/P Accounts (type contains Payable)
   const payableAccounts = useMemo(() => {
@@ -177,7 +177,7 @@ export default function PurchasePaymentComp() {
           const invDue = Number(invH?.balanceAmount !== undefined ? invH.balanceAmount : (invH?.totalAmount || invH?.total_amount || 0));
           const allocatedBillPay = billPaymentAmounts[bId] !== undefined ? billPaymentAmounts[bId] : (payAmount > 0 ? payAmount : invDue);
 
-          const invLines = invObj?.lines || invObj?.lineItems || invObj?.purchaseInvoiceLines || [];
+          const invLines = invObj?.purchaseInvoiceLines || invObj?.lines || invObj?.lineItems || [];
           if (invLines.length > 0) {
             const invTotal = invLines.reduce((sum: number, l: any) => sum + (Number(l.lineTotal || l.line_total || (Number(l.quantity || 1) * Number(l.unitPrice || l.unit_price || 0))) || 0), 0);
 
@@ -253,13 +253,13 @@ export default function PurchasePaymentComp() {
             body: {
               ...payload,
               header: payload,
-              paymentLines: linesWithHeader,
-              lines: linesWithHeader,
+              paymentLines: linesPayload,
+              lines: linesPayload,
             },
           }).unwrap();
           toast.success("Vendor Payment updated successfully.");
           const updatedRecord = res?.result || res?.data || res;
-          setSelectedPayment(updatedRecord || { header: payload, paymentLines: linesWithHeader, id: editId });
+          setSelectedPayment(updatedRecord || { header: payload, paymentLines: linesPayload, id: editId });
           setSelectedPaymentId(editId);
           setViewMode("view");
           setIsEdit(false);
@@ -272,7 +272,7 @@ export default function PurchasePaymentComp() {
           toast.success("Vendor Payment recorded successfully.");
           const createdRecord = res?.result || res?.data || res;
           const createdId = createdRecord?.header?.id || createdRecord?.id;
-          setSelectedPayment(createdRecord || { header: payload, paymentLines: linesWithHeader, id: createdId });
+          setSelectedPayment(createdRecord || { header: payload, paymentLines: linesPayload, id: createdId });
           setSelectedPaymentId(createdId);
           setViewMode("view");
           setIsEdit(false);
@@ -395,7 +395,7 @@ export default function PurchasePaymentComp() {
     const vObj = vendors.find((v: any) => String(v.id) === String(vId));
     if (vObj) {
       formik.setFieldValue("vendorName", getVendorDisplayName(vObj));
-      
+
       const subId = vObj.subsidiary_id || vObj.subsidiaryId || vObj.primary_subsidiary_id || vObj.primarySubsidiary?.id;
       if (subId) formik.setFieldValue("subsidiary_id", String(subId));
 
@@ -666,20 +666,26 @@ export default function PurchasePaymentComp() {
     const activePayment = isView ? singlePayment || selectedPayment || {} : {};
     const activeHeader = isView ? activePayment.header ?? activePayment : formik.values;
 
-    const vendorObj = activeHeader.vendor || vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id));
+    const linkedInv = activePayment.purchaseInvoice || invoices.find((i: any) => String(i.id) === String(activePayment.purchaseInvoiceHeaderId || activeHeader.purchaseInvoiceHeaderId));
+    const invH = linkedInv?.header ?? linkedInv;
+    const poId = invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_header_id || invH?.purchaseOrderId || activePayment.purchaseOrderHeaderId;
+    const linkedPo = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    const poH = linkedPo?.header ?? linkedPo;
+
+    const vendorObj = activeHeader.vendor || vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id || poH?.vendorId || invH?.vendorId));
     const vendorName = getVendorDisplayName(vendorObj) || activeHeader.vendorName || "—";
 
-    const subId = activeHeader.subsidiary_id || activeHeader.vendor?.primary_subsidiary_id || vendorObj?.primary_subsidiary_id;
-    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subId))?.subsidiary_name || "—";
+    const subId = activeHeader.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId || invH?.subsidiary_id || activeHeader.vendor?.primary_subsidiary_id || vendorObj?.primary_subsidiary_id;
+    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subId))?.subsidiary_name || poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "—";
 
-    const classId = activeHeader.class_id;
-    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classId))?.class_name || "—";
+    const classId = activeHeader.class_id || poH?.class_id || poH?.classId || invH?.class_id;
+    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classId))?.class_name || poH?.class?.class_name || "—";
 
-    const deptId = activeHeader.department_id;
-    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptId))?.department_name || "—";
+    const deptId = activeHeader.department_id || poH?.department_id || poH?.departmentId || invH?.department_id;
+    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptId))?.department_name || poH?.department?.department_name || "—";
 
-    const locId = activeHeader.location_id;
-    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(locId))?.city_name || "—";
+    const locId = activeHeader.location_id || activeHeader.city_id || poH?.city_id || poH?.cityId || poH?.location_id || invH?.location_id;
+    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(locId))?.city_name || poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—";
 
     const bankAccObj = activeHeader.bankAccount || bankAccounts.find((b: any) => String(b.id) === String(activeHeader.bankAccountId || activeHeader.bank_account_id));
     const apAccObj = activeHeader.apAccount || payableAccounts.find((a: any) => String(a.id) === String(activeHeader.apAccountId || activeHeader.ap_account_id));
@@ -846,7 +852,7 @@ export default function PurchasePaymentComp() {
                             const amtDue = Number(h.balanceAmount !== undefined ? h.balanceAmount : origAmt);
                             const billNumber = h.invoiceNumber || h.invoice_number || `BILL-${bill.id}`;
                             const dueDateStr = h.dueDate || h.due_date ? new Date(h.dueDate || h.due_date).toLocaleDateString() : "—";
-                            
+
                             const matchedLine = activePayment?.paymentLines?.find(
                               (l: any) => String(l.purchaseInvoiceHeaderId) === billIdStr || String(l.purchaseInvoiceLine?.invoiceHeaderId) === billIdStr
                             );
@@ -929,124 +935,75 @@ export default function PurchasePaymentComp() {
             },
             ...(isView && !isDraft
               ? [
-                  {
-                    id: "gl_impact",
-                    label: "GL Impact",
-                    content: (() => {
-                      const payAmt = Number(activeHeader.totalAmount || activeHeader.amount || 0);
-                      const pNoStr = activeHeader.paymentNumber || activeHeader.payment_number || `PAY-${activePayment.id || "NEW"}`;
-                      const bankAccName = activeHeader.bankAccount?.account_name || bankAccObj?.account_name || "BOI";
-                      const bankAccCode = activeHeader.bankAccount?.account_number || bankAccObj?.account_number || "200000";
-                      const apAccName = activeHeader.apAccount?.account_name || apAccObj?.account_name || "Accounts Payables - Vendor";
-                      const apAccCode = activeHeader.apAccount?.account_number || apAccObj?.account_number || "200002";
+                {
+                  id: "gl_impact",
+                  label: "GL Impact",
+                  content: (() => {
+                    const payAmt = Number(activeHeader.totalAmount || activeHeader.amount || 0);
+                    const pNoStr = activeHeader.paymentNumber || activeHeader.payment_number || `PAY-${activePayment.id || "NEW"}`;
+                    const bankAccName = activeHeader.bankAccount?.account_name || bankAccObj?.account_name || "BOI";
+                    const bankAccCode = activeHeader.bankAccount?.account_number || bankAccObj?.account_number || "200000";
+                    const apAccName = activeHeader.apAccount?.account_name || apAccObj?.account_name || "Accounts Payables - Vendor";
+                    const apAccCode = activeHeader.apAccount?.account_number || apAccObj?.account_number || "200002";
 
-                      // Linked Bill & PO Lookup
-                      const linkedInv = activePayment.purchaseInvoice || invoices.find((i: any) => String(i.id) === String(activePayment.purchaseInvoiceHeaderId || activeHeader.purchaseInvoiceHeaderId));
-                      const invH = linkedInv?.header ?? linkedInv;
-                      const poId = invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_id || activePayment.purchaseOrderHeaderId;
-                      const linkedPo = purchaseOrders.find((p: any) => String(p.id) === String(poId));
-                      const poH = linkedPo?.header ?? linkedPo;
-                      const poNumber = poH?.orderNumber || poH?.po_number || poH?.poNumber || (poId ? `PO-${poId}` : "");
+                    // Linked Bill & PO Lookup
+                    const linkedInv = activePayment.purchaseInvoice || invoices.find((i: any) => String(i.id) === String(activePayment.purchaseInvoiceHeaderId || activeHeader.purchaseInvoiceHeaderId));
+                    const invH = linkedInv?.header ?? linkedInv;
+                    const poId = invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_id || activePayment.purchaseOrderHeaderId;
+                    const linkedPo = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+                    const poH = linkedPo?.header ?? linkedPo;
+                    const poNumber = poH?.orderNumber || poH?.po_number || poH?.poNumber || (poId ? `PO-${poId}` : "");
 
-                      const lineItems = linkedInv?.lines || linkedInv?.lineItems || linkedInv?.purchaseInvoiceLines || linkedPo?.items || linkedPo?.lines || [];
+                    const lineItems = linkedInv?.lines || linkedInv?.lineItems || linkedInv?.purchaseInvoiceLines || linkedPo?.items || linkedPo?.lines || [];
 
-                      let taxAmt = Number(invH?.taxAmount ?? invH?.tax_amount ?? poH?.taxAmount ?? poH?.tax_amount ?? 0);
-                      let discountAmt = Number(invH?.discountAmount ?? invH?.discount_amount ?? poH?.discountAmount ?? poH?.discount_amount ?? 0);
-                      let subtotalAmt = Number(invH?.subtotal ?? invH?.sub_total ?? poH?.subtotal ?? 0);
+                    let taxAmt = Number(invH?.taxAmount ?? invH?.tax_amount ?? poH?.taxAmount ?? poH?.tax_amount ?? 0);
+                    let discountAmt = Number(invH?.discountAmount ?? invH?.discount_amount ?? poH?.discountAmount ?? poH?.discount_amount ?? 0);
+                    let subtotalAmt = Number(invH?.subtotal ?? invH?.sub_total ?? poH?.subtotal ?? 0);
 
-                      if (taxAmt === 0 && lineItems.length > 0) {
-                        taxAmt = lineItems.reduce((sum: number, l: any) => sum + Number(l.taxAmount || l.tax_amount || 0), 0);
-                      }
-                      if (discountAmt === 0 && lineItems.length > 0) {
-                        discountAmt = lineItems.reduce((sum: number, l: any) => sum + Number(l.discountAmount || l.discount_amount || 0), 0);
-                      }
-                      if (subtotalAmt === 0 && lineItems.length > 0) {
-                        subtotalAmt = lineItems.reduce((sum: number, l: any) => sum + (Number(l.quantity || 1) * Number(l.unitPrice || l.unit_price || 0)), 0);
-                      }
+                    if (taxAmt === 0 && lineItems.length > 0) {
+                      taxAmt = lineItems.reduce((sum: number, l: any) => sum + Number(l.taxAmount || l.tax_amount || 0), 0);
+                    }
+                    if (discountAmt === 0 && lineItems.length > 0) {
+                      discountAmt = lineItems.reduce((sum: number, l: any) => sum + Number(l.discountAmount || l.discount_amount || 0), 0);
+                    }
+                    if (subtotalAmt === 0 && lineItems.length > 0) {
+                      subtotalAmt = lineItems.reduce((sum: number, l: any) => sum + (Number(l.quantity || 1) * Number(l.unitPrice || l.unit_price || 0)), 0);
+                    }
 
-                      // If subtotal is still 0, calculate based on payment amount, tax & discount
-                      if (subtotalAmt === 0) {
-                        subtotalAmt = Number((payAmt + discountAmt - taxAmt).toFixed(2));
-                      }
+                    // If subtotal is still 0, calculate based on payment amount, tax & discount
+                    if (subtotalAmt === 0) {
+                      subtotalAmt = Number((payAmt + discountAmt - taxAmt).toFixed(2));
+                    }
 
-                      const postingPeriod = activeHeader.postingPeriod || currentPeriod;
-                      const entries: any[] = [];
+                    const postingPeriod = activeHeader.postingPeriod || currentPeriod;
+                    const entries: any[] = [
+                      {
+                        accountCode: apAccCode,
+                        accountName: apAccName,
+                        debit: payAmt,
+                        credit: 0,
+                        postingPeriod,
+                        memo: `Vendor Payables Settlement - ${vendorName}`,
+                      },
+                      {
+                        accountCode: bankAccCode,
+                        accountName: bankAccName,
+                        debit: 0,
+                        credit: payAmt,
+                        postingPeriod,
+                        memo: `Bank Disbursement - Payment #${pNoStr}`,
+                      },
+                    ];
 
-                      if (taxAmt > 0 || discountAmt > 0) {
-                        // 1. Line Item Cost / Subtotal (Accounts Payable Subtotal)
-                        entries.push({
-                          accountCode: apAccCode,
-                          accountName: `${apAccName} (Item Cost / Subtotal)`,
-                          debit: Number(subtotalAmt.toFixed(2)),
-                          credit: 0,
-                          postingPeriod,
-                          memo: `Vendor Bill Settlement - ${vendorName}${poNumber ? ` [Ref: ${poNumber}]` : ""}`,
-                        });
-
-                        // 2. Input Tax / GST Line (if applied on PO / Bill)
-                        if (taxAmt > 0) {
-                          entries.push({
-                            accountCode: "200004",
-                            accountName: "Input Tax (GST / Input Tax Credit)",
-                            debit: Number(taxAmt.toFixed(2)),
-                            credit: 0,
-                            postingPeriod,
-                            memo: `Input Tax applied on Order${poNumber ? ` #${poNumber}` : ""}`,
-                          });
-                        }
-
-                        // 3. Purchase Discount Line (if applied on PO / Bill)
-                        if (discountAmt > 0) {
-                          entries.push({
-                            accountCode: "500002",
-                            accountName: "Purchase Discounts Received",
-                            debit: 0,
-                            credit: Number(discountAmt.toFixed(2)),
-                            postingPeriod,
-                            memo: `Discount Applied on Order${poNumber ? ` #${poNumber}` : ""}`,
-                          });
-                        }
-
-                        // 4. Bank Disbursement Line
-                        entries.push({
-                          accountCode: bankAccCode,
-                          accountName: bankAccName,
-                          debit: 0,
-                          credit: payAmt,
-                          postingPeriod,
-                          memo: `Bank Disbursement - Payment #${pNoStr}`,
-                        });
-                      } else {
-                        // Standard settlement without tax/discount
-                        entries.push(
-                          {
-                            accountCode: apAccCode,
-                            accountName: apAccName,
-                            debit: payAmt,
-                            credit: 0,
-                            postingPeriod,
-                            memo: `Vendor Payables Settlement - ${vendorName}`,
-                          },
-                          {
-                            accountCode: bankAccCode,
-                            accountName: bankAccName,
-                            debit: 0,
-                            credit: payAmt,
-                            postingPeriod,
-                            memo: `Bank Disbursement - Payment #${pNoStr}`,
-                          }
-                        );
-                      }
-
-                      return (
-                        <GLImpactSubtab
-                          documentNumber={pNoStr}
-                          entries={entries}
-                        />
-                      );
-                    })(),
-                  },
-                ]
+                    return (
+                      <GLImpactSubtab
+                        documentNumber={pNoStr}
+                        entries={entries}
+                      />
+                    );
+                  })(),
+                },
+              ]
               : []),
           ]}
         >
@@ -1104,9 +1061,8 @@ export default function PurchasePaymentComp() {
                         value={formik.values.vendorId || ""}
                         onChange={(e) => handleVendorChange(e.target.value)}
                         onBlur={formik.handleBlur}
-                        className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 ${
-                          formik.touched.vendorId && formik.errors.vendorId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
-                        }`}
+                        className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 ${formik.touched.vendorId && formik.errors.vendorId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
+                          }`}
                       >
                         <option value="">-- Select Payee / Vendor --</option>
                         {vendors.map((v: any) => (
@@ -1135,9 +1091,8 @@ export default function PurchasePaymentComp() {
                         value={formik.values.bankAccountId || ""}
                         onChange={formik.handleChange}
                         onBlur={formik.handleBlur}
-                        className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 font-mono ${
-                          formik.touched.bankAccountId && formik.errors.bankAccountId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
-                        }`}
+                        className={`h-7 text-xs border rounded-xs px-2 focus:outline-none focus:border-sky-500 font-mono ${formik.touched.bankAccountId && formik.errors.bankAccountId ? "border-red-500 bg-red-50" : "border-slate-300 bg-white"
+                          }`}
                       >
                         <option value="">-- Select Bank Account --</option>
                         {bankAccountsList.map((acc: any) => (
@@ -1260,9 +1215,8 @@ export default function PurchasePaymentComp() {
                       placeholder="Cheque / Ref number..."
                       value={formik.values.chequeNo}
                       onChange={formik.handleChange}
-                      className={`h-7 text-xs border border-slate-300 rounded-xs px-2 font-mono ${
-                        isView ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
-                      }`}
+                      className={`h-7 text-xs border border-slate-300 rounded-xs px-2 font-mono ${isView ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
+                        }`}
                     />
                   </div>
 
@@ -1275,9 +1229,8 @@ export default function PurchasePaymentComp() {
                       placeholder="Enter memo / remarks..."
                       value={formik.values.memo}
                       onChange={formik.handleChange}
-                      className={`h-7 text-xs border border-slate-300 rounded-xs px-2 ${
-                        isView ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
-                      }`}
+                      className={`h-7 text-xs border border-slate-300 rounded-xs px-2 ${isView ? "bg-slate-100 cursor-not-allowed" : "bg-white focus:outline-none focus:border-sky-500"
+                        }`}
                     />
                   </div>
 
@@ -1287,13 +1240,12 @@ export default function PurchasePaymentComp() {
                     </label>
                     {isView ? (
                       <div>
-                        <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
-                          String(activeHeader.status || "DRAFT").toUpperCase() === "DRAFT"
+                        <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${String(activeHeader.status || "DRAFT").toUpperCase() === "DRAFT"
                             ? "bg-amber-50 text-amber-800 border-amber-300"
                             : String(activeHeader.status || "").toUpperCase() === "POSTED"
-                            ? "bg-emerald-50 text-emerald-800 border-emerald-300"
-                            : "bg-red-50 text-red-800 border-red-300"
-                        }`}>
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                              : "bg-red-50 text-red-800 border-red-300"
+                          }`}>
                           {activeHeader.status || "DRAFT"}
                         </span>
                       </div>
@@ -1324,12 +1276,12 @@ export default function PurchasePaymentComp() {
                   <span className="text-xs font-semibold text-slate-800">{subsidiaryName}</span>
                 </div>
                 <div className="flex flex-col space-y-0.5">
-                  <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>
-                  <span className="text-xs font-semibold text-slate-800">{classNameVal}</span>
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">LOCATION / CITY</span>
+                  <span className="text-xs font-semibold text-slate-800">{locNameVal}</span>
                 </div>
                 <div className="flex flex-col space-y-0.5">
-                  <span className="text-[10px] font-semibold text-slate-500 uppercase">LOCATION</span>
-                  <span className="text-xs font-semibold text-slate-800">{locNameVal}</span>
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>
+                  <span className="text-xs font-semibold text-slate-800">{classNameVal}</span>
                 </div>
                 <div className="flex flex-col space-y-0.5">
                   <span className="text-[10px] font-semibold text-slate-500 uppercase">DEPARTMENT</span>
@@ -1529,9 +1481,8 @@ export default function PurchasePaymentComp() {
                       ₹{Number(h.totalAmount || h.amount || 0).toFixed(2)}
                     </td>
                     <td className="p-2 text-center">
-                      <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
-                        isDraft ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-emerald-100 text-emerald-800 border-emerald-200"
-                      }`}>
+                      <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${isDraft ? "bg-amber-100 text-amber-800 border-amber-200" : "bg-emerald-100 text-emerald-800 border-emerald-200"
+                        }`}>
                         {h.status || "DRAFT"}
                       </span>
                     </td>

@@ -888,16 +888,22 @@ export default function PurchaseReturnComp() {
     const activeHeader = isView ? selectedReturn?.header || selectedReturn || {} : formik.values.header;
     const activeLines = isView ? selectedReturn?.purchaseReturnLines || selectedReturn?.details || selectedReturn?.lineItems || selectedReturn?.purchase_return_lines || [] : formik.values.lineItems;
 
-    const vendorObj = activeHeader.vendor || vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id || selectedReturn?.vendorId));
+    const invObj = invoices.find((i: any) => String(i.id) === String(activeHeader.purchaseInvoiceHeaderId || activeHeader.purchase_invoice_header_id || activeHeader.invoiceId));
+    const invH = invObj?.header ?? invObj;
+    const poId = activeHeader.purchaseOrderId || activeHeader.purchase_order_id || activeHeader.poId || invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_header_id;
+    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    const poH = poObj?.header ?? poObj;
+
+    const vendorObj = activeHeader.vendor || vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id || selectedReturn?.vendorId || poH?.vendorId));
     const vendorName = getVendorDisplayName(vendorObj);
-    const subIdVal = activeHeader.subsidiary_id || vendorObj?.primary_subsidiary_id || vendorObj?.subsidiary_id;
-    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subIdVal))?.subsidiary_name || "—";
-    const classIdVal = activeHeader.class_id || vendorObj?.class_id;
-    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classIdVal))?.class_name || "—";
-    const deptIdVal = activeHeader.department_id || vendorObj?.department_id;
-    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptIdVal))?.department_name || "—";
-    const locIdVal = activeHeader.location_id || activeHeader.city_id;
-    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(locIdVal))?.city_name || "—";
+    const subIdVal = activeHeader.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId || invH?.subsidiary_id || vendorObj?.primary_subsidiary_id || vendorObj?.subsidiary_id;
+    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subIdVal))?.subsidiary_name || poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "—";
+    const classIdVal = activeHeader.class_id || poH?.class_id || poH?.classId || invH?.class_id || vendorObj?.class_id;
+    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classIdVal))?.class_name || poH?.class?.class_name || "—";
+    const deptIdVal = activeHeader.department_id || poH?.department_id || poH?.departmentId || invH?.department_id || vendorObj?.department_id;
+    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptIdVal))?.department_name || poH?.department?.department_name || "—";
+    const locIdVal = activeHeader.location_id || activeHeader.city_id || poH?.city_id || poH?.cityId || poH?.location_id || invH?.location_id;
+    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(locIdVal))?.city_name || poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—";
     const currIdVal = activeHeader.currency_id || vendorObj?.currency_id;
     const currencyObj = currencies.find((c: any) => String(c.id) === String(currIdVal));
 
@@ -1021,14 +1027,13 @@ export default function PurchaseReturnComp() {
       }
     }
 
-    // ── STEP 3: VENDOR CREDIT GL IMPACT ──
+    // ── STEP 3: VENDOR CREDIT GL IMPACT (NO DISCOUNT, GST VISIBLE, BALANCED) ──
     if (statusVal === "RETURNED") {
       const netTotal = totalReturnAmt > 0 ? totalReturnAmt : Number(activeHeader.totalAmount || activeHeader.total_amount || 0);
-      const subtotal = totalSubtotal > 0 ? totalSubtotal : Number(activeHeader.subtotal || 0);
       const taxAmt = totalTaxAmt > 0 ? totalTaxAmt : Number(activeHeader.taxAmount || activeHeader.tax_amount || 0);
-      const discAmt = totalDiscountAmt > 0 ? totalDiscountAmt : Number(activeHeader.discountAmount || activeHeader.discount_amount || 0);
+      const clearingCredit = Number((netTotal - (taxAmt > 0 ? taxAmt : 0)).toFixed(2));
 
-      // DEBIT: Accounts Payable (Reduces vendor liability)
+      // DEBIT: Accounts Payable (Reduces vendor liability for full credit total)
       entries.push({
         accountCode: apAcc.code,
         accountName: apAcc.name,
@@ -1038,17 +1043,7 @@ export default function PurchaseReturnComp() {
         memo: `Step 3 Vendor Credit: Liability reduction with Vendor`
       });
 
-      // CREDIT: Purchase Return Clearing (Offsets step 2 accrual)
-      entries.push({
-        accountCode: clearingAcc.code,
-        accountName: clearingAcc.name,
-        debit: 0,
-        credit: subtotal,
-        postingPeriod: currentPeriod,
-        memo: `Step 3 Vendor Credit: Purchase Return Clearing offset`
-      });
-
-      // CREDIT: Input Tax Reversal
+      // CREDIT: Input Tax (GST) Reversal (if GST exists)
       if (taxAmt > 0) {
         entries.push({
           accountCode: taxAcc.code,
@@ -1060,15 +1055,15 @@ export default function PurchaseReturnComp() {
         });
       }
 
-      // DEBIT: Purchase Discount Reversal
-      if (discAmt > 0) {
+      // CREDIT: Purchase Return Clearing (Offsets step 2 accrual)
+      if (clearingCredit > 0) {
         entries.push({
-          accountCode: discAcc.code,
-          accountName: discAcc.name,
-          debit: discAmt,
-          credit: 0,
+          accountCode: clearingAcc.code,
+          accountName: clearingAcc.name,
+          debit: 0,
+          credit: clearingCredit,
           postingPeriod: currentPeriod,
-          memo: `Step 3 Vendor Credit: Purchase Discount Reversal`
+          memo: `Step 3 Vendor Credit: Purchase Return Clearing offset`
         });
       }
     }
@@ -1364,6 +1359,20 @@ export default function PurchaseReturnComp() {
                 </div>
               ),
             },
+            ...(isView && glEntries.length > 0
+              ? [
+                  {
+                    id: "gl_impact",
+                    label: "GL Impact",
+                    content: (
+                      <GLImpactSubtab
+                        documentNumber={retNoStr}
+                        entries={glEntries}
+                      />
+                    ),
+                  },
+                ]
+              : []),
           ]}
         >
           {/* PRIMARY INFORMATION + SUMMARY CARD */}
@@ -1519,6 +1528,10 @@ export default function PurchaseReturnComp() {
                 <div className="flex flex-col space-y-0.5">
                   <span className="text-[10px] font-semibold text-slate-500 uppercase">SUBSIDIARY</span>
                   <span className="text-xs font-semibold text-slate-800">{subsidiaryName}</span>
+                </div>
+                <div className="flex flex-col space-y-0.5">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase">LOCATION / CITY</span>
+                  <span className="text-xs font-semibold text-slate-800">{locNameVal}</span>
                 </div>
                 <div className="flex flex-col space-y-0.5">
                   <span className="text-[10px] font-semibold text-slate-500 uppercase">CLASS</span>
