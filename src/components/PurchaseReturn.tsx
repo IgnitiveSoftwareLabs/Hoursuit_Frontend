@@ -38,7 +38,7 @@ import {
 } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
-import { GLImpactSubtab, GLEntry } from "./Layout/GLImpactSubtab";
+import { GLImpactSubtab, type GLEntry } from "./Layout/GLImpactSubtab";
 import ConfirmationDialog from "./Dialog/ConfirmationDialog";
 
 interface PurchaseReturnLineForm {
