@@ -198,21 +198,21 @@ export default function PurchaseReturnComp() {
     }
   };
 
-  const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : Array.isArray(purchaseReturnsData) ? purchaseReturnsData : []), [purchaseReturnsData]);
-  const purchaseInvoices = useMemo(() => (Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : Array.isArray(purchaseInvoicesData?.data) ? purchaseInvoicesData.data : Array.isArray(purchaseInvoicesData) ? purchaseInvoicesData : []), [purchaseInvoicesData]);
+  const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : []), [purchaseReturnsData]);
+  const purchaseInvoices = useMemo(() => (Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : Array.isArray(purchaseInvoicesData?.data) ? purchaseInvoicesData.data : []), [purchaseInvoicesData]);
   const invoices = purchaseInvoices;
-  const purchasePayments = useMemo(() => (Array.isArray(purchasePaymentsData?.result) ? purchasePaymentsData.result : Array.isArray(purchasePaymentsData?.data) ? purchasePaymentsData.data : Array.isArray(purchasePaymentsData) ? purchasePaymentsData : []), [purchasePaymentsData]);
-  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
-  const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
-  const items = useMemo(() => (Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : Array.isArray(itemsData) ? itemsData : []), [itemsData]);
-  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
-  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
-  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
-  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : Array.isArray(citiesData) ? citiesData : [];
-  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : Array.isArray(currenciesData?.data) ? currenciesData.data : Array.isArray(currenciesData) ? currenciesData : [];
-  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
-  const accounts = useMemo(() => (Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : []), [chartOfAccountsData]);
-  const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
+  const purchasePayments = useMemo(() => (Array.isArray(purchasePaymentsData?.result) ? purchasePaymentsData.result : Array.isArray(purchasePaymentsData?.data) ? purchasePaymentsData.data : []), [purchasePaymentsData]);
+  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : []), [purchaseOrdersData]);
+  const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : []), [vendorsData]);
+  const items = useMemo(() => (Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : []), [itemsData]);
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : [];
+  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : [];
+  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : Array.isArray(currenciesData?.data) ? currenciesData.data : [];
+  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : [];
+  const accounts = useMemo(() => (Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : []), [chartOfAccountsData]);
+  const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : []), [debitNotesData]);
 
   const formik = useFormik({
     initialValues: {
@@ -258,7 +258,7 @@ export default function PurchaseReturnComp() {
 
           const uomObj = uoms.find((u: any) => String(u.id) === String(line.uom_id));
           if (uomObj && !isDecimalAllowedForUOM(uomObj) && rQty % 1 !== 0) {
-            toast.error(`Return Quantity for line ${i + 1} (${uomObj.uom_name || uomObj.name}) must be a whole number.`);
+            toast.error(`Return Quantity for line ${i + 1} (${uomObj.uom_name || uomObj.name || "unit"}) must be a whole number.`);
             return;
           }
         }
@@ -336,7 +336,7 @@ export default function PurchaseReturnComp() {
               try {
                 const poRes = await triggerGetPOById(poId).unwrap();
                 linkedPo = poRes?.result || poRes?.data || poRes;
-              } catch (e) {}
+              } catch (e) { }
             }
             if (!linkedPo && vId) {
               linkedPo = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === vId);
@@ -415,7 +415,7 @@ export default function PurchaseReturnComp() {
               try {
                 const poRes = await triggerGetPOById(poId).unwrap();
                 linkedPo = poRes?.result || poRes?.data || poRes;
-              } catch (e) {}
+              } catch (e) { }
             }
             if (!linkedPo && vId) {
               linkedPo = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === vId);
@@ -543,9 +543,9 @@ export default function PurchaseReturnComp() {
                   try {
                     const poRes = await triggerGetPOById(poId).unwrap();
                     linkedPoForPay = poRes?.result || poRes?.data || poRes;
-                  } catch (e) {}
+                  } catch (e) { }
                 }
-              } catch (e) {}
+              } catch (e) { }
             }
             if (!linkedPoForPay && vId) {
               linkedPoForPay = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === vId);
@@ -1049,145 +1049,145 @@ export default function PurchaseReturnComp() {
       return acc + (q * p - d + t);
     }, 0);
 
-      const glEntries: GLEntry[] = (() => {
-    if (!isView || !selectedReturn) return [];
-    const statusVal = String(activeHeader.status || selectedReturn?.status || "").toUpperCase();
+    const glEntries: GLEntry[] = (() => {
+      if (!isView || !selectedReturn) return [];
+      const statusVal = String(activeHeader.status || selectedReturn?.status || "").toUpperCase();
 
-    // Step 1: DRAFT or AUTHORIZED -> Non-posting operational document
-    if (statusVal === "DRAFT" || statusVal === "AUTHORIZED") {
-      return [];
-    }
+      // Step 1: DRAFT or AUTHORIZED -> Non-posting operational document
+      if (statusVal === "DRAFT" || statusVal === "AUTHORIZED") {
+        return [];
+      }
 
-    const entries: GLEntry[] = [];
-    const currentPeriod = (activeHeader.returnDate || new Date().toISOString()).slice(0, 7);
+      const entries: GLEntry[] = [];
+      const currentPeriod = (activeHeader.returnDate || new Date().toISOString()).slice(0, 7);
 
-    const findAccount = (keywords: string[], typeKeywords: string[], defaultName: string, defaultCode: string) => {
-      const byName = accounts.find((a: any) =>
-        keywords.some((k) => (a.account_name || a.name || "").toLowerCase().includes(k.toLowerCase()))
+      const findAccount = (keywords: string[], typeKeywords: string[], defaultName: string, defaultCode: string) => {
+        const byName = accounts.find((a: any) =>
+          keywords.some((k) => (a.account_name || a.name || "").toLowerCase().includes(k.toLowerCase()))
+        );
+        if (byName) return { name: byName.account_name || byName.name, code: byName.account_code || byName.code || defaultCode };
+
+        const byType = accounts.find((a: any) =>
+          typeKeywords.some((k) => (a.accountType?.account_type_name || a.account_type || "").toLowerCase().includes(k.toLowerCase()))
+        );
+        if (byType) return { name: byType.account_name || byType.name, code: byType.account_code || byType.code || defaultCode };
+
+        return { name: defaultName, code: defaultCode };
+      };
+
+      const clearingAcc = findAccount(
+        ["Purchase Return Clearing", "Return Clearing", "GRNI", "Clearing"],
+        ["Asset", "Current Asset", "Liability", "Current Liability"],
+        "Purchase Return Clearing Account",
+        "2115"
       );
-      if (byName) return { name: byName.account_name || byName.name, code: byName.account_code || byName.code || defaultCode };
 
-      const byType = accounts.find((a: any) =>
-        typeKeywords.some((k) => (a.accountType?.account_type_name || a.account_type || "").toLowerCase().includes(k.toLowerCase()))
+      const apAcc = findAccount(
+        ["Accounts Payable", "Trade Creditors", "Creditors", "Payable"],
+        ["Accounts Payable", "Current Liability", "Liability"],
+        "Accounts Payable",
+        "2000"
       );
-      if (byType) return { name: byType.account_name || byType.name, code: byType.account_code || byType.code || defaultCode };
 
-      return { name: defaultName, code: defaultCode };
-    };
+      const taxAcc = findAccount(
+        ["Input Tax", "Input GST", "Tax Receivable", "Tax Credit", "GST Input"],
+        ["Tax", "Current Asset", "Asset"],
+        "Input Tax Receivable",
+        "1400"
+      );
 
-    const clearingAcc = findAccount(
-      ["Purchase Return Clearing", "Return Clearing", "GRNI", "Clearing"],
-      ["Asset", "Current Asset", "Liability", "Current Liability"],
-      "Purchase Return Clearing Account",
-      "2115"
-    );
+      const discAcc = findAccount(
+        ["Purchase Discount", "Discount Received", "Discount Income", "Discount"],
+        ["Income", "Expense", "Direct Income"],
+        "Purchase Discount",
+        "4200"
+      );
 
-    const apAcc = findAccount(
-      ["Accounts Payable", "Trade Creditors", "Creditors", "Payable"],
-      ["Accounts Payable", "Current Liability", "Liability"],
-      "Accounts Payable",
-      "2000"
-    );
+      // ── STEP 2: RETURN FULFILLMENT GL IMPACT ──
+      if (["FULFILLED", "PARTIALLY_FULFILLED", "RETURNED"].includes(statusVal)) {
+        let fulfillmentSubtotal = 0;
+        activeLines.forEach((line: any) => {
+          const itemObj = items.find((i: any) => String(i.id) === String(line.itemId || line.item_id));
+          const q = Number(line.returnQty || line.return_quantity || line.quantity || 0);
+          const p = Number(line.unitPrice || line.unit_price || line.rate || 0);
+          const lineGross = Number((q * p).toFixed(2));
+          if (lineGross <= 0) return;
+          fulfillmentSubtotal += lineGross;
 
-    const taxAcc = findAccount(
-      ["Input Tax", "Input GST", "Tax Receivable", "Tax Credit", "GST Input"],
-      ["Tax", "Current Asset", "Asset"],
-      "Input Tax Receivable",
-      "1400"
-    );
+          const invAcc = itemObj?.asset_account_id
+            ? accounts.find((a: any) => String(a.id) === String(itemObj.asset_account_id))
+            : null;
+          const invName = invAcc ? (invAcc.account_name || invAcc.name) : "Inventory Asset Account";
+          const invCode = invAcc ? (invAcc.account_code || invAcc.code || "1200") : "1200";
 
-    const discAcc = findAccount(
-      ["Purchase Discount", "Discount Received", "Discount Income", "Discount"],
-      ["Income", "Expense", "Direct Income"],
-      "Purchase Discount",
-      "4200"
-    );
-
-    // ── STEP 2: RETURN FULFILLMENT GL IMPACT ──
-    if (["FULFILLED", "PARTIALLY_FULFILLED", "RETURNED"].includes(statusVal)) {
-      let fulfillmentSubtotal = 0;
-      activeLines.forEach((line: any) => {
-        const itemObj = items.find((i: any) => String(i.id) === String(line.itemId || line.item_id));
-        const q = Number(line.returnQty || line.return_quantity || line.quantity || 0);
-        const p = Number(line.unitPrice || line.unit_price || line.rate || 0);
-        const lineGross = Number((q * p).toFixed(2));
-        if (lineGross <= 0) return;
-        fulfillmentSubtotal += lineGross;
-
-        const invAcc = itemObj?.asset_account_id
-          ? accounts.find((a: any) => String(a.id) === String(itemObj.asset_account_id))
-          : null;
-        const invName = invAcc ? (invAcc.account_name || invAcc.name) : "Inventory Asset Account";
-        const invCode = invAcc ? (invAcc.account_code || invAcc.code || "1200") : "1200";
-
-        // CREDIT: Inventory Asset
-        entries.push({
-          accountCode: invCode,
-          accountName: invName,
-          debit: 0,
-          credit: lineGross,
-          postingPeriod: currentPeriod,
-          memo: `Step 2 Fulfillment: Stock Outward for ${itemObj?.item_name || line.item?.item_name || "Item"} (Qty: ${q})`
+          // CREDIT: Inventory Asset
+          entries.push({
+            accountCode: invCode,
+            accountName: invName,
+            debit: 0,
+            credit: lineGross,
+            postingPeriod: currentPeriod,
+            memo: `Step 2 Fulfillment: Stock Outward for ${itemObj?.item_name || line.item?.item_name || "Item"} (Qty: ${q})`
+          });
         });
-      });
 
-      fulfillmentSubtotal = Number(fulfillmentSubtotal.toFixed(2));
-      if (fulfillmentSubtotal > 0) {
-        // DEBIT: Purchase Return Clearing
-        entries.unshift({
-          accountCode: clearingAcc.code,
-          accountName: clearingAcc.name,
-          debit: fulfillmentSubtotal,
+        fulfillmentSubtotal = Number(fulfillmentSubtotal.toFixed(2));
+        if (fulfillmentSubtotal > 0) {
+          // DEBIT: Purchase Return Clearing
+          entries.unshift({
+            accountCode: clearingAcc.code,
+            accountName: clearingAcc.name,
+            debit: fulfillmentSubtotal,
+            credit: 0,
+            postingPeriod: currentPeriod,
+            memo: `Step 2 Fulfillment: Purchase Return Clearing Accrual`
+          });
+        }
+      }
+
+      // ── STEP 3: VENDOR CREDIT GL IMPACT (NO DISCOUNT, GST VISIBLE, BALANCED) ──
+      if (statusVal === "RETURNED") {
+        const netTotal = totalReturnAmt > 0 ? totalReturnAmt : Number(activeHeader.totalAmount || activeHeader.total_amount || 0);
+        const taxAmt = totalTaxAmt > 0 ? totalTaxAmt : Number(activeHeader.taxAmount || activeHeader.tax_amount || 0);
+        const clearingCredit = Number((netTotal - (taxAmt > 0 ? taxAmt : 0)).toFixed(2));
+
+        // DEBIT: Accounts Payable (Reduces vendor liability for full credit total)
+        entries.push({
+          accountCode: apAcc.code,
+          accountName: apAcc.name,
+          debit: netTotal,
           credit: 0,
           postingPeriod: currentPeriod,
-          memo: `Step 2 Fulfillment: Purchase Return Clearing Accrual`
+          memo: `Step 3 Vendor Credit: Liability reduction with Vendor`
         });
-      }
-    }
 
-    // ── STEP 3: VENDOR CREDIT GL IMPACT (NO DISCOUNT, GST VISIBLE, BALANCED) ──
-    if (statusVal === "RETURNED") {
-      const netTotal = totalReturnAmt > 0 ? totalReturnAmt : Number(activeHeader.totalAmount || activeHeader.total_amount || 0);
-      const taxAmt = totalTaxAmt > 0 ? totalTaxAmt : Number(activeHeader.taxAmount || activeHeader.tax_amount || 0);
-      const clearingCredit = Number((netTotal - (taxAmt > 0 ? taxAmt : 0)).toFixed(2));
+        // CREDIT: Input Tax (GST) Reversal (if GST exists)
+        if (taxAmt > 0) {
+          entries.push({
+            accountCode: taxAcc.code,
+            accountName: taxAcc.name,
+            debit: 0,
+            credit: taxAmt,
+            postingPeriod: currentPeriod,
+            memo: `Step 3 Vendor Credit: Input Tax Reversal`
+          });
+        }
 
-      // DEBIT: Accounts Payable (Reduces vendor liability for full credit total)
-      entries.push({
-        accountCode: apAcc.code,
-        accountName: apAcc.name,
-        debit: netTotal,
-        credit: 0,
-        postingPeriod: currentPeriod,
-        memo: `Step 3 Vendor Credit: Liability reduction with Vendor`
-      });
-
-      // CREDIT: Input Tax (GST) Reversal (if GST exists)
-      if (taxAmt > 0) {
-        entries.push({
-          accountCode: taxAcc.code,
-          accountName: taxAcc.name,
-          debit: 0,
-          credit: taxAmt,
-          postingPeriod: currentPeriod,
-          memo: `Step 3 Vendor Credit: Input Tax Reversal`
-        });
+        // CREDIT: Purchase Return Clearing (Offsets step 2 accrual)
+        if (clearingCredit > 0) {
+          entries.push({
+            accountCode: clearingAcc.code,
+            accountName: clearingAcc.name,
+            debit: 0,
+            credit: clearingCredit,
+            postingPeriod: currentPeriod,
+            memo: `Step 3 Vendor Credit: Purchase Return Clearing offset`
+          });
+        }
       }
 
-      // CREDIT: Purchase Return Clearing (Offsets step 2 accrual)
-      if (clearingCredit > 0) {
-        entries.push({
-          accountCode: clearingAcc.code,
-          accountName: clearingAcc.name,
-          debit: 0,
-          credit: clearingCredit,
-          postingPeriod: currentPeriod,
-          memo: `Step 3 Vendor Credit: Purchase Return Clearing offset`
-        });
-      }
-    }
-
-    return entries;
-  })();
+      return entries;
+    })();
 
     const retNoStr = activeHeader.returnNumber || activeHeader.return_number || `RET-${selectedReturn?.id || "NEW"}`;
 
@@ -1479,17 +1479,17 @@ export default function PurchaseReturnComp() {
             },
             ...(isView && glEntries.length > 0
               ? [
-                  {
-                    id: "gl_impact",
-                    label: "GL Impact",
-                    content: (
-                      <GLImpactSubtab
-                        documentNumber={retNoStr}
-                        entries={glEntries}
-                      />
-                    ),
-                  },
-                ]
+                {
+                  id: "gl_impact",
+                  label: "GL Impact",
+                  content: (
+                    <GLImpactSubtab
+                      documentNumber={retNoStr}
+                      entries={glEntries}
+                    />
+                  ),
+                },
+              ]
               : []),
           ]}
         >
