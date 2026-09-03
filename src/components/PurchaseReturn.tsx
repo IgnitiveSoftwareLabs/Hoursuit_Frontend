@@ -219,6 +219,9 @@ export default function PurchaseReturnComp() {
       header: {
         returnNumber: "",
         vendorId: "",
+        purchaseInvoiceHeaderId: "",
+        purchaseOrderId: "",
+        purchasePaymentHeaderId: "",
         returnDate: new Date().toISOString().slice(0, 10),
         subsidiary_id: "",
         class_id: "",
@@ -378,6 +381,9 @@ export default function PurchaseReturnComp() {
               header: {
                 returnNumber: `RET-GRN-${grn.id}`,
                 vendorId: vId,
+                purchaseInvoiceHeaderId: "",
+                purchaseOrderId: poId ? String(poId) : (header.purchaseOrderId ? String(header.purchaseOrderId) : ""),
+                purchasePaymentHeaderId: "",
                 returnDate: new Date().toISOString().slice(0, 10),
                 subsidiary_id: subId,
                 class_id: classId,
@@ -462,6 +468,9 @@ export default function PurchaseReturnComp() {
               header: {
                 returnNumber: `RET-BILL-${inv.id}`,
                 vendorId: vId,
+                purchaseInvoiceHeaderId: String(inv.id),
+                purchaseOrderId: poId ? String(poId) : (poH?.id ? String(poH.id) : ""),
+                purchasePaymentHeaderId: "",
                 returnDate: new Date().toISOString().slice(0, 10),
                 subsidiary_id: subId,
                 class_id: classId,
@@ -563,6 +572,9 @@ export default function PurchaseReturnComp() {
               header: {
                 returnNumber: `RET-PAY-${pay.id}`,
                 vendorId: vId,
+                purchasePaymentHeaderId: String(pay.id),
+                purchaseInvoiceHeaderId: invId ? String(invId) : "",
+                purchaseOrderId: poH?.id ? String(poH.id) : (linkedPoForPay?.id ? String(linkedPoForPay.id) : ""),
                 returnDate: new Date().toISOString().slice(0, 10),
                 subsidiary_id: subId,
                 class_id: classId,
@@ -635,6 +647,9 @@ export default function PurchaseReturnComp() {
               header: {
                 returnNumber: `RET-PO-${po.id}`,
                 vendorId: vId,
+                purchaseInvoiceHeaderId: "",
+                purchaseOrderId: String(po.id),
+                purchasePaymentHeaderId: "",
                 returnDate: new Date().toISOString().slice(0, 10),
                 subsidiary_id: subId,
                 class_id: classId,
@@ -1006,24 +1021,25 @@ export default function PurchaseReturnComp() {
     const activeHeader = isView ? selectedReturn?.header || selectedReturn || {} : formik.values.header;
     const activeLines = isView ? selectedReturn?.purchaseReturnLines || selectedReturn?.details || selectedReturn?.lineItems || selectedReturn?.purchase_return_lines || [] : formik.values.lineItems;
 
-    const invObj = invoices.find((i: any) => String(i.id) === String(activeHeader.purchaseInvoiceHeaderId || activeHeader.purchase_invoice_header_id || activeHeader.invoiceId));
+    const invId = activeHeader?.purchaseInvoiceHeaderId || activeHeader?.purchase_invoice_header_id || activeHeader?.invoiceId;
+    const invObj = invId ? (invoices || []).find((i: any) => String(i?.id) === String(invId)) : null;
     const invH = invObj?.header ?? invObj;
-    const poId = activeHeader.purchaseOrderId || activeHeader.purchase_order_id || activeHeader.poId || invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_header_id;
-    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    const poId = activeHeader?.purchaseOrderId || activeHeader?.purchase_order_id || activeHeader?.poId || invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_header_id;
+    const poObj = poId ? (purchaseOrders || []).find((p: any) => String(p?.id) === String(poId)) : null;
     const poH = poObj?.header ?? poObj;
 
-    const vendorObj = activeHeader.vendor || vendors.find((v: any) => String(v.id) === String(activeHeader.vendorId || activeHeader.vendor_id || selectedReturn?.vendorId || poH?.vendorId));
+    const vendorObj = activeHeader?.vendor || (vendors || []).find((v: any) => String(v?.id) === String(activeHeader?.vendorId || activeHeader?.vendor_id || selectedReturn?.vendorId || poH?.vendorId));
     const vendorName = getVendorDisplayName(vendorObj);
-    const subIdVal = activeHeader.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId || invH?.subsidiary_id || vendorObj?.primary_subsidiary_id || vendorObj?.subsidiary_id;
-    const subsidiaryName = activeHeader.subsidiary?.subsidiary_name || subsidiaries.find((s: any) => String(s.id) === String(subIdVal))?.subsidiary_name || poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "—";
-    const classIdVal = activeHeader.class_id || poH?.class_id || poH?.classId || invH?.class_id || vendorObj?.class_id;
-    const classNameVal = activeHeader.class?.class_name || classesList.find((c: any) => String(c.id) === String(classIdVal))?.class_name || poH?.class?.class_name || "—";
-    const deptIdVal = activeHeader.department_id || poH?.department_id || poH?.departmentId || invH?.department_id || vendorObj?.department_id;
-    const deptNameVal = activeHeader.department?.department_name || departmentsList.find((d: any) => String(d.id) === String(deptIdVal))?.department_name || poH?.department?.department_name || "—";
-    const locIdVal = activeHeader.location_id || activeHeader.city_id || poH?.city_id || poH?.cityId || poH?.location_id || invH?.location_id;
-    const locNameVal = activeHeader.location?.city_name || citiesList.find((c: any) => String(c.id) === String(locIdVal))?.city_name || poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—";
-    const currIdVal = activeHeader.currency_id || vendorObj?.currency_id;
-    const currencyObj = currencies.find((c: any) => String(c.id) === String(currIdVal));
+    const subIdVal = activeHeader?.subsidiary_id || poH?.subsidiary_id || poH?.subsidiaryId || invH?.subsidiary_id || vendorObj?.primary_subsidiary_id || vendorObj?.subsidiary_id;
+    const subsidiaryName = activeHeader?.subsidiary?.subsidiary_name || (subsidiaries || []).find((s: any) => String(s?.id) === String(subIdVal))?.subsidiary_name || poH?.subsidiary?.subsidiary_name || poH?.subsidiary?.name || "—";
+    const classIdVal = activeHeader?.class_id || poH?.class_id || poH?.classId || invH?.class_id || vendorObj?.class_id;
+    const classNameVal = activeHeader?.class?.class_name || (classesList || []).find((c: any) => String(c?.id) === String(classIdVal))?.class_name || poH?.class?.class_name || "—";
+    const deptIdVal = activeHeader?.department_id || poH?.department_id || poH?.departmentId || invH?.department_id || vendorObj?.department_id;
+    const deptNameVal = activeHeader?.department?.department_name || (departmentsList || []).find((d: any) => String(d?.id) === String(deptIdVal))?.department_name || poH?.department?.department_name || "—";
+    const locIdVal = activeHeader?.location_id || activeHeader?.city_id || poH?.city_id || poH?.cityId || poH?.location_id || invH?.location_id;
+    const locNameVal = activeHeader?.location?.city_name || (citiesList || []).find((c: any) => String(c?.id) === String(locIdVal))?.city_name || poH?.city?.city_name || poH?.city?.name || poH?.location?.city_name || "—";
+    const currIdVal = activeHeader?.currency_id || vendorObj?.currency_id;
+    const currencyObj = (currencies || []).find((c: any) => String(c?.id) === String(currIdVal));
 
     const totalSubtotal = activeLines.reduce((acc: number, l: any) => {
       const q = Number(l.returnQty || l.return_quantity || l.quantity || 0);
