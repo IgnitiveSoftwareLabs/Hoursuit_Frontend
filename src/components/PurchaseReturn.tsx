@@ -200,6 +200,7 @@ export default function PurchaseReturnComp() {
 
   const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : Array.isArray(purchaseReturnsData) ? purchaseReturnsData : []), [purchaseReturnsData]);
   const purchaseInvoices = useMemo(() => (Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : Array.isArray(purchaseInvoicesData?.data) ? purchaseInvoicesData.data : Array.isArray(purchaseInvoicesData) ? purchaseInvoicesData : []), [purchaseInvoicesData]);
+  const invoices = purchaseInvoices;
   const purchasePayments = useMemo(() => (Array.isArray(purchasePaymentsData?.result) ? purchasePaymentsData.result : Array.isArray(purchasePaymentsData?.data) ? purchasePaymentsData.data : Array.isArray(purchasePaymentsData) ? purchasePaymentsData : []), [purchasePaymentsData]);
   const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
@@ -211,6 +212,7 @@ export default function PurchaseReturnComp() {
   const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : Array.isArray(currenciesData?.data) ? currenciesData.data : Array.isArray(currenciesData) ? currenciesData : [];
   const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
   const accounts = useMemo(() => (Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : []), [chartOfAccountsData]);
+  const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
 
   const formik = useFormik({
     initialValues: {
@@ -320,17 +322,33 @@ export default function PurchaseReturnComp() {
     if (grnIdParam) {
       triggerGetGRNById(grnIdParam)
         .unwrap()
-        .then((res: any) => {
+        .then(async (res: any) => {
           const grn = res?.result || res?.data || res;
           if (grn) {
             const header = grn.header ?? grn;
             const grnLines = grn.grnLines || grn.lineItems || grn.lines || grn.details || [];
             const vId = String(header.vendorId || header.vendor_id || "");
-            const subId = String(header.subsidiary_id || header.subsidiaryId || "");
-            const classId = String(header.class_id || header.classId || "");
-            const deptId = String(header.department_id || header.departmentId || "");
-            const locId = String(header.location_id || header.locationId || citiesList[0]?.id || "");
-            const currId = String(header.currency_id || header.currencyId || "");
+            const vObj = vendors.find((v: any) => String(v.id) === vId);
+
+            const poId = header.purchaseOrderId || header.purchase_order_id || header.po_header_id;
+            let linkedPo: any = null;
+            if (poId) {
+              try {
+                const poRes = await triggerGetPOById(poId).unwrap();
+                linkedPo = poRes?.result || poRes?.data || poRes;
+              } catch (e) {}
+            }
+            if (!linkedPo && vId) {
+              linkedPo = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === vId);
+            }
+            const poH = linkedPo?.header ?? linkedPo;
+
+            const subId = String(poH?.subsidiary_id || poH?.subsidiaryId || header.subsidiary_id || header.subsidiaryId || vObj?.primary_subsidiary_id || vObj?.subsidiary_id || subsidiaries[0]?.id || "");
+            const classId = String(poH?.class_id || poH?.classId || header.class_id || header.classId || vObj?.class_id || classesList[0]?.id || "");
+            const deptId = String(poH?.department_id || poH?.departmentId || header.department_id || header.departmentId || vObj?.department_id || departmentsList[0]?.id || "");
+            const primaryAddr = vObj?.addressBook?.find((a: any) => a.default_billing) || vObj?.addressBook?.[0];
+            const locId = String(poH?.location_id || poH?.city_id || poH?.cityId || header.location_id || header.city_id || primaryAddr?.city_id || vObj?.city_id || citiesList[0]?.id || "");
+            const currId = String(poH?.currency_id || poH?.currencyId || header.currency_id || header.currencyId || vObj?.currency_id || currencies[0]?.id || "");
 
             const mappedLines = grnLines.map((l: any) => {
               const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
@@ -383,17 +401,33 @@ export default function PurchaseReturnComp() {
     } else if (billIdParam) {
       triggerGetInvoiceById(billIdParam)
         .unwrap()
-        .then((res: any) => {
+        .then(async (res: any) => {
           const inv = res?.result || res?.data || res;
           if (inv) {
             const header = inv.header ?? inv;
             const invLines = inv.purchaseInvoiceLines || inv.lines || inv.details || [];
             const vId = String(header.vendorId || header.vendor_id || "");
-            const subId = String(header.subsidiary_id || header.vendor?.primary_subsidiary_id || "");
-            const classId = String(header.class_id || "");
-            const deptId = String(header.department_id || "");
-            const locId = String(header.location_id || header.city_id || "");
-            const currId = String(header.currency_id || "");
+            const vObj = vendors.find((v: any) => String(v.id) === vId);
+
+            const poId = header.purchaseOrderHeaderId || header.poHeaderId || header.po_header_id || header.purchaseOrderId;
+            let linkedPo: any = null;
+            if (poId) {
+              try {
+                const poRes = await triggerGetPOById(poId).unwrap();
+                linkedPo = poRes?.result || poRes?.data || poRes;
+              } catch (e) {}
+            }
+            if (!linkedPo && vId) {
+              linkedPo = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === vId);
+            }
+            const poH = linkedPo?.header ?? linkedPo;
+
+            const subId = String(poH?.subsidiary_id || poH?.subsidiaryId || header.subsidiary_id || header.subsidiaryId || vObj?.primary_subsidiary_id || vObj?.subsidiary_id || subsidiaries[0]?.id || "");
+            const classId = String(poH?.class_id || poH?.classId || header.class_id || header.classId || vObj?.class_id || classesList[0]?.id || "");
+            const deptId = String(poH?.department_id || poH?.departmentId || header.department_id || header.departmentId || vObj?.department_id || departmentsList[0]?.id || "");
+            const primaryAddr = vObj?.addressBook?.find((a: any) => a.default_billing) || vObj?.addressBook?.[0];
+            const locId = String(poH?.location_id || poH?.city_id || poH?.cityId || header.location_id || header.city_id || primaryAddr?.city_id || vObj?.city_id || citiesList[0]?.id || "");
+            const currId = String(poH?.currency_id || poH?.currencyId || header.currency_id || header.currencyId || vObj?.currency_id || currencies[0]?.id || "");
 
             const mappedLines = invLines.map((l: any) => {
               const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
@@ -497,16 +531,44 @@ export default function PurchaseReturnComp() {
               };
             });
 
+            const vObj = vendors.find((v: any) => String(v.id) === vId);
+            let linkedPoForPay: any = null;
+            if (invId) {
+              try {
+                const invRes = await triggerGetInvoiceById(invId).unwrap();
+                const linkedInv = invRes?.result || invRes?.data || invRes;
+                const invH = linkedInv?.header ?? linkedInv;
+                const poId = invH?.purchaseOrderHeaderId || invH?.poHeaderId || invH?.po_header_id || invH?.purchaseOrderId;
+                if (poId) {
+                  try {
+                    const poRes = await triggerGetPOById(poId).unwrap();
+                    linkedPoForPay = poRes?.result || poRes?.data || poRes;
+                  } catch (e) {}
+                }
+              } catch (e) {}
+            }
+            if (!linkedPoForPay && vId) {
+              linkedPoForPay = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === vId);
+            }
+            const poH = linkedPoForPay?.header ?? linkedPoForPay;
+
+            const subId = String(poH?.subsidiary_id || poH?.subsidiaryId || header.subsidiary_id || vObj?.primary_subsidiary_id || vObj?.subsidiary_id || subsidiaries[0]?.id || "");
+            const classId = String(poH?.class_id || poH?.classId || header.class_id || vObj?.class_id || classesList[0]?.id || "");
+            const deptId = String(poH?.department_id || poH?.departmentId || header.department_id || vObj?.department_id || departmentsList[0]?.id || "");
+            const primaryAddr = vObj?.addressBook?.find((a: any) => a.default_billing) || vObj?.addressBook?.[0];
+            const locId = String(poH?.location_id || poH?.city_id || poH?.cityId || header.location_id || header.city_id || primaryAddr?.city_id || vObj?.city_id || citiesList[0]?.id || "");
+            const currId = String(poH?.currency_id || poH?.currencyId || vObj?.currency_id || currencies.find((c: any) => (c.currency_code || c.code || "").toUpperCase() === (header.currency || "INR").toUpperCase())?.id || currencies[0]?.id || "");
+
             formik.setValues({
               header: {
                 returnNumber: `RET-PAY-${pay.id}`,
                 vendorId: vId,
                 returnDate: new Date().toISOString().slice(0, 10),
-                subsidiary_id: String(header.subsidiary_id || ""),
-                class_id: String(header.class_id || ""),
-                department_id: String(header.department_id || ""),
-                location_id: String(header.location_id || ""),
-                currency_id: String(header.currency_id || ""),
+                subsidiary_id: subId,
+                class_id: classId,
+                department_id: deptId,
+                location_id: locId,
+                currency_id: currId,
                 reason: `Return against Purchase Payment #${header.paymentNumber || pay.id}`,
                 remarks: `Auto-populated from Purchase Payment #${header.paymentNumber || pay.id}`,
                 status: "DRAFT",
@@ -560,16 +622,25 @@ export default function PurchaseReturnComp() {
               };
             });
 
+            const vObj = vendors.find((v: any) => String(v.id) === vId);
+            const poH = header;
+            const subId = String(poH.subsidiary_id || poH.subsidiaryId || vObj?.primary_subsidiary_id || vObj?.subsidiary_id || subsidiaries[0]?.id || "");
+            const classId = String(poH.class_id || poH.classId || vObj?.class_id || classesList[0]?.id || "");
+            const deptId = String(poH.department_id || poH.departmentId || vObj?.department_id || departmentsList[0]?.id || "");
+            const primaryAddr = vObj?.addressBook?.find((a: any) => a.default_billing) || vObj?.addressBook?.[0];
+            const locId = String(poH.location_id || poH.city_id || poH.cityId || primaryAddr?.city_id || vObj?.city_id || citiesList[0]?.id || "");
+            const currId = String(poH.currency_id || poH.currencyId || vObj?.currency_id || currencies[0]?.id || "");
+
             formik.setValues({
               header: {
                 returnNumber: `RET-PO-${po.id}`,
                 vendorId: vId,
                 returnDate: new Date().toISOString().slice(0, 10),
-                subsidiary_id: String(header.subsidiary_id || ""),
-                class_id: String(header.class_id || ""),
-                department_id: String(header.department_id || ""),
-                location_id: String(header.location_id || header.city_id || ""),
-                currency_id: String(header.currency_id || ""),
+                subsidiary_id: subId,
+                class_id: classId,
+                department_id: deptId,
+                location_id: locId,
+                currency_id: currId,
                 reason: `Return against Purchase Order #${header.poNumber || po.id}`,
                 remarks: `Auto-populated from Purchase Order #${header.poNumber || po.id}`,
                 status: "DRAFT",
@@ -607,29 +678,76 @@ export default function PurchaseReturnComp() {
     }
   }, [searchParams, items, inventoryItems]);
 
+  // Auto-sync classification & currency whenever vendorId is selected/present in formik
+  useEffect(() => {
+    if (viewMode === "form") {
+      const vId = formik.values.header.vendorId;
+      if (vId) {
+        const selectedVendor = vendors.find((v: any) => String(v.id) === String(vId));
+        const linkedPo = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === String(vId));
+        const poH = linkedPo?.header ?? linkedPo;
+
+        if (!formik.values.header.subsidiary_id) {
+          const subId = poH?.subsidiary_id || poH?.subsidiaryId || selectedVendor?.primary_subsidiary_id || selectedVendor?.primarySubsidiary?.id || selectedVendor?.subsidiary_id || selectedVendor?.subsidiary?.id || subsidiaries[0]?.id;
+          if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
+        }
+
+        if (!formik.values.header.class_id) {
+          const classId = poH?.class_id || poH?.classId || selectedVendor?.class_id || selectedVendor?.class?.id || classesList[0]?.id;
+          if (classId) formik.setFieldValue("header.class_id", String(classId));
+        }
+
+        if (!formik.values.header.department_id) {
+          const deptId = poH?.department_id || poH?.departmentId || selectedVendor?.department_id || selectedVendor?.department?.id || departmentsList[0]?.id;
+          if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+        }
+
+        if (!formik.values.header.currency_id) {
+          const currId = poH?.currency_id || poH?.currencyId || selectedVendor?.currency_id || selectedVendor?.currency?.id || currencies[0]?.id;
+          if (currId) formik.setFieldValue("header.currency_id", String(currId));
+        }
+
+        if (!formik.values.header.location_id) {
+          const primaryAddr = selectedVendor?.addressBook?.find((a: any) => a.default_billing) || selectedVendor?.addressBook?.[0];
+          const locId = poH?.location_id || poH?.city_id || poH?.cityId || primaryAddr?.city_id || primaryAddr?.city?.id || selectedVendor?.city_id || citiesList[0]?.id;
+          if (locId) {
+            formik.setFieldValue("header.location_id", String(locId));
+            const updatedLines = formik.values.lineItems.map((l: any) => ({
+              ...l,
+              location_id: l.location_id || String(locId),
+            }));
+            formik.setFieldValue("lineItems", updatedLines);
+          }
+        }
+      }
+    }
+  }, [formik.values.header.vendorId, viewMode, vendors, purchaseOrders, subsidiaries, classesList, departmentsList, currencies, citiesList]);
+
   const handleVendorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const vendorId = e.target.value;
     formik.setFieldValue("header.vendorId", vendorId);
 
     const selectedVendor = vendors.find((v: any) => String(v.id) === String(vendorId));
     if (selectedVendor) {
-      const subId = selectedVendor.primary_subsidiary_id ?? selectedVendor.primarySubsidiary?.id ?? selectedVendor.subsidiary_id ?? selectedVendor.subsidiary?.id ?? subsidiaries[0]?.id;
+      const linkedPo = purchaseOrders.find((p: any) => String(p.vendorId || p.vendor_id || p.header?.vendorId) === String(vendorId));
+      const poH = linkedPo?.header ?? linkedPo;
+
+      const subId = poH?.subsidiary_id || poH?.subsidiaryId || selectedVendor.primary_subsidiary_id || selectedVendor.primarySubsidiary?.id || selectedVendor.subsidiary_id || selectedVendor.subsidiary?.id || subsidiaries[0]?.id;
       if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
 
-      const currId = selectedVendor.currency_id ?? selectedVendor.currency?.id ?? currencies[0]?.id;
+      const currId = poH?.currency_id || poH?.currencyId || selectedVendor.currency_id || selectedVendor.currency?.id || currencies[0]?.id;
       if (currId) formik.setFieldValue("header.currency_id", String(currId));
 
-      const classId = selectedVendor.class_id ?? selectedVendor.class?.id ?? classesList[0]?.id;
+      const classId = poH?.class_id || poH?.classId || selectedVendor.class_id || selectedVendor.class?.id || classesList[0]?.id;
       if (classId) formik.setFieldValue("header.class_id", String(classId));
 
-      const deptId = selectedVendor.department_id ?? selectedVendor.department?.id ?? departmentsList[0]?.id;
+      const deptId = poH?.department_id || poH?.departmentId || selectedVendor.department_id || selectedVendor.department?.id || departmentsList[0]?.id;
       if (deptId) formik.setFieldValue("header.department_id", String(deptId));
 
       const primaryAddr = selectedVendor.addressBook?.find((a: any) => a.default_billing) || selectedVendor.addressBook?.[0];
-      const cityId = primaryAddr?.city_id ?? primaryAddr?.city?.id ?? selectedVendor.city_id ?? selectedVendor.city?.id ?? citiesList[0]?.id;
+      const cityId = poH?.location_id || poH?.city_id || poH?.cityId || primaryAddr?.city_id || primaryAddr?.city?.id || selectedVendor.city_id || selectedVendor.city?.id || citiesList[0]?.id;
       if (cityId) {
         formik.setFieldValue("header.location_id", String(cityId));
-        // Set location for line items if empty
         const updatedLines = formik.values.lineItems.map((l: any) => ({
           ...l,
           location_id: l.location_id || String(cityId),
@@ -1557,6 +1675,25 @@ export default function PurchaseReturnComp() {
                     {subsidiaries.map((s: any) => (
                       <option key={s.id} value={s.id}>
                         {s.subsidiary_name || s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col space-y-1">
+                  <label className="text-[11px] font-semibold text-[#475569] uppercase">
+                    LOCATION / CITY <span className="text-amber-600">*</span>
+                  </label>
+                  <select
+                    name="header.location_id"
+                    value={formik.values.header.location_id || ""}
+                    onChange={formik.handleChange}
+                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-medium text-slate-800"
+                  >
+                    <option value="">Select Location...</option>
+                    {citiesList.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.city_name || c.name}
                       </option>
                     ))}
                   </select>

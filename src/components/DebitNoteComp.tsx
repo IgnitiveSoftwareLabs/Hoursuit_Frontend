@@ -24,10 +24,13 @@ import {
   useLazyGetDebitNoteByIdQuery,
   useUpdateDebitNoteMutation,
 } from "../RTK/services/debitNoteApi";
-import { useGetPurchaseInvoicesQuery,
+import {
+  useGetPurchaseInvoicesQuery,
   useLazyGetPurchaseInvoiceByIdQuery,
   useGetPurchaseReturnsQuery,
-  useLazyGetPurchaseReturnByIdQuery } from "../RTK/services/purchaseApi";
+  useLazyGetPurchaseReturnByIdQuery,
+  useGetPurchaseOrdersQuery,
+} from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
 import { GLImpactSubtab } from "./Layout/GLImpactSubtab";
@@ -52,6 +55,7 @@ export default function DebitNoteComp() {
   // Eager Queries
   const { data: debitNotesData, refetch: refetchDebitNotes } = useGetDebitNotesQuery({ page: 1, limit: 50 });
   const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 });
+  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery(undefined);
   const { data: purchaseReturnsData, refetch: refetchPurchaseReturns } = useGetPurchaseReturnsQuery({ page: 1, limit: 100 });
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
   const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
@@ -70,6 +74,7 @@ export default function DebitNoteComp() {
 
   const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
   const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : []), [invoicesData]);
+  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
   const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : Array.isArray(purchaseReturnsData) ? purchaseReturnsData : []), [purchaseReturnsData]);
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
   const accounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : [];

@@ -24,6 +24,8 @@ import {
   useGetReturnFulfillmentsQuery,
   useLazyGetReturnFulfillmentByIdQuery,
   useCreateReturnFulfillmentMutation,
+  useGetPurchaseOrdersQuery,
+  useGetPurchaseInvoicesQuery,
 } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
@@ -104,15 +106,20 @@ export default function ReturnFulfillmentComp() {
   const { data: uomsData } = useGetUOMsQuery(undefined);
   const { data: inventoryData } = useGetInventoryQuery({ page: 1, limit: 1000 });
   const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
+  const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery(undefined);
+  const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery(undefined);
 
   const [createReturnFulfillment, { isLoading: isCreating }] = useCreateReturnFulfillmentMutation();
   const [triggerGetPurchaseReturnById] = useLazyGetPurchaseReturnByIdQuery();
   const [triggerGetFulfillmentById] = useLazyGetReturnFulfillmentByIdQuery();
 
   const fulfillments = useMemo(() => (Array.isArray(fulfillmentsData?.result) ? fulfillmentsData.result : Array.isArray(fulfillmentsData?.data) ? fulfillmentsData.data : Array.isArray(fulfillmentsData?.result?.rows) ? fulfillmentsData.result.rows : Array.isArray(fulfillmentsData) ? fulfillmentsData : []), [fulfillmentsData]);
+  const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : Array.isArray(purchaseOrdersData) ? purchaseOrdersData : []), [purchaseOrdersData]);
+  const invoices = useMemo(() => (Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : Array.isArray(purchaseInvoicesData?.data) ? purchaseInvoicesData.data : Array.isArray(purchaseInvoicesData) ? purchaseInvoicesData : []), [purchaseInvoicesData]);
   const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : Array.isArray(purchaseReturnsData) ? purchaseReturnsData : []), [purchaseReturnsData]);
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : Array.isArray(vendorsData) ? vendorsData : []), [vendorsData]);
   const items = useMemo(() => (Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : Array.isArray(itemsData) ? itemsData : []), [itemsData]);
+  const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
   const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : Array.isArray(subsidiariesData) ? subsidiariesData : [];
   const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : Array.isArray(classesData) ? classesData : [];
   const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : Array.isArray(departmentsData) ? departmentsData : [];
