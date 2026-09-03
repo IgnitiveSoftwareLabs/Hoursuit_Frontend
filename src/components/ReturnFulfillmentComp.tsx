@@ -14,12 +14,15 @@ import { useGetCitiesQuery } from "../RTK/services/cityApi";
 import { useGetUOMsQuery } from "../RTK/services/uomApi";
 import { useGetInventoryQuery } from "../RTK/services/inventoryApi";
 import { useGetChartOfAccountsQuery } from "../RTK/services/chartOfAccountApi";
+import { useGetDebitNotesQuery } from "../RTK/services/debitNoteApi";
 import { useAppSelector } from "../Hooks/Reduxhook/hooks";
 import { usePermissions } from "../Hooks/usePermissions";
 
 import {
   useGetPurchaseReturnsQuery,
+  useLazyGetPurchaseReturnByIdQuery,
   useGetReturnFulfillmentsQuery,
+  useLazyGetReturnFulfillmentByIdQuery,
   useCreateReturnFulfillmentMutation,
 } from "../RTK/services/purchaseApi";
 
@@ -90,6 +93,7 @@ export default function ReturnFulfillmentComp() {
 
   // Eager Queries
   const { data: fulfillmentsData, refetch: refetchFulfillments } = useGetReturnFulfillmentsQuery({ page: 1, limit: 100 });
+  const { data: debitNotesData } = useGetDebitNotesQuery({ page: 1, limit: 500 });
   const { data: purchaseReturnsData, refetch: refetchPurchaseReturns } = useGetPurchaseReturnsQuery({ page: 1, limit: 100 });
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
   const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 1000 });
@@ -102,6 +106,8 @@ export default function ReturnFulfillmentComp() {
   const { data: chartOfAccountsData } = useGetChartOfAccountsQuery(undefined);
 
   const [createReturnFulfillment, { isLoading: isCreating }] = useCreateReturnFulfillmentMutation();
+  const [triggerGetPurchaseReturnById] = useLazyGetPurchaseReturnByIdQuery();
+  const [triggerGetFulfillmentById] = useLazyGetReturnFulfillmentByIdQuery();
 
   const fulfillments = useMemo(() => (Array.isArray(fulfillmentsData?.result) ? fulfillmentsData.result : Array.isArray(fulfillmentsData?.data) ? fulfillmentsData.data : Array.isArray(fulfillmentsData?.result?.rows) ? fulfillmentsData.result.rows : Array.isArray(fulfillmentsData) ? fulfillmentsData : []), [fulfillmentsData]);
   const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : Array.isArray(purchaseReturnsData) ? purchaseReturnsData : []), [purchaseReturnsData]);
@@ -114,7 +120,19 @@ export default function ReturnFulfillmentComp() {
   const cities = citiesList;
   const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : Array.isArray(uomsData) ? uomsData : [];
   const accounts = Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : Array.isArray(chartOfAccountsData) ? chartOfAccountsData : [];
-  const inventoryList = useMemo(() => (Array.isArray(inventoryData?.result?.items) ? inventoryData.result.items : Array.isArray(inventoryData?.result) ? inventoryData.result : Array.isArray(inventoryData?.data) ? inventoryData.data : []), [inventoryData]);
+  const inventoryList = useMemo(() => (
+    Array.isArray(inventoryData?.result?.inventory)
+      ? inventoryData.result.inventory
+      : Array.isArray(inventoryData?.result?.items)
+        ? inventoryData.result.items
+        : Array.isArray(inventoryData?.result)
+          ? inventoryData.result
+          : Array.isArray(inventoryData?.data)
+            ? inventoryData.data
+            : Array.isArray(inventoryData)
+              ? inventoryData
+              : []
+  ), [inventoryData]);
 
   const formik = useFormik({
     initialValues: {
@@ -259,30 +277,111 @@ export default function ReturnFulfillmentComp() {
     const action = searchParams.get("action");
 
     if (id && (action === "view" || action === "edit")) {
-      const f = fulfillments.find((x: any) => String(x.id) === String(id));
-      if (f) {
-        setSelectedFulfillment(f);
-        if (action === "edit") {
-          setIsEdit(true);
-          setEditId(id);
-          setViewMode("form");
-        } else {
-          setIsEdit(false);
-          setEditId(null);
-          setViewMode("view");
-        }
-      }
+      triggerGetFulfillmentById(id)
+        .unwrap()
+        .then((res: any) => {
+          const f = res?.result || res?.data || res;
+          if (f) {
+            setSelectedFulfillment(f);
+            if (action === "edit") {
+              setIsEdit(true);
+              setEditId(id);
+              setViewMode("form");
+            } else {
+              setIsEdit(false);
+              setEditId(null);
+              setViewMode("view");
+            }
+          }
+        })
+        .catch(() => {
+          const f = fulfillments.find((x: any) => String(x.id) === String(id));
+          if (f) {
+            setSelectedFulfillment(f);
+            if (action === "edit") {
+              setIsEdit(true);
+              setEditId(id);
+              setViewMode("form");
+            } else {
+              setIsEdit(false);
+              setEditId(null);
+              setViewMode("view");
+            }
+          }
+        });
     } else if (returnId) {
       setViewMode("form");
       setIsEdit(false);
       setEditId(null);
       formik.setFieldValue("header.purchaseReturnHeaderId", String(returnId));
+
+      triggerGetPurchaseReturnById(returnId)
+        .unwrap()
+        .then((res: any) => {
+          const parentReturn = res?.result || res?.data || res;
+          if (!parentReturn) return;
+
+          const pHeader = parentReturn.header || parentReturn;
+          const statusVal = String(pHeader.status || parentReturn.status || "").toUpperCase();
+          if (statusVal === "DRAFT") {
+            toast.error(`Purchase Return #${pHeader.returnNumber || pHeader.return_number || returnId} is in DRAFT status. It must be AUTHORIZED before fulfillment.`);
+            setViewMode("list");
+            setSearchParams({});
+            return;
+          }
+          if (statusVal === "FULFILLED" || statusVal === "RETURNED") {
+            toast.error(`Purchase Return #${pHeader.returnNumber || pHeader.return_number || returnId} is already FULFILLED.`);
+            setViewMode("list");
+            setSearchParams({});
+            return;
+          }
+
+          const defaultLocId = String(pHeader.location_id || pHeader.city_id || cities[0]?.id || "");
+          if (defaultLocId) formik.setFieldValue("header.location_id", defaultLocId);
+
+          if (pHeader.subsidiary_id) formik.setFieldValue("header.subsidiary_id", String(pHeader.subsidiary_id));
+          if (pHeader.class_id) formik.setFieldValue("header.class_id", String(pHeader.class_id));
+          if (pHeader.department_id) formik.setFieldValue("header.department_id", String(pHeader.department_id));
+
+          const parentLines = parentReturn.details || parentReturn.lineItems || parentReturn.purchaseReturnLines || parentReturn.purchase_return_lines || [];
+          if (parentLines.length > 0) {
+            const mapped = parentLines.map((l: any) => {
+              const iId = String(l.itemId || l.item_id || "");
+              const itemObj = items.find((i: any) => String(i.id) === iId);
+              const authorizedQty = Number(l.returnQty || l.return_quantity || l.quantity || 1);
+              const alreadyFulfilled = Number(l.fulfilledQty || l.fulfilled_quantity || 0);
+              const remaining = Math.max(0, authorizedQty - alreadyFulfilled);
+              const uPrice = Number(l.unitPrice || l.unit_price || l.rate || 0);
+              const lineLoc = String(l.locationId || l.warehouseId || defaultLocId);
+
+              return {
+                purchaseReturnLineId: String(l.id || ""),
+                itemId: iId,
+                fulfill: true,
+                itemDescription: itemObj?.description || itemObj?.item_name || "",
+                uom_id: String(l.uom_id || itemObj?.uom_id || ""),
+                returnQty: authorizedQty,
+                remainingQty: remaining,
+                fulfilledQty: remaining > 0 ? remaining : authorizedQty,
+                unitPrice: uPrice,
+                warehouseId: lineLoc,
+                batchNo: l.batchNo || "",
+                serialNo: l.serialNo || "",
+                remarks: l.remarks || "",
+              };
+            });
+            formik.setFieldValue("lineItems", mapped);
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch Purchase Return by ID for fulfillment:", err);
+        });
     } else if (action === "create" && !returnId) {
       toast.error("Item Fulfillment must be created from an Authorized Purchase Return.");
       setViewMode("list");
       setSearchParams({});
     }
-  }, [searchParams, fulfillments]);
+  }, [searchParams, items, cities]);
 
   useEffect(() => {
     if (viewMode !== "form" || !selectedReturnId || isEdit) return;
@@ -599,23 +698,42 @@ export default function ReturnFulfillmentComp() {
                   <span>Fulfill (Stock Outward)</span>
                 </button>
               )}
-              {isView && returnIdVal && !isDraftFulfillment && String(parentReturnHeader?.status || parentReturn?.status || "").toUpperCase() === "FULFILLED" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigate(`/debit-note?returnId=${returnIdVal}`);
-                  }}
-                  className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
-                >
-                  <ReceiptLong className="!w-4 !h-4" />
-                  <span>Credit (Vendor Credit)</span>
-                </button>
-              )}
-              {isView && returnIdVal && String(parentReturnHeader?.status || parentReturn?.status || "").toUpperCase() === "RETURNED" && (
-                <div className="flex items-center space-x-1 bg-teal-50 border border-teal-300 text-teal-800 text-xs px-2.5 py-1 rounded-xs font-semibold">
-                  <span>✓ Vendor Credit Completed</span>
-                </div>
-              )}
+              {(() => {
+                const currentReturnIdStr = String(returnIdVal || selectedFulfillment?.purchaseReturnHeaderId || selectedFulfillment?.header?.purchaseReturnHeaderId || "");
+                const matchingDebitNote = debitNotes.find((dn: any) => {
+                  const dnReturnId = String(dn.purchase_return_id || dn.purchaseReturnId || dn.returnId || dn.header?.purchaseReturnHeaderId || dn.reason || "");
+                  return currentReturnIdStr && (dnReturnId === currentReturnIdStr || dnReturnId.includes(currentReturnIdStr));
+                });
+                const isVendorCreditDone = Boolean(
+                  matchingDebitNote ||
+                  String(parentReturnHeader?.status || parentReturn?.status || "").toUpperCase() === "RETURNED"
+                );
+
+                if (isView && currentReturnIdStr && !isDraftFulfillment && String(parentReturnHeader?.status || parentReturn?.status || "").toUpperCase() === "FULFILLED" && !isVendorCreditDone) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate(`/debit-note?returnId=${currentReturnIdStr}`);
+                      }}
+                      className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
+                    >
+                      <ReceiptLong className="!w-4 !h-4" />
+                      <span>Credit (Vendor Credit)</span>
+                    </button>
+                  );
+                }
+
+                if (isView && currentReturnIdStr && (isVendorCreditDone || String(parentReturnHeader?.status || parentReturn?.status || "").toUpperCase() === "RETURNED")) {
+                  return (
+                    <div className="flex items-center space-x-1 bg-teal-50 border border-teal-300 text-teal-800 text-xs px-2.5 py-1 rounded-xs font-semibold">
+                      <span>✓ Vendor Credit Completed</span>
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
             </div>
           }
           subTabs={[
@@ -714,8 +832,14 @@ export default function ReturnFulfillmentComp() {
                               </td>
 
                               {/* Description */}
-                              <td className="p-2 border-r border-slate-200 text-slate-600 text-[11px]">
-                                {itemObj?.description || itemObj?.item_name || "—"}
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="text"
+                                  value={itemObj?.item_desc || itemObj?.description || itemObj?.item_name || "—"}
+                                  disabled={true}
+                                  placeholder="Item Description"
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 text-slate-700 font-medium cursor-not-allowed"
+                                />
                               </td>
 
                               {/* Location (REQUIRED) */}
@@ -822,10 +946,7 @@ export default function ReturnFulfillmentComp() {
               <RecordSection title="Primary Information" defaultOpen={true}>
                 {isView ? (
                   <>
-                    <div className="flex flex-col space-y-0.5">
-                      <span className="text-[10px] font-semibold text-slate-500 uppercase">CUSTOM FORM</span>
-                      <span className="text-xs font-semibold text-slate-800">Standard Item Fulfillment</span>
-                    </div>
+
                     <div className="flex flex-col space-y-0.5">
                       <span className="text-[10px] font-semibold text-slate-500 uppercase">REF. NO.</span>
                       <span className="text-xs font-bold text-slate-900">{fNoStr}</span>
@@ -869,15 +990,7 @@ export default function ReturnFulfillmentComp() {
                   </>
                 ) : (
                   <>
-                    <div className="flex flex-col space-y-1">
-                      <label className="text-[11px] font-semibold text-[#475569] uppercase">CUSTOM FORM</label>
-                      <input
-                        type="text"
-                        disabled
-                        value="Standard Item Fulfillment"
-                        className="h-7 text-xs bg-slate-100 border border-slate-300 rounded-xs px-2 text-slate-700 font-medium"
-                      />
-                    </div>
+
 
                     <div className="flex flex-col space-y-1">
                       <label className="text-[11px] font-semibold text-[#475569] uppercase">REF. NO.</label>

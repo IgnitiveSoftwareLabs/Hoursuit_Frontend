@@ -19,9 +19,13 @@ import {
   useCreatePurchasePaymentMutation,
   useDeletePurchasePaymentMutation,
   useGetPurchaseInvoicesQuery,
+  useGetPurchaseInvoiceByIdQuery,
+  useLazyGetPurchaseInvoiceByIdQuery,
   useGetPurchaseOrdersQuery,
+  useLazyGetPurchaseOrderByIdQuery,
   useGetPurchasePaymentsQuery,
   useGetPurchasePaymentByIdQuery,
+  useLazyGetPurchasePaymentByIdQuery,
   useUpdatePurchasePaymentMutation,
 } from "../RTK/services/purchaseApi";
 
@@ -45,6 +49,7 @@ export default function PurchasePaymentComp() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [paymentToDelete, setPaymentToDelete] = useState<any>(null);
   const [appliedBillIds, setAppliedBillIds] = useState<string[]>([]);
+  const [billPaymentAmounts, setBillPaymentAmounts] = useState<Record<string, number>>({});
   const [billSearchTerm, setBillSearchTerm] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -70,6 +75,7 @@ export default function PurchasePaymentComp() {
   const [createPurchasePayment, { isLoading: isCreating }] = useCreatePurchasePaymentMutation();
   const [updatePurchasePayment, { isLoading: isUpdating }] = useUpdatePurchasePaymentMutation();
   const [deletePurchasePayment] = useDeletePurchasePaymentMutation();
+  const [triggerGetInvoiceById] = useLazyGetPurchaseInvoiceByIdQuery();
 
   const payments = useMemo(() => (Array.isArray(paymentsData?.result) ? paymentsData.result : Array.isArray(paymentsData?.data) ? paymentsData.data : Array.isArray(paymentsData) ? paymentsData : []), [paymentsData]);
   const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : []), [invoicesData]);
@@ -158,61 +164,68 @@ export default function PurchasePaymentComp() {
     }),
     onSubmit: async (values) => {
       try {
-        let targetInv = invoices.find((inv: any) => String(inv.id) === String(values.purchaseInvoiceHeaderId));
-        if (!targetInv && appliedBillIds.length > 0) {
-          targetInv = invoices.find((inv: any) => String(inv.id) === String(appliedBillIds[0]));
-        }
-        if (!targetInv && values.vendorId) {
-          targetInv = invoices.find((inv: any) => String(inv.vendorId || inv.vendor_id || inv.header?.vendorId) === String(values.vendorId));
-        }
+        let linesPayload: any[] = [];
+        const checkedBillIds = appliedBillIds.length > 0
+          ? appliedBillIds
+          : (values.purchaseInvoiceHeaderId ? [String(values.purchaseInvoiceHeaderId)] : []);
 
-        const invHeaderId = targetInv ? Number(targetInv.id) : (values.purchaseInvoiceHeaderId ? Number(values.purchaseInvoiceHeaderId) : null);
         const payAmount = Number(values.totalAmount || 0);
 
-        let linesPayload: any[] = [];
-        const invLines = targetInv?.lines || targetInv?.lineItems || targetInv?.purchaseInvoiceLines || [];
-        
-        if (invLines.length > 0) {
-          const invTotal = invLines.reduce((sum: number, l: any) => sum + (Number(l.lineTotal || l.line_total || (Number(l.quantity || 1) * Number(l.unitPrice || l.unit_price || 0))) || 0), 0);
+        for (const bId of checkedBillIds) {
+          const invObj = invoices.find((inv: any) => String(inv.id) === String(bId));
+          const invH = invObj?.header ?? invObj;
+          const invDue = Number(invH?.balanceAmount !== undefined ? invH.balanceAmount : (invH?.totalAmount || invH?.total_amount || 0));
+          const allocatedBillPay = billPaymentAmounts[bId] !== undefined ? billPaymentAmounts[bId] : (payAmount > 0 ? payAmount : invDue);
 
-          let allocatedSum = 0;
-          linesPayload = invLines.map((l: any, idx: number) => {
-            let lineAmt = 0;
-            if (idx === invLines.length - 1) {
-              lineAmt = Number((payAmount - allocatedSum).toFixed(2));
-            } else {
-              const rawAmt = invTotal > 0 ? (Number(l.lineTotal || l.line_total || 0) / invTotal) * payAmount : payAmount / invLines.length;
-              lineAmt = Number(rawAmt.toFixed(2));
-              allocatedSum += lineAmt;
-            }
-            return {
-              purchaseInvoiceLineId: Number(l.id || (idx + 1)),
-              amountPaid: lineAmt > 0 ? lineAmt : payAmount,
-              remarks: l.remarks || "Invoice payment line allocation",
-            };
-          });
+          const invLines = invObj?.lines || invObj?.lineItems || invObj?.purchaseInvoiceLines || [];
+          if (invLines.length > 0) {
+            const invTotal = invLines.reduce((sum: number, l: any) => sum + (Number(l.lineTotal || l.line_total || (Number(l.quantity || 1) * Number(l.unitPrice || l.unit_price || 0))) || 0), 0);
+
+            let allocatedLineSum = 0;
+            invLines.forEach((l: any, idx: number) => {
+              let lineAmt = 0;
+              if (idx === invLines.length - 1) {
+                lineAmt = Number((allocatedBillPay - allocatedLineSum).toFixed(2));
+              } else {
+                const rawAmt = invTotal > 0 ? (Number(l.lineTotal || l.line_total || 0) / invTotal) * allocatedBillPay : allocatedBillPay / invLines.length;
+                lineAmt = Number(rawAmt.toFixed(2));
+                allocatedLineSum += lineAmt;
+              }
+              linesPayload.push({
+                purchaseInvoiceHeaderId: Number(bId),
+                purchaseInvoiceLineId: Number(l.id || (idx + 1)),
+                amountPaid: lineAmt > 0 ? lineAmt : allocatedBillPay,
+                remarks: l.remarks || `Bill #${invH?.invoiceNumber || bId} payment allocation`,
+              });
+            });
+          } else {
+            linesPayload.push({
+              purchaseInvoiceHeaderId: Number(bId),
+              purchaseInvoiceLineId: 1,
+              amountPaid: Number(allocatedBillPay.toFixed(2)),
+              remarks: `Bill #${invH?.invoiceNumber || bId} payment allocation`,
+            });
+          }
         }
 
         if (linesPayload.length === 0) {
-          const lineId = invLines?.[0]?.id || targetInv?.id || 1;
-          linesPayload = [
-            {
-              purchaseInvoiceLineId: Number(lineId),
-              amountPaid: Number(payAmount.toFixed(2)),
-              remarks: "Invoice payment allocation line",
-            },
-          ];
+          linesPayload.push({
+            purchaseInvoiceHeaderId: values.purchaseInvoiceHeaderId ? Number(values.purchaseInvoiceHeaderId) : 1,
+            purchaseInvoiceLineId: 1,
+            amountPaid: Number(payAmount.toFixed(2)),
+            remarks: "Payment allocation line",
+          });
         }
+
+        const calculatedFinalTotal = Number(linesPayload.reduce((sum, l) => sum + Number(l.amountPaid || 0), 0).toFixed(2));
+        const finalPayAmount = calculatedFinalTotal > 0 ? calculatedFinalTotal : payAmount;
+
+        const targetInvId = checkedBillIds.length > 0 ? Number(checkedBillIds[0]) : (values.purchaseInvoiceHeaderId ? Number(values.purchaseInvoiceHeaderId) : null);
+        const targetInv = invoices.find((inv: any) => String(inv.id) === String(targetInvId));
 
         const payNum = values.paymentNumber || `PAY-${Date.now().toString().slice(-6)}`;
         const vObj = vendors.find((v: any) => String(v.id) === String(values.vendorId));
         const pmId = values.paymentMethodId || vObj?.payment_method_id || vObj?.paymentMethodId || vObj?.default_payment_method_id || vObj?.paymentMethod?.id || targetInv?.paymentMethodId || targetInv?.payment_method_id || targetInv?.header?.paymentMethodId || targetInv?.header?.payment_method_id || null;
-
-        const linesWithHeader = linesPayload.map((l: any) => ({
-          ...l,
-          purchaseInvoiceHeaderId: invHeaderId || l.purchaseInvoiceHeaderId || 1,
-          purchaseInvoiceLineId: l.purchaseInvoiceLineId || l.id || 1,
-        }));
 
         const payload = {
           paymentNumber: payNum,
@@ -221,17 +234,17 @@ export default function PurchasePaymentComp() {
           paymentMethodId: pmId ? Number(pmId) : null,
           bankAccountId: values.bankAccountId ? Number(values.bankAccountId) : null,
           apAccountId: values.apAccountId ? Number(values.apAccountId) : null,
-          totalAmount: payAmount,
+          totalAmount: finalPayAmount,
           currency: extractCurrencyString(values.currency),
           exchangeRate: Number(values.exchangeRate || 1),
           referenceNo: values.chequeNo || values.referenceNo || null,
           status: values.status || "DRAFT",
           remarks: values.memo || values.remarks || null,
-          purchaseInvoiceHeaderId: invHeaderId,
+          purchaseInvoiceHeaderId: targetInvId,
           user_id: userId,
-          paymentLines: linesWithHeader,
-          lines: linesWithHeader,
-          details: linesWithHeader,
+          paymentLines: linesPayload,
+          lines: linesPayload,
+          details: linesPayload,
         };
 
         if (isEdit && editId) {
@@ -298,22 +311,27 @@ export default function PurchasePaymentComp() {
   const toggleApplyBill = (billId: string | number) => {
     const idStr = String(billId);
     let nextApplied: string[];
+    const nextAmounts = { ...billPaymentAmounts };
+
     if (appliedBillIds.includes(idStr)) {
       nextApplied = appliedBillIds.filter((id) => id !== idStr);
+      delete nextAmounts[idStr];
     } else {
       nextApplied = [...appliedBillIds, idStr];
+      const appliedBill = vendorBills.find((b: any) => String(b.id) === idStr);
+      const h = appliedBill?.header ?? appliedBill;
+      const bal = Number(h?.balanceAmount !== undefined ? h.balanceAmount : (h?.totalAmount || h?.total_amount || 0));
+      nextAmounts[idStr] = bal > 0 ? bal : Number(h?.totalAmount || h?.total_amount || 0);
     }
     setAppliedBillIds(nextApplied);
+    setBillPaymentAmounts(nextAmounts);
 
-    const total = vendorBills
-      .filter((b: any) => nextApplied.includes(String(b.id)))
-      .reduce((sum: number, b: any) => {
-        const h = b.header ?? b;
-        const bal = Number(h.balanceAmount !== undefined ? h.balanceAmount : (h.totalAmount || h.total_amount || 0));
-        return sum + (bal > 0 ? bal : Number(h.totalAmount || h.total_amount || 0));
-      }, 0);
+    const total = nextApplied.reduce((sum: number, id: string) => {
+      const bAmt = nextAmounts[id] !== undefined ? nextAmounts[id] : 0;
+      return sum + Number(bAmt);
+    }, 0);
 
-    formik.setFieldValue("totalAmount", total);
+    formik.setFieldValue("totalAmount", Number(total.toFixed(2)));
     if (nextApplied.length > 0) {
       formik.setFieldValue("purchaseInvoiceHeaderId", nextApplied[0]);
       const appliedBill = vendorBills.find((b: any) => String(b.id) === String(nextApplied[0]));
@@ -321,18 +339,42 @@ export default function PurchasePaymentComp() {
         const h = appliedBill.header ?? appliedBill;
         formik.setFieldValue("memo", `Payment for Bill #${h.invoiceNumber || h.invoice_number || appliedBill.id}`);
       }
+    } else {
+      formik.setFieldValue("purchaseInvoiceHeaderId", "");
     }
+  };
+
+  const handleBillPaymentAmountChange = (billIdStr: string, value: string, maxAmt: number) => {
+    let numVal = parseFloat(value);
+    if (isNaN(numVal) || numVal < 0) numVal = 0;
+    if (numVal > maxAmt && maxAmt > 0) {
+      toast.error(`Payment cannot exceed the due amount of ₹${maxAmt.toFixed(2)}`);
+      numVal = maxAmt;
+    }
+    const nextAmounts = { ...billPaymentAmounts, [billIdStr]: numVal };
+    setBillPaymentAmounts(nextAmounts);
+
+    const newTotal = appliedBillIds.reduce((sum, id) => {
+      const bAmt = nextAmounts[id] !== undefined ? nextAmounts[id] : 0;
+      return sum + Number(bAmt);
+    }, 0);
+    formik.setFieldValue("totalAmount", Number(newTotal.toFixed(2)));
   };
 
   const markAllBills = () => {
     const allIds = vendorBills.map((b: any) => String(b.id));
-    setAppliedBillIds(allIds);
-    const total = vendorBills.reduce((sum: number, b: any) => {
+    const nextAmounts: Record<string, number> = {};
+    let total = 0;
+    vendorBills.forEach((b: any) => {
       const h = b.header ?? b;
       const bal = Number(h.balanceAmount !== undefined ? h.balanceAmount : (h.totalAmount || h.total_amount || 0));
-      return sum + (bal > 0 ? bal : Number(h.totalAmount || h.total_amount || 0));
-    }, 0);
-    formik.setFieldValue("totalAmount", total);
+      const amt = bal > 0 ? bal : Number(h.totalAmount || h.total_amount || 0);
+      nextAmounts[String(b.id)] = amt;
+      total += amt;
+    });
+    setAppliedBillIds(allIds);
+    setBillPaymentAmounts(nextAmounts);
+    formik.setFieldValue("totalAmount", Number(total.toFixed(2)));
     if (allIds.length > 0) {
       formik.setFieldValue("purchaseInvoiceHeaderId", allIds[0]);
       formik.setFieldValue("memo", `Settlement for ${allIds.length} bills`);
@@ -341,6 +383,7 @@ export default function PurchasePaymentComp() {
 
   const unmarkAllBills = () => {
     setAppliedBillIds([]);
+    setBillPaymentAmounts({});
     formik.setFieldValue("totalAmount", 0);
     formik.setFieldValue("purchaseInvoiceHeaderId", "");
   };
@@ -384,13 +427,16 @@ export default function PurchasePaymentComp() {
         const h = firstBill.header ?? firstBill;
         setAppliedBillIds([String(firstBill.id)]);
         const bal = Number(h.balanceAmount !== undefined ? h.balanceAmount : (h.totalAmount || h.total_amount || 0));
-        formik.setFieldValue("totalAmount", bal > 0 ? bal : Number(h.totalAmount || h.total_amount || 0));
+        const amt = bal > 0 ? bal : Number(h.totalAmount || h.total_amount || 0);
+        setBillPaymentAmounts({ [String(firstBill.id)]: amt });
+        formik.setFieldValue("totalAmount", amt);
         formik.setFieldValue("purchaseInvoiceHeaderId", String(firstBill.id));
         formik.setFieldValue("invoiceNumber", h.invoiceNumber || h.invoice_number || `BILL-${firstBill.id}`);
         formik.setFieldValue("invoiceDate", h.invoiceDate || h.invoice_date || "");
         formik.setFieldValue("memo", `Payment for Bill #${h.invoiceNumber || h.invoice_number || firstBill.id}`);
       } else {
         setAppliedBillIds([]);
+        setBillPaymentAmounts({});
         formik.setFieldValue("totalAmount", 0);
         formik.setFieldValue("purchaseInvoiceHeaderId", "");
       }
@@ -399,36 +445,69 @@ export default function PurchasePaymentComp() {
 
   const handleInvoiceChange = (invId: string) => {
     formik.setFieldValue("purchaseInvoiceHeaderId", invId);
-    const inv = invoices.find((x: any) => String(x.id) === String(invId));
-    if (inv) {
-      const header = inv.header ?? inv;
-      const vId = header.vendorId ?? header.vendor_id ?? "";
-      setAppliedBillIds([String(inv.id)]);
+    setAppliedBillIds([String(invId)]);
 
-      if (vId) {
-        handleVendorChange(String(vId));
-      }
+    // Trigger API call for Purchase Invoice
+    triggerGetInvoiceById(invId)
+      .unwrap()
+      .then((res: any) => {
+        const inv = res?.result || res?.data || res;
+        if (inv) {
+          const header = inv.header ?? inv;
+          const vId = header.vendorId ?? header.vendor_id ?? "";
+          if (vId) {
+            handleVendorChange(String(vId));
+          }
 
-      formik.setFieldValue("invoiceNumber", header.invoiceNumber ?? header.invoice_number ?? "");
-      formik.setFieldValue("invoiceDate", header.invoiceDate ?? header.invoice_date ?? "");
-      const billTotal = Number(header.balanceAmount !== undefined ? header.balanceAmount : (header.totalAmount || header.total_amount || 0));
-      formik.setFieldValue("totalAmount", billTotal > 0 ? billTotal : Number(header.totalAmount || header.total_amount || 0));
+          formik.setFieldValue("invoiceNumber", header.invoiceNumber ?? header.invoice_number ?? "");
+          formik.setFieldValue("invoiceDate", header.invoiceDate ?? header.invoice_date ?? "");
+          const billTotal = Number(header.balanceAmount !== undefined ? header.balanceAmount : (header.totalAmount || header.total_amount || 0));
+          const amt = billTotal > 0 ? billTotal : Number(header.totalAmount || header.total_amount || 0);
+          setBillPaymentAmounts({ [String(inv.id || invId)]: amt });
+          formik.setFieldValue("totalAmount", amt);
 
-      const subId = header.subsidiary_id;
-      if (subId) formik.setFieldValue("subsidiary_id", String(subId));
-      if (header.class_id) formik.setFieldValue("class_id", String(header.class_id));
-      if (header.department_id) formik.setFieldValue("department_id", String(header.department_id));
-      if (header.location_id) formik.setFieldValue("location_id", String(header.location_id));
-      if (header.currency) formik.setFieldValue("currency", extractCurrencyString(header.currency));
-      formik.setFieldValue("memo", `Payment for Bill #${header.invoiceNumber || header.invoice_number || inv.id}`);
-    }
+          const subId = header.subsidiary_id;
+          if (subId) formik.setFieldValue("subsidiary_id", String(subId));
+          if (header.class_id) formik.setFieldValue("class_id", String(header.class_id));
+          if (header.department_id) formik.setFieldValue("department_id", String(header.department_id));
+          if (header.location_id) formik.setFieldValue("location_id", String(header.location_id));
+          if (header.currency) formik.setFieldValue("currency", extractCurrencyString(header.currency));
+          formik.setFieldValue("memo", `Payment for Bill #${header.invoiceNumber || header.invoice_number || inv.id || invId}`);
+        }
+      })
+      .catch(() => {
+        const inv = invoices.find((x: any) => String(x.id) === String(invId));
+        if (inv) {
+          const header = inv.header ?? inv;
+          const vId = header.vendorId ?? header.vendor_id ?? "";
+          if (vId) {
+            handleVendorChange(String(vId));
+          }
+
+          formik.setFieldValue("invoiceNumber", header.invoiceNumber ?? header.invoice_number ?? "");
+          formik.setFieldValue("invoiceDate", header.invoiceDate ?? header.invoice_date ?? "");
+          const billTotal = Number(header.balanceAmount !== undefined ? header.balanceAmount : (header.totalAmount || header.total_amount || 0));
+          const amt = billTotal > 0 ? billTotal : Number(header.totalAmount || header.total_amount || 0);
+          setBillPaymentAmounts({ [String(inv.id)]: amt });
+          formik.setFieldValue("totalAmount", amt);
+
+          const subId = header.subsidiary_id;
+          if (subId) formik.setFieldValue("subsidiary_id", String(subId));
+          if (header.class_id) formik.setFieldValue("class_id", String(header.class_id));
+          if (header.department_id) formik.setFieldValue("department_id", String(header.department_id));
+          if (header.location_id) formik.setFieldValue("location_id", String(header.location_id));
+          if (header.currency) formik.setFieldValue("currency", extractCurrencyString(header.currency));
+          formik.setFieldValue("memo", `Payment for Bill #${header.invoiceNumber || header.invoice_number || inv.id}`);
+        }
+      });
   };
 
   // URL Query Params Synchronization
   useEffect(() => {
-    if (urlBillId && invoices.length > 0) {
+    if (urlBillId) {
       setViewMode("form");
       setOpen(true);
+      setIsEdit(false);
       handleInvoiceChange(urlBillId);
     } else if (urlId && (urlAction === "view" || urlAction === "edit")) {
       setSelectedPaymentId(urlId);
@@ -444,7 +523,7 @@ export default function PurchasePaymentComp() {
       setOpen(false);
       setSelectedPaymentId(null);
     }
-  }, [urlBillId, urlId, urlAction, invoices]);
+  }, [urlBillId, urlId, urlAction]);
 
   // Sync single GET API data when retrieved
   const fetchedSinglePayment = singlePaymentData?.result || singlePaymentData?.data || singlePaymentData;
@@ -525,6 +604,25 @@ export default function PurchasePaymentComp() {
         totalAmount: Number(header.totalAmount ?? header.amount ?? 0),
         status: statusVal,
       });
+
+      const pLines = item.paymentLines || item.lines || item.details || [];
+      const billId = header.purchaseInvoiceHeaderId ?? header.purchase_invoice_header_id;
+      if (billId) {
+        setAppliedBillIds([String(billId)]);
+        setBillPaymentAmounts({ [String(billId)]: Number(header.totalAmount ?? header.amount ?? 0) });
+      } else if (pLines.length > 0) {
+        const bIds = Array.from(new Set(pLines.map((l: any) => String(l.purchaseInvoiceHeaderId || l.invoiceHeaderId)).filter(Boolean))) as string[];
+        setAppliedBillIds(bIds);
+        const amounts: Record<string, number> = {};
+        pLines.forEach((l: any) => {
+          const bId = String(l.purchaseInvoiceHeaderId || l.invoiceHeaderId || "");
+          if (bId) {
+            amounts[bId] = (amounts[bId] || 0) + Number(l.amountPaid || 0);
+          }
+        });
+        setBillPaymentAmounts(amounts);
+      }
+
       setEditId(id);
       setIsEdit(true);
       setViewMode("form");
@@ -725,21 +823,17 @@ export default function PurchasePaymentComp() {
                           <th className="p-2 border-r border-slate-300 w-12 text-center">APPLY</th>
                           <th className="p-2 border-r border-slate-300 w-28">DATE DUE</th>
                           <th className="p-2 border-r border-slate-300 w-20">TYPE</th>
-                          <th className="p-2 border-r border-slate-300 min-w-[120px]">REF NO</th>
-                          <th className="p-2 border-r border-slate-300 min-w-[130px]">INSTALLMENT REF NO</th>
-                          <th className="p-2 border-r border-slate-300 text-right w-24">ORIG. AMT</th>
-                          <th className="p-2 border-r border-slate-300 text-right w-24">AMT. DUE</th>
-                          <th className="p-2 border-r border-slate-300 w-20 text-center">CURRENCY</th>
-                          <th className="p-2 border-r border-slate-300 w-24 text-center">DISC. DATE</th>
-                          <th className="p-2 border-r border-slate-300 text-right w-24">DISC. AVAIL</th>
-                          <th className="p-2 border-r border-slate-300 text-right w-24">DISC. TAKEN</th>
-                          <th className="p-2 text-right w-28">PAYMENT</th>
+                          <th className="p-2 border-r border-slate-300 min-w-[140px]">REF NO</th>
+                          <th className="p-2 border-r border-slate-300 text-right w-28">ORIG. AMT</th>
+                          <th className="p-2 border-r border-slate-300 text-right w-28">AMT. DUE</th>
+                          <th className="p-2 border-r border-slate-300 w-24 text-center">CURRENCY</th>
+                          <th className="p-2 text-right w-36">PAYMENT</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200">
                         {billsToDisplay.length === 0 ? (
                           <tr>
-                            <td colSpan={12} className="p-6 text-center text-slate-500 font-medium italic">
+                            <td colSpan={8} className="p-6 text-center text-slate-500 font-medium italic">
                               {formik.values.vendorId ? "No open bills found for this vendor." : "Select a Payee / Vendor above to view and apply bills."}
                             </td>
                           </tr>
@@ -752,7 +846,13 @@ export default function PurchasePaymentComp() {
                             const amtDue = Number(h.balanceAmount !== undefined ? h.balanceAmount : origAmt);
                             const billNumber = h.invoiceNumber || h.invoice_number || `BILL-${bill.id}`;
                             const dueDateStr = h.dueDate || h.due_date ? new Date(h.dueDate || h.due_date).toLocaleDateString() : "—";
-                            const linePayAmt = isView ? Number(activeHeader.totalAmount || activeHeader.amount || amtDue) : amtDue;
+                            
+                            const matchedLine = activePayment?.paymentLines?.find(
+                              (l: any) => String(l.purchaseInvoiceHeaderId) === billIdStr || String(l.purchaseInvoiceLine?.invoiceHeaderId) === billIdStr
+                            );
+                            const linePayAmt = isView
+                              ? (matchedLine ? Number(matchedLine.amountPaid || 0) : Number(activeHeader.totalAmount || activeHeader.amount || amtDue))
+                              : (billPaymentAmounts[billIdStr] !== undefined ? billPaymentAmounts[billIdStr] : (amtDue > 0 ? amtDue : origAmt));
 
                             return (
                               <tr key={bill.id} className={isApplied ? "bg-sky-50/70" : "hover:bg-slate-50"}>
@@ -776,7 +876,6 @@ export default function PurchasePaymentComp() {
                                     {billNumber}
                                   </button>
                                 </td>
-                                <td className="p-2 border-r border-slate-200 text-slate-400 font-mono text-center">—</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700">
                                   ₹{origAmt.toFixed(2)}
                                 </td>
@@ -786,11 +885,25 @@ export default function PurchasePaymentComp() {
                                 <td className="p-2 border-r border-slate-200 text-center font-bold text-slate-600">
                                   {h.currency || "INR"}
                                 </td>
-                                <td className="p-2 border-r border-slate-200 text-center text-slate-400">—</td>
-                                <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-400">0.00</td>
-                                <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-400">0.00</td>
                                 <td className="p-2 text-right font-mono font-extrabold text-sky-900">
-                                  {isApplied ? `₹${linePayAmt.toFixed(2)}` : "0.00"}
+                                  {isView ? (
+                                    isApplied ? `₹${linePayAmt.toFixed(2)}` : "0.00"
+                                  ) : isApplied ? (
+                                    <div className="flex items-center justify-end space-x-1">
+                                      <span className="text-slate-500 text-xs font-semibold">₹</span>
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0.01"
+                                        max={amtDue > 0 ? amtDue : undefined}
+                                        value={billPaymentAmounts[billIdStr] !== undefined ? billPaymentAmounts[billIdStr] : (amtDue > 0 ? amtDue : "")}
+                                        onChange={(e) => handleBillPaymentAmountChange(billIdStr, e.target.value, amtDue > 0 ? amtDue : origAmt)}
+                                        className="w-28 h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono font-bold text-sky-900 bg-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 font-normal">0.00</span>
+                                  )}
                                 </td>
                               </tr>
                             );

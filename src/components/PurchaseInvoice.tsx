@@ -29,6 +29,8 @@ import {
   useGetPurchaseOrdersQuery,
   useGetPurchasePaymentsQuery,
   useGetPurchaseReturnsQuery,
+  useLazyGetGRNByIdQuery,
+  useLazyGetPurchaseOrderByIdQuery,
   useUpdatePurchaseInvoiceMutation,
 } from "../RTK/services/purchaseApi";
 
@@ -150,6 +152,8 @@ const PurchaseInvoiceComp: React.FC = () => {
   const [createPurchaseInvoice, { isLoading: isCreating }] = useCreatePurchaseInvoiceMutation();
   const [updatePurchaseInvoice, { isLoading: isUpdating }] = useUpdatePurchaseInvoiceMutation();
   const [deletePurchaseInvoice] = useDeletePurchaseInvoiceMutation();
+  const [triggerGetGRNById] = useLazyGetGRNByIdQuery();
+  const [triggerGetPOById] = useLazyGetPurchaseOrderByIdQuery();
 
   const purchaseInvoices = Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : [];
   const purchaseOrders = Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : [];
@@ -371,135 +375,144 @@ const PurchaseInvoiceComp: React.FC = () => {
     const selectedGrnId = formik.values.header.grnHeaderId;
     if (!selectedGrnId || isEdit) return;
 
-    const grnObj = grns.find((g: any) => String(g.id) === String(selectedGrnId));
-    if (!grnObj) return;
+    if (lastProcessedGrnIdRef.current === String(selectedGrnId)) return;
+    lastProcessedGrnIdRef.current = String(selectedGrnId);
 
-    const grnKey = `${selectedGrnId}_${grns.length}_${purchaseOrders.length}_${items.length}`;
-    if (lastProcessedGrnIdRef.current === grnKey) return;
-    lastProcessedGrnIdRef.current = grnKey;
+    // Trigger API call for GRN
+    triggerGetGRNById(selectedGrnId)
+      .unwrap()
+      .then(async (grnRes: any) => {
+        const grnObj = grnRes?.result || grnRes?.data || grnRes;
+        if (!grnObj) return;
 
-    // 1. Auto-populate PO Reference if available
-    const poId = grnObj.purchaseOrderId || grnObj.po_header_id || grnObj.purchaseOrder?.id;
-    if (poId) {
-      formik.setFieldValue("header.poHeaderId", String(poId));
-    }
+        const poId = grnObj.purchaseOrderId || grnObj.po_header_id || grnObj.purchaseOrder?.id;
+        if (poId) {
+          formik.setFieldValue("header.poHeaderId", String(poId));
+        }
 
-    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(poId)) || grnObj.purchaseOrder;
+        let poObj = grnObj.purchaseOrder;
+        if (poId && (!poObj || !poObj.purchaseOrderLines)) {
+          try {
+            const poRes = await triggerGetPOById(poId).unwrap();
+            poObj = poRes?.result || poRes?.data || poRes;
+          } catch (e) {
+            // fallback
+          }
+        }
 
-    // 2. Auto-populate Vendor if present on PO / GRN
-    const vendorId = grnObj.vendor_id || grnObj.vendorId || poObj?.vendor_id || poObj?.vendorId;
-    if (vendorId) {
-      formik.setFieldValue("header.vendorId", String(vendorId));
-    }
+        const vendorId = grnObj.vendor_id || grnObj.vendorId || poObj?.vendor_id || poObj?.vendorId;
+        if (vendorId) {
+          formik.setFieldValue("header.vendorId", String(vendorId));
+        }
 
-    // 3. Auto-populate Memo / Remarks from GRN
-    const grnMemo = grnObj.memo || grnObj.remarks || grnObj.comment;
-    if (grnMemo) {
-      formik.setFieldValue("header.remarks", grnMemo);
-    }
+        const grnMemo = grnObj.memo || grnObj.remarks || grnObj.comment;
+        if (grnMemo) {
+          formik.setFieldValue("header.remarks", grnMemo);
+        }
 
-    // 4. Auto-populate Location / City from PO or GRN
-    const grnLoc = poObj?.city_id || poObj?.cityId || poObj?.location_id || poObj?.locationId || grnObj.location_id || grnObj.locationId || grnObj.city_id || grnObj.godownId || grnObj.warehouseId;
-    if (grnLoc) {
-      formik.setFieldValue("header.location_id", String(grnLoc));
-    }
+        const grnLoc = poObj?.city_id || poObj?.cityId || poObj?.location_id || poObj?.locationId || grnObj.location_id || grnObj.locationId || grnObj.city_id || grnObj.godownId || grnObj.warehouseId;
+        if (grnLoc) {
+          formik.setFieldValue("header.location_id", String(grnLoc));
+        }
 
-    // 5. Auto-populate Subsidiary, Class, Department from PO if present
-    if (poObj) {
-      const subId = poObj.subsidiary_id || poObj.subsidiaryId;
-      if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
-      const classId = poObj.class_id || poObj.classId;
-      if (classId) formik.setFieldValue("header.class_id", String(classId));
-      const deptId = poObj.department_id || poObj.departmentId;
-      if (deptId) formik.setFieldValue("header.department_id", String(deptId));
-    }
+        if (poObj) {
+          const subId = poObj.subsidiary_id || poObj.subsidiaryId;
+          if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
+          const classId = poObj.class_id || poObj.classId;
+          if (classId) formik.setFieldValue("header.class_id", String(classId));
+          const deptId = poObj.department_id || poObj.departmentId;
+          if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+        }
 
-    // 6. Auto-populate Line Items from GRN line details
-    const grnLines = grnObj.lineItems || grnObj.grnDetails || grnObj.details || grnObj.line_items || [];
-    const poLines = poObj?.lineItems || poObj?.purchaseOrderLines || poObj?.line_items || poObj?.details || [];
+        const grnLines = grnObj.lineItems || grnObj.grnDetails || grnObj.details || grnObj.line_items || [];
+        const poLines = poObj?.lineItems || poObj?.purchaseOrderLines || poObj?.line_items || poObj?.details || [];
 
-    if (Array.isArray(grnLines) && grnLines.length > 0) {
-      const mappedLines = grnLines.map((gLine: any) => {
-        const matchedPoLine = poLines.find(
-          (pol: any) => String(pol.id) === String(gLine.purchaseOrderLineId || gLine.po_line_id)
-        ) || poLines.find(
-          (pol: any) => String(pol.itemId || pol.item_id) === String(gLine.itemId || gLine.item_id)
-        );
+        if (Array.isArray(grnLines) && grnLines.length > 0) {
+          const mappedLines = grnLines.map((gLine: any) => {
+            const matchedPoLine = poLines.find(
+              (pol: any) => String(pol.id) === String(gLine.purchaseOrderLineId || gLine.po_line_id)
+            ) || poLines.find(
+              (pol: any) => String(pol.itemId || pol.item_id) === String(gLine.itemId || gLine.item_id)
+            );
 
-        const itemId = String(gLine.itemId ?? gLine.item_id ?? matchedPoLine?.itemId ?? matchedPoLine?.item_id ?? "");
-        const itemObj = items.find((i: any) => String(i.id) === String(itemId));
-        const uomId = String(gLine.uom_id ?? gLine.uomId ?? matchedPoLine?.uom_id ?? itemObj?.uom_id ?? "");
+            const itemId = String(gLine.itemId ?? gLine.item_id ?? matchedPoLine?.itemId ?? matchedPoLine?.item_id ?? "");
+            const itemObj = items.find((i: any) => String(i.id) === String(itemId));
+            const uomId = String(gLine.uom_id ?? gLine.uomId ?? matchedPoLine?.uom_id ?? itemObj?.uom_id ?? "");
 
-        const quantity = Number(
-          gLine.acceptedQty ?? gLine.accepted_quantity ?? gLine.receivedQty ?? gLine.received_quantity ?? gLine.orderedQty ?? 1
-        );
+            const quantity = Number(
+              gLine.acceptedQty ?? gLine.accepted_quantity ?? gLine.receivedQty ?? gLine.received_quantity ?? gLine.orderedQty ?? 1
+            );
 
-        const unitPrice = Number(
-          gLine.purchaseOrderLine?.rate ??
-          gLine.rate ??
-          gLine.unitPrice ??
-          gLine.unit_price ??
-          matchedPoLine?.rate ??
-          matchedPoLine?.unitPrice ??
-          matchedPoLine?.unit_price ??
-          matchedPoLine?.price ??
-          itemObj?.purchase_price ??
-          itemObj?.cost_price ??
-          itemObj?.default_rate ??
-          0
-        );
+            const unitPrice = Number(
+              gLine.purchaseOrderLine?.rate ??
+              gLine.rate ??
+              gLine.unitPrice ??
+              gLine.unit_price ??
+              matchedPoLine?.rate ??
+              matchedPoLine?.unitPrice ??
+              matchedPoLine?.unit_price ??
+              matchedPoLine?.price ??
+              itemObj?.purchase_price ??
+              itemObj?.cost_price ??
+              itemObj?.default_rate ??
+              0
+            );
 
-        const discountPercent = Number(
-          matchedPoLine?.discount_percent ??
-          matchedPoLine?.discountPercent ??
-          gLine.discount_percent ??
-          gLine.discountPercent ??
-          0
-        );
-        const taxPercent = Number(
-          matchedPoLine?.tax_rate ??
-          matchedPoLine?.taxRate ??
-          matchedPoLine?.tax_percent ??
-          matchedPoLine?.taxPercent ??
-          gLine.purchaseOrderLine?.tax_rate ??
-          gLine.purchaseOrderLine?.taxRate ??
-          gLine.purchaseOrderLine?.tax_percent ??
-          gLine.purchaseOrderLine?.taxPercent ??
-          gLine.tax_rate ??
-          gLine.taxRate ??
-          gLine.tax_percent ??
-          gLine.taxPercent ??
-          itemObj?.hsnSacCode?.taxPercentage ??
-          itemObj?.hsnSac?.taxPercentage ??
-          0
-        );
+            const discountPercent = Number(
+              matchedPoLine?.discount_percent ??
+              matchedPoLine?.discountPercent ??
+              gLine.discount_percent ??
+              gLine.discountPercent ??
+              0
+            );
+            const taxPercent = Number(
+              matchedPoLine?.tax_rate ??
+              matchedPoLine?.taxRate ??
+              matchedPoLine?.tax_percent ??
+              matchedPoLine?.taxPercent ??
+              gLine.purchaseOrderLine?.tax_rate ??
+              gLine.purchaseOrderLine?.taxRate ??
+              gLine.purchaseOrderLine?.tax_percent ??
+              gLine.purchaseOrderLine?.taxPercent ??
+              gLine.tax_rate ??
+              gLine.taxRate ??
+              gLine.tax_percent ??
+              gLine.taxPercent ??
+              itemObj?.hsnSacCode?.taxPercentage ??
+              itemObj?.hsnSac?.taxPercentage ??
+              0
+            );
 
-        const baseLine: PurchaseInvoiceLineForm = {
-          invoiceHeaderId: "",
-          poLineId: String(gLine.purchaseOrderLineId || gLine.po_line_id || matchedPoLine?.id || ""),
-          grnLineId: String(gLine.id || ""),
-          itemId,
-          uom_id: uomId,
-          description: gLine.item?.item_name || itemObj?.item_name || gLine.remarks || "",
-          batchNo: gLine.batchNo || "",
-          quantity,
-          unitPrice,
-          discountPercent,
-          discountAmount: 0,
-          taxPercent,
-          taxAmount: 0,
-          lineTotal: 0,
-          user_id: userId,
-          remarks: gLine.remarks || "",
-        };
+            const baseLine: PurchaseInvoiceLineForm = {
+              invoiceHeaderId: "",
+              poLineId: String(gLine.purchaseOrderLineId || gLine.po_line_id || matchedPoLine?.id || ""),
+              grnLineId: String(gLine.id || ""),
+              itemId,
+              uom_id: uomId,
+              description: gLine.item?.item_name || itemObj?.item_name || gLine.remarks || "",
+              batchNo: gLine.batchNo || "",
+              quantity,
+              unitPrice,
+              discountPercent,
+              discountAmount: 0,
+              taxPercent,
+              taxAmount: 0,
+              lineTotal: 0,
+              user_id: userId,
+              remarks: gLine.remarks || "",
+            };
 
-        const calc = calculateLine(baseLine);
-        return { ...baseLine, ...calc };
+            const calc = calculateLine(baseLine);
+            return { ...baseLine, ...calc };
+          });
+
+          formik.setFieldValue("lineItems", mappedLines);
+        }
+      })
+      .catch((err: any) => {
+        console.error("Failed to fetch GRN by ID:", err);
       });
-
-      formik.setFieldValue("lineItems", mappedLines);
-    }
-  }, [formik.values.header.grnHeaderId, grns, purchaseOrders, items, isEdit, userId]);
+  }, [formik.values.header.grnHeaderId, isEdit, items, userId]);
 
   // Auto-populate all details (Vendor, Items, Location, Memo, Subsidiary) when Purchase Order is selected directly (and no GRN is selected)
   const lastProcessedPoIdRef = React.useRef<string | null>(null);
@@ -509,95 +522,95 @@ const PurchaseInvoiceComp: React.FC = () => {
     const selectedGrnId = formik.values.header.grnHeaderId;
     if (!selectedPoId || selectedGrnId || isEdit) return;
 
-    const poObj = purchaseOrders.find((p: any) => String(p.id) === String(selectedPoId));
-    if (!poObj) return;
+    if (lastProcessedPoIdRef.current === String(selectedPoId)) return;
+    lastProcessedPoIdRef.current = String(selectedPoId);
 
-    const poKey = `${selectedPoId}_${purchaseOrders.length}_${items.length}`;
-    if (lastProcessedPoIdRef.current === poKey) return;
-    lastProcessedPoIdRef.current = poKey;
+    // Trigger API call for PO
+    triggerGetPOById(selectedPoId)
+      .unwrap()
+      .then((poRes: any) => {
+        const poObj = poRes?.result || poRes?.data || poRes;
+        if (!poObj) return;
 
-    // 1. Auto-populate Vendor if present on PO
-    const vendorId = poObj.vendor_id || poObj.vendorId || poObj.vendor?.id;
-    if (vendorId) {
-      formik.setFieldValue("header.vendorId", String(vendorId));
-    }
+        const vendorId = poObj.vendor_id || poObj.vendorId || poObj.vendor?.id;
+        if (vendorId) {
+          formik.setFieldValue("header.vendorId", String(vendorId));
+        }
 
-    // 2. Auto-populate Memo / Remarks from PO
-    const poMemo = poObj.memo || poObj.remarks;
-    if (poMemo) {
-      formik.setFieldValue("header.remarks", poMemo);
-    }
+        const poMemo = poObj.memo || poObj.remarks;
+        if (poMemo) {
+          formik.setFieldValue("header.remarks", poMemo);
+        }
 
-    // 3. Auto-populate Location / City from PO
-    const poLoc = poObj.city_id || poObj.cityId || poObj.location_id || poObj.locationId || poObj.location?.id || poObj.city?.id;
-    if (poLoc) {
-      formik.setFieldValue("header.location_id", String(poLoc));
-    }
+        const poLoc = poObj.city_id || poObj.cityId || poObj.location_id || poObj.locationId || poObj.location?.id || poObj.city?.id;
+        if (poLoc) {
+          formik.setFieldValue("header.location_id", String(poLoc));
+        }
 
-    // 4. Auto-populate Subsidiary, Class, Department from PO
-    const subId = poObj.subsidiary_id || poObj.subsidiaryId;
-    if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
-    const classId = poObj.class_id || poObj.classId;
-    if (classId) formik.setFieldValue("header.class_id", String(classId));
-    const deptId = poObj.department_id || poObj.departmentId;
-    if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+        const subId = poObj.subsidiary_id || poObj.subsidiaryId;
+        if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
+        const classId = poObj.class_id || poObj.classId;
+        if (classId) formik.setFieldValue("header.class_id", String(classId));
+        const deptId = poObj.department_id || poObj.departmentId;
+        if (deptId) formik.setFieldValue("header.department_id", String(deptId));
 
-    // 5. Auto-populate Currency from PO
-    const currId = poObj.currency_id || poObj.currencyId;
-    if (currId) {
-      formik.setFieldValue("header.currency_id", String(currId));
-    }
+        const currId = poObj.currency_id || poObj.currencyId;
+        if (currId) {
+          formik.setFieldValue("header.currency_id", String(currId));
+        }
 
-    // 6. Auto-populate Line Items from PO lines
-    const poLines = poObj.purchaseOrderLines || poObj.lineItems || poObj.line_items || poObj.details || [];
+        const poLines = poObj.purchaseOrderLines || poObj.lineItems || poObj.line_items || poObj.details || [];
+        if (Array.isArray(poLines) && poLines.length > 0) {
+          const mappedLines = poLines.map((poLine: any) => {
+            const itemId = String(poLine.itemId ?? poLine.item_id ?? poLine.item?.id ?? "");
+            const itemObj = items.find((i: any) => String(i.id) === String(itemId));
+            const uomId = String(poLine.uom_id ?? poLine.uomId ?? itemObj?.uom_id ?? "");
 
-    if (Array.isArray(poLines) && poLines.length > 0) {
-      const mappedLines = poLines.map((poLine: any) => {
-        const itemId = String(poLine.itemId ?? poLine.item_id ?? poLine.item?.id ?? "");
-        const itemObj = items.find((i: any) => String(i.id) === String(itemId));
-        const uomId = String(poLine.uom_id ?? poLine.uomId ?? itemObj?.uom_id ?? "");
+            const quantity = Number(poLine.quantity ?? poLine.qty ?? 1);
+            const unitPrice = Number(poLine.rate ?? poLine.unitPrice ?? poLine.unit_price ?? itemObj?.purchase_price ?? itemObj?.cost_price ?? itemObj?.default_rate ?? 0);
+            const discountPercent = Number(poLine.discount_percent ?? poLine.discountPercent ?? 0);
+            const taxPercent = Number(
+              poLine.tax_rate ??
+              poLine.taxRate ??
+              poLine.tax_percent ??
+              poLine.taxPercent ??
+              poLine.hsnSac?.taxPercentage ??
+              poLine.hsnSacCode?.taxPercentage ??
+              itemObj?.hsnSacCode?.taxPercentage ??
+              itemObj?.hsnSac?.taxPercentage ??
+              0
+            );
 
-        const quantity = Number(poLine.quantity ?? poLine.qty ?? 1);
-        const unitPrice = Number(poLine.rate ?? poLine.unitPrice ?? poLine.unit_price ?? itemObj?.purchase_price ?? itemObj?.cost_price ?? itemObj?.default_rate ?? 0);
-        const discountPercent = Number(poLine.discount_percent ?? poLine.discountPercent ?? 0);
-        const taxPercent = Number(
-          poLine.tax_rate ??
-          poLine.taxRate ??
-          poLine.tax_percent ??
-          poLine.taxPercent ??
-          poLine.hsnSac?.taxPercentage ??
-          poLine.hsnSacCode?.taxPercentage ??
-          itemObj?.hsnSacCode?.taxPercentage ??
-          itemObj?.hsnSac?.taxPercentage ??
-          0
-        );
+            const baseLine: PurchaseInvoiceLineForm = {
+              invoiceHeaderId: "",
+              poLineId: String(poLine.id || ""),
+              grnLineId: "",
+              itemId,
+              uom_id: uomId,
+              description: poLine.item?.item_name || itemObj?.item_name || poLine.remarks || "",
+              batchNo: poLine.batchNo || "",
+              quantity,
+              unitPrice,
+              discountPercent,
+              discountAmount: 0,
+              taxPercent,
+              taxAmount: 0,
+              lineTotal: 0,
+              user_id: userId,
+              remarks: poLine.remarks || "",
+            };
 
-        const baseLine: PurchaseInvoiceLineForm = {
-          invoiceHeaderId: "",
-          poLineId: String(poLine.id || ""),
-          grnLineId: "",
-          itemId,
-          uom_id: uomId,
-          description: poLine.item?.item_name || itemObj?.item_name || poLine.remarks || "",
-          batchNo: poLine.batchNo || "",
-          quantity,
-          unitPrice,
-          discountPercent,
-          discountAmount: 0,
-          taxPercent,
-          taxAmount: 0,
-          lineTotal: 0,
-          user_id: userId,
-          remarks: poLine.remarks || "",
-        };
+            const calc = calculateLine(baseLine);
+            return { ...baseLine, ...calc };
+          });
 
-        const calc = calculateLine(baseLine);
-        return { ...baseLine, ...calc };
+          formik.setFieldValue("lineItems", mappedLines);
+        }
+      })
+      .catch((err: any) => {
+        console.error("Failed to fetch PO by ID:", err);
       });
-
-      formik.setFieldValue("lineItems", mappedLines);
-    }
-  }, [formik.values.header.poHeaderId, formik.values.header.grnHeaderId, purchaseOrders, items, isEdit, userId]);
+  }, [formik.values.header.poHeaderId, formik.values.header.grnHeaderId, items, isEdit, userId]);
 
   // Sync state with URL search params (Single Bill View / PO / GRN link support)
   useEffect(() => {
@@ -606,12 +619,14 @@ const PurchaseInvoiceComp: React.FC = () => {
     const currentAction = searchParams.get("action");
     const currentId = searchParams.get("id");
 
-    if (urlPoId && !formik.values.header.poHeaderId) {
-      formik.setFieldValue("header.poHeaderId", urlPoId);
-      setViewMode("form");
-    } else if (urlGrnId && !formik.values.header.grnHeaderId) {
+    if (urlGrnId) {
       formik.setFieldValue("header.grnHeaderId", urlGrnId);
       setViewMode("form");
+      setIsEdit(false);
+    } else if (urlPoId) {
+      formik.setFieldValue("header.poHeaderId", urlPoId);
+      setViewMode("form");
+      setIsEdit(false);
     } else if (currentAction === "create") {
       setViewMode("form");
       setIsEdit(false);
@@ -629,8 +644,13 @@ const PurchaseInvoiceComp: React.FC = () => {
           setViewMode("view");
         }
       }
+    } else if (currentId && currentAction === "edit") {
+      const inv = (singleInvoiceData?.result || singleInvoiceData?.data || singleInvoiceData) || purchaseInvoices.find((i: any) => String(i.id) === String(currentId));
+      if (inv && (!isEdit || String(editId) !== String(currentId))) {
+        handleEdit(currentId, inv);
+      }
     }
-  }, [searchParams, singleInvoiceData, purchaseInvoices]);
+  }, [searchParams, singleInvoiceData]);
 
   const updateLineItem = (index: number, key: keyof PurchaseInvoiceLineForm, value: any) => {
     const updated = [...formik.values.lineItems];
@@ -742,6 +762,65 @@ const PurchaseInvoiceComp: React.FC = () => {
     const lines = inv.lineItems || inv.purchaseInvoiceLines || [];
     const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
 
+    const linkedGrn = grns.find((g: any) => String(g.id) === String(header.grnHeaderId || header.grn_header_id));
+    const poId = header.poHeaderId || header.po_header_id || header.purchase_order_id || linkedGrn?.purchaseOrderId || linkedGrn?.po_header_id;
+    const linkedPo = purchaseOrders.find((p: any) => String(p.id) === String(poId));
+    const vendorObj = vendors.find((v: any) => String(v.id) === String(header.vendorId || header.vendor_id || linkedGrn?.vendor_id || linkedPo?.vendor_id));
+
+    const firstLineItemWithLoc = lines.map((l: any) => items.find((itm: any) => String(itm.id) === String(l.itemId || l.item_id))).find((itm: any) => itm?.location_id || itm?.city_id);
+
+    const resolvedLocationId = String(
+      header.location_id ||
+      header.city_id ||
+      header.locationId ||
+      header.cityId ||
+      header.location?.id ||
+      header.city?.id ||
+      linkedPo?.city_id ||
+      linkedPo?.location_id ||
+      linkedPo?.cityId ||
+      linkedPo?.locationId ||
+      linkedGrn?.location_id ||
+      linkedGrn?.city_id ||
+      linkedGrn?.locationId ||
+      linkedGrn?.warehouseId ||
+      linkedGrn?.godownId ||
+      firstLineItemWithLoc?.location_id ||
+      firstLineItemWithLoc?.city_id ||
+      vendorObj?.city_id ||
+      vendorObj?.location_id ||
+      (citiesList.length > 0 ? citiesList[0].id : "")
+    );
+
+    const resolvedSubsidiaryId = String(
+      header.subsidiary_id ||
+      header.subsidiaryId ||
+      header.subsidiary?.id ||
+      linkedPo?.subsidiary_id ||
+      linkedPo?.subsidiaryId ||
+      vendorObj?.primary_subsidiary_id ||
+      vendorObj?.subsidiary_id ||
+      (subsidiaries.length > 0 ? subsidiaries[0].id : "")
+    );
+
+    const resolvedClassId = String(
+      header.class_id ||
+      header.classId ||
+      header.class?.id ||
+      linkedPo?.class_id ||
+      linkedPo?.classId ||
+      ""
+    );
+
+    const resolvedDeptId = String(
+      header.department_id ||
+      header.departmentId ||
+      header.department?.id ||
+      linkedPo?.department_id ||
+      linkedPo?.departmentId ||
+      ""
+    );
+
     formik.setValues({
       header: {
         invoiceNumber: header.invoiceNumber || header.invoice_number || "",
@@ -763,10 +842,10 @@ const PurchaseInvoiceComp: React.FC = () => {
         totalAmount: Number(header.totalAmount || 0),
         paidAmount: Number(header.paidAmount || 0),
         balanceAmount: Number(header.balanceAmount || 0),
-        subsidiary_id: String(header.subsidiary_id || ""),
-        class_id: String(header.class_id || ""),
-        department_id: String(header.department_id || ""),
-        location_id: String(header.location_id || header.city_id || ""),
+        subsidiary_id: resolvedSubsidiaryId,
+        class_id: resolvedClassId,
+        department_id: resolvedDeptId,
+        location_id: resolvedLocationId,
         status: header.status || "DRAFT",
         remarks: header.remarks || "",
         user_id: header.user_id || userId,
@@ -972,6 +1051,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                         <tr>
                           <th className="p-2 border-r border-slate-400 w-10 text-center">#</th>
                           <th className="p-2 border-r border-slate-400 min-w-[180px]">ITEM *</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[160px]">DESCRIPTION</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">QTY *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">UNIT PRICE (₹) *</th>
                           <th className="p-2 border-r border-slate-400 w-20 text-right">DISCOUNT %</th>
@@ -987,6 +1067,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                           const itemObj = items.find((i: any) => String(i.id) === String(line.itemId || line.item_id));
                           const selectedUom = uoms.find((u: any) => String(u.id) === String(line.uom_id || itemObj?.uom_id));
                           const allowsDecimals = isDecimalAllowedForUOM(selectedUom);
+                          const lineDesc = line.description || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || "—";
 
                           if (isView) {
                             const lQty = Number(line.quantity || 0);
@@ -999,6 +1080,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                               <tr key={idx} className="hover:bg-slate-50">
                                 <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
                                 <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">{line.item?.item_name || itemObj?.item_name || `Item #${line.itemId}`}</td>
+                                <td className="p-2 border-r border-slate-200 text-slate-700">{lineDesc}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold">{lQty}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lPrice.toFixed(2)}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">{line.discountPercent || 0}%</td>
@@ -1030,6 +1112,15 @@ const PurchaseInvoiceComp: React.FC = () => {
                                     </option>
                                   ))}
                                 </select>
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="text"
+                                  value={lineDesc}
+                                  disabled={true}
+                                  placeholder="Item Description"
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 text-slate-700 font-medium cursor-not-allowed"
+                                />
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
@@ -1325,7 +1416,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                           ? "bg-amber-100 text-amber-800 border-amber-200"
                           : "bg-emerald-100 text-emerald-800 border-emerald-200"
                           }`}>
-                          {activeHeader.status || "DRAFT"}
+                          {String(activeHeader.status || "").toUpperCase() === "POSTED" ? "APPROVED" : activeHeader.status || "DRAFT"}
                         </span>
                       </div>
                     </div>
@@ -1721,8 +1812,12 @@ const PurchaseInvoiceComp: React.FC = () => {
                       {inv.dueDate || inv.due_date ? new Date(inv.dueDate || inv.due_date).toLocaleDateString() : "—"}
                     </td>
                     <td className="p-2 text-center">
-                      <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase bg-sky-100 text-sky-800 border border-sky-200">
-                        {inv.status || "DRAFT"}
+                      <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${
+                        String(inv.status || "").toUpperCase() === "DRAFT"
+                          ? "bg-amber-100 text-amber-800 border-amber-200"
+                          : "bg-emerald-100 text-emerald-800 border-emerald-200"
+                      }`}>
+                        {String(inv.status || "").toUpperCase() === "POSTED" ? "APPROVED" : inv.status || "DRAFT"}
                       </span>
                     </td>
                   </tr>

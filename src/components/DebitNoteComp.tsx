@@ -19,9 +19,15 @@ import {
   useCreateDebitNoteMutation,
   useDeleteDebitNoteMutation,
   useGetDebitNotesQuery,
+  useLazyGetDebitNotesQuery,
+  useGetDebitNoteByIdQuery,
+  useLazyGetDebitNoteByIdQuery,
   useUpdateDebitNoteMutation,
 } from "../RTK/services/debitNoteApi";
-import { useGetPurchaseInvoicesQuery, useGetPurchaseReturnsQuery } from "../RTK/services/purchaseApi";
+import { useGetPurchaseInvoicesQuery,
+  useLazyGetPurchaseInvoiceByIdQuery,
+  useGetPurchaseReturnsQuery,
+  useLazyGetPurchaseReturnByIdQuery } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
 import { GLImpactSubtab } from "./Layout/GLImpactSubtab";
@@ -58,6 +64,9 @@ export default function DebitNoteComp() {
   const [createDebitNote, { isLoading: isCreating }] = useCreateDebitNoteMutation();
   const [updateDebitNote, { isLoading: isUpdating }] = useUpdateDebitNoteMutation();
   const [deleteDebitNote] = useDeleteDebitNoteMutation();
+  const [triggerGetPurchaseReturnById] = useLazyGetPurchaseReturnByIdQuery();
+  const [triggerGetInvoiceById] = useLazyGetPurchaseInvoiceByIdQuery();
+  const [triggerGetDebitNoteById] = useLazyGetDebitNoteByIdQuery();
 
   const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData) ? debitNotesData : []), [debitNotesData]);
   const invoices = useMemo(() => (Array.isArray(invoicesData?.result) ? invoicesData.result : Array.isArray(invoicesData?.data) ? invoicesData.data : Array.isArray(invoicesData) ? invoicesData : []), [invoicesData]);
@@ -118,24 +127,30 @@ export default function DebitNoteComp() {
           lines: [],
         };
 
+        let savedId = editId;
         if (isEdit && editId) {
-          await updateDebitNote({ id: editId, body: payload }).unwrap();
-          toast.success("Debit Note updated successfully.");
+          const res = await updateDebitNote({ id: editId, body: payload }).unwrap();
+          toast.success("Vendor Credit updated successfully.");
+          savedId = res?.result?.id || res?.data?.id || res?.result?.header?.id || res?.data?.header?.id || editId;
         } else {
-          await createDebitNote(payload).unwrap();
-          toast.success("Debit Note recorded successfully.");
+          const res = await createDebitNote(payload).unwrap();
+          toast.success("Vendor Credit recorded successfully.");
+          savedId = res?.result?.id || res?.data?.id || res?.result?.header?.id || res?.data?.header?.id || res?.id;
         }
-        const returnId = searchParams.get("returnId");
-        if (returnId) {
-          navigate(`/purchase-return?action=view&id=${returnId}`);
+        if (refetchDebitNotes) refetchDebitNotes();
+        if (savedId) {
+          setSelectedDebitNote({ id: savedId, header: payload.header, ...payload });
+          setViewMode("view");
+          setIsEdit(false);
+          setEditId(null);
+          setSearchParams({ action: "view", id: String(savedId) });
         } else {
           setViewMode("list");
           setIsEdit(false);
           setEditId(null);
           setSearchParams({});
-          formik.resetForm();
-          refetchDebitNotes();
         }
+        formik.resetForm();
       } catch (error: any) {
         toast.error(error?.data?.message || "Something went wrong.");
       }
@@ -184,103 +199,131 @@ export default function DebitNoteComp() {
     const invoiceId = searchParams.get("invoiceId");
 
     if (returnId) {
-      if (refetchPurchaseReturns) refetchPurchaseReturns();
       setViewMode("form");
       setIsEdit(false);
-      const retObj = purchaseReturns.find((r: any) => String(r.id) === String(returnId));
-      if (retObj) {
-        const header = retObj.header || retObj;
-        const statusVal = String(header.status || retObj.status || "").toUpperCase();
-        if (statusVal !== "FULFILLED" && statusVal !== "RETURNED") {
-          toast.error(`Purchase Return #${header.returnNumber || header.return_number || returnId} must be FULFILLED before creating a Vendor Credit.`);
-          setViewMode("list");
-          setSearchParams({});
-          return;
-        }
-        if (header.vendorId || header.vendor_id) {
-          formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
-        }
-        if (header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id) {
-          formik.setFieldValue("purchaseInvoiceHeaderId", String(header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id));
-        }
 
-        const retLines = retObj.details || retObj.lineItems || retObj.purchaseReturnLines || retObj.purchase_return_lines || [];
-        let subtotal = Number(header.subtotal || 0);
-        let discountAmount = Number(header.discountAmount || header.discount_amount || 0);
-        let taxAmount = Number(header.taxAmount || header.tax_amount || 0);
-        let totalAmt = Number(header.totalAmount || header.total_amount || 0);
+      triggerGetPurchaseReturnById(returnId)
+        .unwrap()
+        .then((res: any) => {
+          const retObj = res?.result || res?.data || res;
+          if (!retObj) return;
 
-        if (retLines.length > 0) {
-          if (subtotal === 0) {
-            subtotal = retLines.reduce((acc: number, l: any) => {
-              const q = Number(l.returnQty || l.return_quantity || l.quantity || 0);
-              const p = Number(l.unitPrice || l.unit_price || l.rate || 0);
-              return acc + (q * p);
-            }, 0);
+          const header = retObj.header || retObj;
+          const statusVal = String(header.status || retObj.status || "").toUpperCase();
+          if (statusVal !== "FULFILLED" && statusVal !== "RETURNED") {
+            toast.error(`Purchase Return #${header.returnNumber || header.return_number || returnId} must be FULFILLED before creating a Vendor Credit.`);
+            setViewMode("list");
+            setSearchParams({});
+            return;
           }
-          if (discountAmount === 0) {
-            discountAmount = retLines.reduce((acc: number, l: any) => acc + Number(l.discountAmount || l.discount_amount || 0), 0);
-          }
-          if (taxAmount === 0) {
-            taxAmount = retLines.reduce((acc: number, l: any) => acc + Number(l.taxAmount || l.tax_amount || 0), 0);
-          }
-          if (totalAmt === 0) {
-            totalAmt = Number((subtotal - discountAmount + taxAmount).toFixed(2));
-          }
-        }
 
-        formik.setFieldValue("subtotal", Number(subtotal.toFixed(2)));
-        formik.setFieldValue("discountAmount", Number(discountAmount.toFixed(2)));
-        formik.setFieldValue("taxAmount", Number(taxAmount.toFixed(2)));
-        const finalNet = totalAmt > 0 ? totalAmt : Math.max(0, Number((subtotal - discountAmount + taxAmount).toFixed(2)));
-        formik.setFieldValue("amount", finalNet);
+          if (header.vendorId || header.vendor_id) {
+            formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
+          }
+          if (header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id) {
+            formik.setFieldValue("purchaseInvoiceHeaderId", String(header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id));
+          }
 
-        if (header.subsidiary_id || header.subsidiaryId) {
-          formik.setFieldValue("subsidiary_id", String(header.subsidiary_id || header.subsidiaryId));
-        }
-        if (header.class_id || header.classId) {
-          formik.setFieldValue("class_id", String(header.class_id || header.classId));
-        }
-        if (header.department_id || header.departmentId) {
-          formik.setFieldValue("department_id", String(header.department_id || header.departmentId));
-        }
-        if (header.currency_id || header.currencyId) {
-          formik.setFieldValue("currency_id", String(header.currency_id || header.currencyId));
-        }
-      }
+          const retLines = retObj.details || retObj.lineItems || retObj.purchaseReturnLines || retObj.purchase_return_lines || [];
+          let subtotal = Number(header.subtotal || 0);
+          let discountAmount = Number(header.discountAmount || header.discount_amount || 0);
+          let taxAmount = Number(header.taxAmount || header.tax_amount || 0);
+          let totalAmt = Number(header.totalAmount || header.total_amount || 0);
+
+          if (retLines.length > 0) {
+            if (subtotal === 0) {
+              subtotal = retLines.reduce((acc: number, l: any) => {
+                const q = Number(l.returnQty || l.return_quantity || l.quantity || 0);
+                const p = Number(l.unitPrice || l.unit_price || l.rate || 0);
+                return acc + (q * p);
+              }, 0);
+            }
+            if (discountAmount === 0) {
+              discountAmount = retLines.reduce((acc: number, l: any) => acc + Number(l.discountAmount || l.discount_amount || 0), 0);
+            }
+            if (taxAmount === 0) {
+              taxAmount = retLines.reduce((acc: number, l: any) => acc + Number(l.taxAmount || l.tax_amount || 0), 0);
+            }
+            if (totalAmt === 0) {
+              totalAmt = Number((subtotal - discountAmount + taxAmount).toFixed(2));
+            }
+          }
+
+          formik.setFieldValue("subtotal", Number(subtotal.toFixed(2)));
+          formik.setFieldValue("discountAmount", Number(discountAmount.toFixed(2)));
+          formik.setFieldValue("taxAmount", Number(taxAmount.toFixed(2)));
+          const finalNet = totalAmt > 0 ? totalAmt : Math.max(0, Number((subtotal - discountAmount + taxAmount).toFixed(2)));
+          formik.setFieldValue("amount", finalNet);
+
+          if (header.subsidiary_id || header.subsidiaryId) {
+            formik.setFieldValue("subsidiary_id", String(header.subsidiary_id || header.subsidiaryId));
+          }
+          if (header.class_id || header.classId) {
+            formik.setFieldValue("class_id", String(header.class_id || header.classId));
+          }
+          if (header.department_id || header.departmentId) {
+            formik.setFieldValue("department_id", String(header.department_id || header.departmentId));
+          }
+          if (header.currency_id || header.currencyId) {
+            formik.setFieldValue("currency_id", String(header.currency_id || header.currencyId));
+          }
+          formik.setFieldValue("reason", `Vendor Credit against Return Authorization #${header.returnNumber || header.return_number || returnId}`);
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch Return by ID for vendor credit:", err);
+        });
     } else if (invoiceId) {
       setViewMode("form");
       setIsEdit(false);
-      const invObj = invoices.find((i: any) => String(i.id) === String(invoiceId));
-      if (invObj) {
-        const header = invObj.header || invObj;
-        if (header.vendorId || header.vendor_id) {
-          formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
-        }
-        formik.setFieldValue("purchaseInvoiceHeaderId", String(invoiceId));
 
-        const sub = Number(header.subtotal || 0);
-        const disc = Number(header.discountAmount || header.discount_amount || 0);
-        const tax = Number(header.taxAmount || header.tax_amount || 0);
-        const total = Number(header.totalAmount || header.total_amount || 0);
+      triggerGetInvoiceById(invoiceId)
+        .unwrap()
+        .then((res: any) => {
+          const invObj = res?.result || res?.data || res;
+          if (!invObj) return;
 
-        formik.setFieldValue("subtotal", Number(sub.toFixed(2)));
-        formik.setFieldValue("discountAmount", Number(disc.toFixed(2)));
-        formik.setFieldValue("taxAmount", Number(tax.toFixed(2)));
-        formik.setFieldValue("amount", total > 0 ? total : Math.max(0, Number((sub - disc + tax).toFixed(2))));
-      }
+          const header = invObj.header || invObj;
+          if (header.vendorId || header.vendor_id) {
+            formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
+          }
+          formik.setFieldValue("purchaseInvoiceHeaderId", String(invoiceId));
+
+          const sub = Number(header.subtotal || 0);
+          const disc = Number(header.discountAmount || header.discount_amount || 0);
+          const tax = Number(header.taxAmount || header.tax_amount || 0);
+          const total = Number(header.totalAmount || header.total_amount || 0);
+
+          formik.setFieldValue("subtotal", Number(sub.toFixed(2)));
+          formik.setFieldValue("discountAmount", Number(disc.toFixed(2)));
+          formik.setFieldValue("taxAmount", Number(tax.toFixed(2)));
+          formik.setFieldValue("amount", total > 0 ? total : Math.max(0, Number((sub - disc + tax).toFixed(2))));
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch Invoice by ID for vendor credit:", err);
+        });
     } else if (urlAction === "create") {
       toast.error("Vendor Credits must be initiated from a fulfilled Purchase Return or Invoice.");
       setViewMode("list");
       setSearchParams({});
     } else if (urlId && urlAction === "view") {
-      const dn = debitNotes.find((d: any) => String(d.id) === String(urlId));
-      if (dn) {
-        setSelectedDebitNote(dn);
-        setViewMode("view");
-      }
+      triggerGetDebitNoteById(urlId)
+        .unwrap()
+        .then((res: any) => {
+          const dn = res?.result || res?.data || res;
+          if (dn) {
+            setSelectedDebitNote(dn);
+            setViewMode("view");
+          }
+        })
+        .catch(() => {
+          const dn = debitNotes.find((d: any) => String(d.id) === String(urlId));
+          if (dn) {
+            setSelectedDebitNote(dn);
+            setViewMode("view");
+          }
+        });
     }
-  }, [searchParams, debitNotes, purchaseReturns, invoices]);
+  }, [searchParams]);
 
   const handleVendorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const vendorId = e.target.value;
@@ -475,7 +518,7 @@ export default function DebitNoteComp() {
     );
 
     const glImpactEntries = [
-      // 1. DEBIT: Accounts Payable (Reduces liability)
+      // 1. DEBIT: Accounts Payable (Reduces liability by total net amount)
       {
         accountCode: apAcc.code,
         accountName: apAcc.name,
@@ -483,30 +526,14 @@ export default function DebitNoteComp() {
         credit: 0,
         memo: `Debit AP - Vendor Credit #${dnNoStr} (${vendorName})`,
       },
-      // 2. DEBIT: Purchase Discount Reversal (if discount exists)
-      ...(activeDiscount > 0 ? [{
-        accountCode: discAcc.code,
-        accountName: discAcc.name,
-        debit: activeDiscount,
-        credit: 0,
-        memo: `Purchase Discount Reversal - Vendor Credit #${dnNoStr}`,
-      }] : []),
-      // 3. CREDIT: Purchase Return Clearing (Offsets fulfillment accrual)
+      // 2. CREDIT: Purchase Return Clearing (Offsets fulfillment accrual for full credit value, no tax line)
       {
         accountCode: clearingAcc.code,
         accountName: clearingAcc.name,
         debit: 0,
-        credit: resolvedSubtotal > 0 ? resolvedSubtotal : totalAmount,
+        credit: totalAmount,
         memo: `Vendor Return Clearing Offset - #${dnNoStr}`,
       },
-      // 4. CREDIT: Input Tax Reversal (if tax exists)
-      ...(activeTax > 0 ? [{
-        accountCode: taxAcc.code,
-        accountName: taxAcc.name,
-        debit: 0,
-        credit: activeTax,
-        memo: `Input Tax (GST) Reversal - Vendor Credit #${dnNoStr}`,
-      }] : []),
     ];
 
     return (
@@ -522,13 +549,39 @@ export default function DebitNoteComp() {
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
           customActions={
-            isView && String(activeHeader.status || activeHeader.document_status || "").toUpperCase() === "DRAFT" ? (
+            isView && selectedDebitNote && String(activeHeader.status || activeHeader.document_status || "").toUpperCase() === "DRAFT" ? (
               <div className="flex items-center space-x-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    handleEdit(selectedDebitNote.id);
-                    formik.setFieldValue("status", "APPROVED");
+                  onClick={async () => {
+                    try {
+                      const updatedPayload = {
+                        ...selectedDebitNote,
+                        header: {
+                          ...(selectedDebitNote.header || selectedDebitNote),
+                          status: "APPROVED",
+                        },
+                        status: "APPROVED",
+                      };
+                      await updateDebitNote({
+                        id: selectedDebitNote.id,
+                        body: updatedPayload,
+                      }).unwrap();
+                      toast.success("Vendor Credit approved & posted successfully.");
+                      if (refetchDebitNotes) refetchDebitNotes();
+                      setSelectedDebitNote({
+                        ...selectedDebitNote,
+                        header: {
+                          ...(selectedDebitNote.header || selectedDebitNote),
+                          status: "APPROVED",
+                        },
+                        status: "APPROVED",
+                      });
+                      setViewMode("view");
+                      setSearchParams({ action: "view", id: String(selectedDebitNote.id) });
+                    } catch (err: any) {
+                      toast.error(err?.data?.message || "Failed to approve Vendor Credit.");
+                    }
                   }}
                   className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
                 >

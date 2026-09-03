@@ -24,6 +24,7 @@ import {
   useGetGRNsQuery,
   useGetPurchaseInvoicesQuery,
   useGetPurchasePaymentsQuery,
+  useGetPurchaseReturnsQuery,
 } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
@@ -39,9 +40,11 @@ const PurchaseOrderComp: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [isEdit, setIsEdit] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
-  const [selectedPOId, setSelectedPOId] = useState<number | null>(null);
-  const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [isDeleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedPOId, setSelectedPOId] = useState<number | string | null>(null);
+
+  const effectivePOId = selectedPOId || searchParams.get("id");
 
   const [updatePOStatus, { isLoading: isStatusUpdating }] = useUpdatePurchaseOrderStatusMutation();
   const [createPurchaseOrder, { isLoading: isCreating }] = useCreatePurchaseOrderMutation();
@@ -53,10 +56,11 @@ const PurchaseOrderComp: React.FC = () => {
   const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 100 });
   const { data: invoicesData } = useGetPurchaseInvoicesQuery({ page: 1, limit: 100 });
   const { data: paymentsData } = useGetPurchasePaymentsQuery({ page: 1, limit: 100 });
+  const { data: returnsData } = useGetPurchaseReturnsQuery({});
 
   // Single GET API Query for Specific PO View/Edit Details
-  const { data: singlePOData, isLoading: isSinglePOLoading } = useGetPurchaseOrderByIdQuery(selectedPOId!, {
-    skip: !selectedPOId,
+  const { data: singlePOData, isLoading: isSinglePOLoading } = useGetPurchaseOrderByIdQuery(effectivePOId!, {
+    skip: !effectivePOId,
   });
   const singlePO = singlePOData?.result || singlePOData?.data || singlePOData;
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
@@ -80,6 +84,7 @@ const PurchaseOrderComp: React.FC = () => {
   const grnsList = Array.isArray(grnsData?.result) ? grnsData.result : [];
   const invoicesList = Array.isArray(invoicesData?.result) ? invoicesData.result : [];
   const paymentsList = Array.isArray(paymentsData?.result) ? paymentsData.result : [];
+  const returnsList = Array.isArray(returnsData?.result) ? returnsData.result : Array.isArray(returnsData?.data) ? returnsData.data : Array.isArray(returnsData) ? returnsData : [];
 
   const isGrnCompletedForPo = (po: any) => {
     if (!po) return false;
@@ -219,7 +224,8 @@ const PurchaseOrderComp: React.FC = () => {
         formik.resetForm();
         refetch();
       } catch (error: any) {
-        toast.error(error?.data?.message || "Something went wrong");
+        console.error("Purchase Order save error:", error);
+        toast.error(error?.data?.message || error?.message || "Failed to save Purchase Order.");
       }
     },
   });
@@ -292,20 +298,15 @@ const PurchaseOrderComp: React.FC = () => {
       setViewMode("form");
       setIsEdit(false);
       setEditId(null);
-      setSelectedPOId(null);
     } else if (urlId && urlAction === "view") {
-      const idNum = Number(urlId);
-      setSelectedPOId(idNum);
       setViewMode("view");
     } else if (urlId && urlAction === "edit") {
       const idNum = Number(urlId);
-      setSelectedPOId(idNum);
       setEditId(idNum);
       setIsEdit(true);
       setViewMode("form");
     } else if (!urlAction && !urlId) {
       setViewMode("list");
-      setSelectedPOId(null);
     }
   }, [searchParams]);
 
@@ -484,27 +485,50 @@ const PurchaseOrderComp: React.FC = () => {
     const lineItem = { ...lineItems[index], item_id: itemId };
 
     if (selectedItem) {
-      lineItem.uom_id = selectedItem.uom_id ?? "";
+      lineItem.description = selectedItem.item_desc || selectedItem.description || selectedItem.item_name || "";
+      lineItem.uom_id = selectedItem.uom_id ?? selectedItem.uom?.id ?? "";
       lineItem.rate = Number(selectedItem.purchase_price || selectedItem.cost_price || selectedItem.default_rate || 0);
+
+      const itemTax = Number(
+        selectedItem.hsnSacCode?.taxPercentage ??
+        selectedItem.hsnSac?.taxPercentage ??
+        selectedItem.tax_rate ??
+        selectedItem.taxRate ??
+        selectedItem.taxPercentage ??
+        0
+      );
+      lineItem.tax_rate = itemTax;
+      lineItem.taxRate = itemTax;
 
       const selectedUom = uoms.find((u: any) => String(u.id) === String(lineItem.uom_id));
       if (selectedUom && !isDecimalAllowedForUOM(selectedUom) && Number(lineItem.quantity) % 1 !== 0) {
         lineItem.quantity = Math.floor(Number(lineItem.quantity)) || 1;
       }
     } else {
+      lineItem.description = "";
       lineItem.uom_id = "";
       lineItem.rate = 0;
+      lineItem.tax_rate = 0;
+      lineItem.taxRate = 0;
     }
 
     const qty = Number(lineItem.quantity) || 0;
     const rate = Number(lineItem.rate) || 0;
-    const taxRate = Number(lineItem.tax_rate) || 0;
-    const lineSubtotal = qty * rate;
-    const taxAmount = lineSubtotal * (taxRate / 100);
-    const lineTotal = lineSubtotal + taxAmount;
+    const discountPercent = Number(lineItem.discount_percent || lineItem.discountPercent) || 0;
+    const taxRate = Number(lineItem.tax_rate || lineItem.taxRate) || 0;
 
-    lineItem.tax_amount = Number(taxAmount.toFixed(2));
-    lineItem.line_total = Number(lineTotal.toFixed(2));
+    const gross = qty * rate;
+    const discountAmount = Number(((gross * discountPercent) / 100).toFixed(2));
+    const subtotal = Number((gross - discountAmount).toFixed(2));
+    const taxAmount = Number(((subtotal * taxRate) / 100).toFixed(2));
+    const lineTotal = Number((subtotal + taxAmount).toFixed(2));
+
+    lineItem.amount = gross;
+    lineItem.discount_percent = discountPercent;
+    lineItem.discount_amount = discountAmount;
+    lineItem.subtotal = subtotal;
+    lineItem.tax_amount = taxAmount;
+    lineItem.line_total = lineTotal;
 
     lineItems[index] = lineItem;
     formik.setFieldValue("lineItems", lineItems);
@@ -561,6 +585,11 @@ const PurchaseOrderComp: React.FC = () => {
   };
 
   const handleAddLineItem = () => {
+    if (!formik.values.header.vendor_id) {
+      toast.error("Please select a Vendor first before adding items.");
+      return;
+    }
+
     const currentLines = formik.values.lineItems;
     if (currentLines.length > 0) {
       const unfulfilledLineIndex = currentLines.findIndex((line: any) => !line.item_id || String(line.item_id).trim() === "");
@@ -574,6 +603,7 @@ const PurchaseOrderComp: React.FC = () => {
       ...currentLines,
       {
         item_id: "",
+        description: "",
         quantity: 1,
         uom_id: "",
         rate: 0,
@@ -627,8 +657,12 @@ const PurchaseOrderComp: React.FC = () => {
           const da = line.discount_amount != null ? Number(line.discount_amount) : Number(((q * r * dp) / 100).toFixed(2));
           const sub = line.subtotal != null ? Number(line.subtotal) : Number((q * r - da).toFixed(2));
 
+          const itemObj = items.find((i: any) => String(i.id) === String(line.item_id ?? line.itemId));
+          const desc = String(line.description ?? line.item_desc ?? itemObj?.item_desc ?? itemObj?.description ?? itemObj?.item_name ?? "");
+
           return {
             item_id: String(line.item_id ?? line.itemId ?? ""),
+            description: desc,
             quantity: q,
             uom_id: String(line.uom_id ?? line.uomId ?? ""),
             rate: r,
@@ -700,7 +734,6 @@ const PurchaseOrderComp: React.FC = () => {
   const handleNewOrder = () => {
     setIsEdit(false);
     setEditId(null);
-    setSelectedPOId(null);
     formik.resetForm();
     setViewMode("form");
     setSearchParams({ action: "create" });
@@ -721,7 +754,6 @@ const PurchaseOrderComp: React.FC = () => {
       }
       populateFormFromPO(itemFromList);
     }
-    setSelectedPOId(id);
     setEditId(id);
     setIsEdit(true);
     setViewMode("form");
@@ -729,7 +761,6 @@ const PurchaseOrderComp: React.FC = () => {
   };
 
   const handleView = (id: number) => {
-    setSelectedPOId(id);
     setViewMode("view");
     setSearchParams({ id: String(id), action: "view" });
   };
@@ -796,6 +827,7 @@ const PurchaseOrderComp: React.FC = () => {
                         <tr>
                           <th className="p-2 border-r border-slate-400 w-8 text-center">#</th>
                           <th className="p-2 border-r border-slate-400 min-w-[180px]">ITEM *</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[160px]">DESCRIPTION</th>
                           <th className="p-2 border-r border-slate-400 min-w-[110px]">UNITS (UOM) *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">QTY *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">RATE (₹) *</th>
@@ -828,14 +860,17 @@ const PurchaseOrderComp: React.FC = () => {
                               <td className="p-1.5 border-r border-slate-200">
                                 <select
                                   value={line.item_id}
+                                  disabled={!formik.values.header.vendor_id}
                                   onChange={(e) => fillLineItemFromSelectedItem(index, e.target.value)}
                                   onBlur={formik.handleBlur}
-                                  className={`w-full h-7 px-2 text-xs border rounded-xs focus:outline-none focus:border-sky-500 bg-white ${(lineTouched?.item_id || formik.submitCount > 0) && lineError?.item_id
-                                    ? "border-red-500 bg-red-50"
-                                    : "border-slate-300"
+                                  className={`w-full h-7 px-2 text-xs border rounded-xs focus:outline-none focus:border-sky-500 ${!formik.values.header.vendor_id
+                                    ? "bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200"
+                                    : (lineTouched?.item_id || formik.submitCount > 0) && lineError?.item_id
+                                      ? "border-red-500 bg-red-50"
+                                      : "border-slate-300 bg-white"
                                     }`}
                                 >
-                                  <option value="">Select Item...</option>
+                                  <option value="">{formik.values.header.vendor_id ? "Select Item..." : "Select Vendor first..."}</option>
                                   {items.map((item: any) => (
                                     <option key={item.id} value={item.id}>
                                       {item.item_name || item.name}
@@ -847,16 +882,21 @@ const PurchaseOrderComp: React.FC = () => {
                                 )}
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="text"
+                                  value={line.description || ""}
+                                  disabled={true}
+                                  placeholder="Item Description"
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 text-slate-700 font-medium cursor-not-allowed"
+                                />
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
                                 <select
                                   value={line.uom_id}
-                                  onChange={(e) => updateLineItemField(index, "uom_id", e.target.value)}
-                                  onBlur={formik.handleBlur}
-                                  className={`w-full h-7 px-2 text-xs border rounded-xs focus:outline-none focus:border-sky-500 bg-white ${(lineTouched?.uom_id || formik.submitCount > 0) && lineError?.uom_id
-                                    ? "border-red-500 bg-red-50"
-                                    : "border-slate-300"
-                                    }`}
+                                  disabled={true}
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 text-slate-700 font-medium cursor-not-allowed"
                                 >
-                                  <option value="">Select UOM...</option>
+                                  <option value="">UOM</option>
                                   {uoms.map((u: any) => (
                                     <option key={u.id} value={u.id}>
                                       {u.uom_name || u.name}
@@ -970,15 +1010,20 @@ const PurchaseOrderComp: React.FC = () => {
                     </table>
                   </div>
 
-                  <div className="flex justify-between items-center pt-2">
-                    <button
-                      type="button"
-                      onClick={handleAddLineItem}
-                      className="bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-1.5 rounded-xs transition-colors flex items-center space-x-1 cursor-pointer"
-                    >
-                      <Add className="!w-4 !h-4" />
-                      <span>Add Line Item</span>
-                    </button>
+                    <div className="flex justify-between items-center pt-2">
+                      <button
+                        type="button"
+                        disabled={!formik.values.header.vendor_id}
+                        onClick={handleAddLineItem}
+                        className={`text-white text-xs font-semibold px-3 py-1.5 rounded-xs transition-colors flex items-center space-x-1 ${!formik.values.header.vendor_id
+                          ? "bg-slate-400 cursor-not-allowed opacity-60"
+                          : "bg-slate-700 hover:bg-slate-800 cursor-pointer"
+                          }`}
+                        title={!formik.values.header.vendor_id ? "Select a Vendor first" : "Add Line Item"}
+                      >
+                        <Add className="!w-4 !h-4" />
+                        <span>Add Line Item</span>
+                      </button>
 
                     {typeof formik.errors.lineItems === "string" && (
                       <span className="text-xs text-red-600 font-medium bg-red-50 px-2.5 py-1 border border-red-200 rounded-xs">
@@ -1344,7 +1389,40 @@ const PurchaseOrderComp: React.FC = () => {
     const canShowReceive = !isDraft && !isPoGrnDone;
     const canShowBill = !isDraft && isPoGrnDone && !isPoBillDone;
     const canShowPayment = !isDraft && isPoBillDone && !isPoPaymentDone;
-    const canShowReturn = !isDraft && isPoPaymentDone;
+    const canShowReturn = !isDraft && isPoGrnDone;
+
+    const poIdStr = String(selectedPO.id);
+    const poNumStr = String(poHeader.purchaseNo || "");
+
+    const relatedGrns = grnsList.filter((g: any) => {
+      const gPoId = String(g.purchaseOrderId || g.purchase_order_id || g.poHeaderId || g.purchaseOrder?.id || "");
+      const gPoNo = String(g.purchaseOrderNo || g.purchase_order_no || "");
+      return gPoId === poIdStr || (poNumStr && gPoNo === poNumStr);
+    });
+
+    const relatedBills = invoicesList.filter((inv: any) => {
+      const invPoId = String(inv.poHeaderId || inv.purchase_order_id || inv.header?.poHeaderId || "");
+      const invGrnId = String(inv.grnHeaderId || inv.header?.grnHeaderId || "");
+      const isLinkedGrn = relatedGrns.some((g: any) => String(g.id) === invGrnId);
+      return invPoId === poIdStr || isLinkedGrn;
+    });
+
+    const relatedReturns = returnsList.filter((pr: any) => {
+      const prPoId = String(pr.poHeaderId || pr.po_header_id || pr.purchaseOrderId || "");
+      const prGrnId = String(pr.grnHeaderId || pr.grn_header_id || "");
+      const prBillId = String(pr.purchaseInvoiceHeaderId || pr.purchase_invoice_header_id || pr.billId || "");
+      const isLinkedGrn = relatedGrns.some((g: any) => String(g.id) === prGrnId);
+      const isLinkedBill = relatedBills.some((b: any) => String(b.id) === prBillId);
+      return prPoId === poIdStr || isLinkedGrn || isLinkedBill;
+    });
+
+    const relatedPayments = paymentsList.filter((p: any) => {
+      const h = p.header ?? p;
+      const pPoId = String(h.poHeaderId || h.purchase_order_id || h.po_id || "");
+      const pBillId = String(h.purchaseInvoiceHeaderId || h.purchase_invoice_header_id || h.billId || "");
+      const isLinkedBill = relatedBills.some((b: any) => String(b.id) === pBillId);
+      return pPoId === poIdStr || isLinkedBill;
+    });
 
     return (
       <RecordPageLayout
@@ -1435,6 +1513,7 @@ const PurchaseOrderComp: React.FC = () => {
                       <tr>
                         <th className="p-2 border-r border-slate-400 w-10 text-center">#</th>
                         <th className="p-2 border-r border-slate-400 min-w-[160px]">ITEM</th>
+                        <th className="p-2 border-r border-slate-400 min-w-[160px]">DESCRIPTION</th>
                         <th className="p-2 border-r border-slate-400 min-w-[80px]">UNITS</th>
                         <th className="p-2 border-r border-slate-400 w-20 text-right">QUANTITY</th>
                         <th className="p-2 border-r border-slate-400 w-24 text-right">RATE (₹)</th>
@@ -1449,7 +1528,7 @@ const PurchaseOrderComp: React.FC = () => {
                     <tbody className="divide-y divide-slate-200">
                       {poLines.length === 0 ? (
                         <tr>
-                          <td colSpan={11} className="p-4 text-center text-slate-400 italic">No line items in this order.</td>
+                          <td colSpan={12} className="p-4 text-center text-slate-400 italic">No line items in this order.</td>
                         </tr>
                       ) : (
                         poLines.map((l: any, idx: number) => {
@@ -1464,12 +1543,16 @@ const PurchaseOrderComp: React.FC = () => {
                           const lineTaxRate = Number(l.tax_rate || l.taxRate || 0);
                           const lineTaxAmt = l.tax_amount != null ? Number(l.tax_amount) : (lineSubtotal * (lineTaxRate / 100));
                           const lineTotal = l.line_total != null ? Number(l.line_total) : (lineSubtotal + lineTaxAmt);
+                          const lineDesc = l.description || l.item_desc || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || "-";
 
                           return (
                             <tr key={idx} className="hover:bg-slate-50">
                               <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
                               <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">
                                 {l.item?.item_name || itemObj?.item_name || `Item #${l.item_id}`}
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-slate-700">
+                                {lineDesc}
                               </td>
                               <td className="p-2 border-r border-slate-200 text-slate-700">
                                 {l.uom?.uom_name || uomObj?.uom_name || "—"}
@@ -1489,6 +1572,216 @@ const PurchaseOrderComp: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
+              </div>
+            ),
+          },
+          {
+            id: "relatedRecords",
+            label: "Related Records",
+            badge: relatedGrns.length + relatedBills.length + relatedReturns.length + relatedPayments.length,
+            content: (
+              <div className="space-y-6">
+                {/* Goods Receipt Notes */}
+                <div className="bg-white border border-slate-300 rounded-xs overflow-hidden">
+                  <div className="bg-[#1d3e4c] text-white px-3 py-1.5 flex justify-between items-center text-xs font-bold uppercase tracking-wider">
+                    <span>Goods Receipt Notes (GRNs)</span>
+                    <span className="bg-white/20 px-2 py-0.5 rounded-xs font-mono text-[10px]">{relatedGrns.length} records</span>
+                  </div>
+                  {relatedGrns.length === 0 ? (
+                    <div className="p-3 text-center text-slate-400 italic text-xs">No GRN received for this Purchase Order yet.</div>
+                  ) : (
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-100 font-semibold text-slate-600 text-[10px] uppercase border-b border-slate-300">
+                        <tr>
+                          <th className="p-2 border-r border-slate-200">GRN #</th>
+                          <th className="p-2 border-r border-slate-200">Date</th>
+                          <th className="p-2 border-r border-slate-200">Status</th>
+                          <th className="p-2 border-r border-slate-200 text-right">Received Qty</th>
+                          <th className="p-2 text-center w-20">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {relatedGrns.map((g: any) => {
+                          const gHeader = g.header ?? g;
+                          const gLines = g.grnLines || g.lines || [];
+                          const totalRec = gLines.reduce((acc: number, l: any) => acc + Number(l.receivedQty || l.received_qty || 0), 0);
+                          const gNo = gHeader.grnNumber || gHeader.grn_number || `GRN-${g.id}`;
+                          return (
+                            <tr key={g.id} className="hover:bg-slate-50">
+                              <td className="p-2 border-r border-slate-200 font-bold text-sky-700 font-mono">{gNo}</td>
+                              <td className="p-2 border-r border-slate-200 font-mono">{gHeader.grnDate ? String(gHeader.grnDate).slice(0, 10) : "-"}</td>
+                              <td className="p-2 border-r border-slate-200">
+                                <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${String(gHeader.status || "").toUpperCase() === "DRAFT" ? "bg-amber-50 text-amber-800 border-amber-200" : "bg-emerald-50 text-emerald-800 border-emerald-200"}`}>
+                                  {gHeader.status || "RECEIVED"}
+                                </span>
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold">{totalRec}</td>
+                              <td className="p-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/grn?id=${g.id}&action=view`)}
+                                  className="text-xs text-sky-700 hover:text-sky-900 font-semibold underline cursor-pointer"
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Vendor Bills */}
+                <div className="bg-white border border-slate-300 rounded-xs overflow-hidden">
+                  <div className="bg-[#1d3e4c] text-white px-3 py-1.5 flex justify-between items-center text-xs font-bold uppercase tracking-wider">
+                    <span>Vendor Bills (Purchase Invoices)</span>
+                    <span className="bg-white/20 px-2 py-0.5 rounded-xs font-mono text-[10px]">{relatedBills.length} records</span>
+                  </div>
+                  {relatedBills.length === 0 ? (
+                    <div className="p-3 text-center text-slate-400 italic text-xs">No Vendor Bills created for this Purchase Order yet.</div>
+                  ) : (
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-100 font-semibold text-slate-600 text-[10px] uppercase border-b border-slate-300">
+                        <tr>
+                          <th className="p-2 border-r border-slate-200">Bill #</th>
+                          <th className="p-2 border-r border-slate-200">Date</th>
+                          <th className="p-2 border-r border-slate-200">Status</th>
+                          <th className="p-2 border-r border-slate-200 text-right">Total (₹)</th>
+                          <th className="p-2 border-r border-slate-200 text-right">Paid (₹)</th>
+                          <th className="p-2 border-r border-slate-200 text-right">Balance (₹)</th>
+                          <th className="p-2 text-center w-20">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {relatedBills.map((inv: any) => {
+                          const h = inv.header ?? inv;
+                          const invNo = h.invoiceNumber || h.vendorInvoiceNumber || `INV-${inv.id}`;
+                          return (
+                            <tr key={inv.id} className="hover:bg-slate-50">
+                              <td className="p-2 border-r border-slate-200 font-bold text-sky-700 font-mono">{invNo}</td>
+                              <td className="p-2 border-r border-slate-200 font-mono">{h.invoiceDate ? String(h.invoiceDate).slice(0, 10) : "-"}</td>
+                              <td className="p-2 border-r border-slate-200">
+                                <span className={`px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border ${String(h.status || "").toUpperCase() === "PAID" ? "bg-emerald-50 text-emerald-800 border-emerald-200" : "bg-blue-50 text-blue-800 border-blue-200"}`}>
+                                  {h.status || "DRAFT"}
+                                </span>
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold">₹{Number(h.totalAmount || 0).toFixed(2)}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono text-emerald-700">₹{Number(h.paidAmount || 0).toFixed(2)}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono text-amber-800">₹{Number(h.balanceAmount || 0).toFixed(2)}</td>
+                              <td className="p-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/purchase-invoice?id=${inv.id}&action=view`)}
+                                  className="text-xs text-sky-700 hover:text-sky-900 font-semibold underline cursor-pointer"
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+
+                {/* Purchase Returns */}
+                {relatedReturns.length > 0 && (
+                  <div className="bg-white border border-slate-300 rounded-xs overflow-hidden">
+                    <div className="bg-[#1d3e4c] text-white px-3 py-1.5 flex justify-between items-center text-xs font-bold uppercase tracking-wider">
+                      <span>Purchase Returns</span>
+                      <span className="bg-white/20 px-2 py-0.5 rounded-xs font-mono text-[10px]">{relatedReturns.length} records</span>
+                    </div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-100 font-semibold text-slate-600 text-[10px] uppercase border-b border-slate-300">
+                        <tr>
+                          <th className="p-2 border-r border-slate-200">Return #</th>
+                          <th className="p-2 border-r border-slate-200">Date</th>
+                          <th className="p-2 border-r border-slate-200">Status</th>
+                          <th className="p-2 border-r border-slate-200 text-right">Amount (₹)</th>
+                          <th className="p-2 text-center w-20">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {relatedReturns.map((pr: any) => {
+                          const h = pr.header ?? pr;
+                          const rNo = h.returnNumber || h.return_number || `PR-${pr.id}`;
+                          return (
+                            <tr key={pr.id} className="hover:bg-slate-50">
+                              <td className="p-2 border-r border-slate-200 font-bold text-purple-700 font-mono">{rNo}</td>
+                              <td className="p-2 border-r border-slate-200 font-mono">{h.returnDate ? String(h.returnDate).slice(0, 10) : "-"}</td>
+                              <td className="p-2 border-r border-slate-200">
+                                <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border bg-purple-50 text-purple-800 border-purple-200">
+                                  {h.status || "PENDING"}
+                                </span>
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold">₹{Number(h.totalAmount || 0).toFixed(2)}</td>
+                              <td className="p-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/purchase-return?id=${pr.id}&action=view`)}
+                                  className="text-xs text-purple-700 hover:text-purple-900 font-semibold underline cursor-pointer"
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Bill Payments */}
+                {relatedPayments.length > 0 && (
+                  <div className="bg-white border border-slate-300 rounded-xs overflow-hidden">
+                    <div className="bg-[#1d3e4c] text-white px-3 py-1.5 flex justify-between items-center text-xs font-bold uppercase tracking-wider">
+                      <span>Bill Payments</span>
+                      <span className="bg-white/20 px-2 py-0.5 rounded-xs font-mono text-[10px]">{relatedPayments.length} records</span>
+                    </div>
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-100 font-semibold text-slate-600 text-[10px] uppercase border-b border-slate-300">
+                        <tr>
+                          <th className="p-2 border-r border-slate-200">Payment #</th>
+                          <th className="p-2 border-r border-slate-200">Date</th>
+                          <th className="p-2 border-r border-slate-200">Status</th>
+                          <th className="p-2 border-r border-slate-200 text-right">Amount Paid (₹)</th>
+                          <th className="p-2 text-center w-20">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {relatedPayments.map((p: any) => {
+                          const h = p.header ?? p;
+                          const pNo = h.paymentNo || h.payment_no || h.referenceNo || `PAY-${p.id}`;
+                          return (
+                            <tr key={p.id} className="hover:bg-slate-50">
+                              <td className="p-2 border-r border-slate-200 font-bold text-emerald-700 font-mono">{pNo}</td>
+                              <td className="p-2 border-r border-slate-200 font-mono">{h.paymentDate ? String(h.paymentDate).slice(0, 10) : "-"}</td>
+                              <td className="p-2 border-r border-slate-200">
+                                <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase border bg-emerald-50 text-emerald-800 border-emerald-200">
+                                  {h.status || "COMPLETED"}
+                                </span>
+                              </td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-emerald-700">₹{Number(h.amountPaid || h.totalAmount || 0).toFixed(2)}</td>
+                              <td className="p-2 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/purchase-payment?id=${p.id}&action=view`)}
+                                  className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold underline cursor-pointer"
+                                >
+                                  View
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             ),
           },

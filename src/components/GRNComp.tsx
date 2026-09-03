@@ -24,6 +24,7 @@ import {
   useGetPurchasePaymentsQuery,
   useGetPurchaseReturnsQuery,
   useLazyGetGRNByIdQuery,
+  useLazyGetPurchaseOrderByIdQuery,
   useUpdateGRNMutation,
   useUpdateGRNStatusMutation,
 } from "../RTK/services/purchaseApi";
@@ -114,13 +115,17 @@ const GRNComp: React.FC = () => {
   const transportationModes = Array.isArray(transportationModesData?.result) ? transportationModesData.result : [];
 
   const inventoryItems = useMemo(() => {
-    return Array.isArray(inventoryData?.result)
-      ? inventoryData.result
-      : Array.isArray(inventoryData?.data)
-        ? inventoryData.data
-        : Array.isArray(inventoryData)
-          ? inventoryData
-          : [];
+    return Array.isArray(inventoryData?.result?.inventory)
+      ? inventoryData.result.inventory
+      : Array.isArray(inventoryData?.result?.items)
+        ? inventoryData.result.items
+        : Array.isArray(inventoryData?.result)
+          ? inventoryData.result
+          : Array.isArray(inventoryData?.data)
+            ? inventoryData.data
+            : Array.isArray(inventoryData)
+              ? inventoryData
+              : [];
   }, [inventoryData]);
 
   const onHandMap = useMemo(() => {
@@ -128,7 +133,7 @@ const GRNComp: React.FC = () => {
     inventoryItems.forEach((inv: any) => {
       const itemId = String(inv.item_id || inv.itemId || inv.item?.id || "");
       if (itemId) {
-        map[itemId] = (map[itemId] || 0) + Number(inv.qty || 0);
+        map[itemId] = (map[itemId] || 0) + Number(inv.qty ?? inv.quantity ?? 0);
       }
     });
     return map;
@@ -139,6 +144,7 @@ const GRNComp: React.FC = () => {
   const [updateGRNStatus, { isLoading: isUpdatingStatus }] = useUpdateGRNStatusMutation();
   const [deleteGRN] = useDeleteGRNMutation();
   const [triggerGetGRNById] = useLazyGetGRNByIdQuery();
+  const [triggerGetPOById] = useLazyGetPurchaseOrderByIdQuery();
 
   const handleSubmitWithStatus = (status: string) => {
     formik.setFieldValue("header.status", status);
@@ -302,12 +308,16 @@ const GRNComp: React.FC = () => {
       });
     }
 
+    const itemObj = line.item || selectedItem;
+    const desc = itemObj?.item_desc || itemObj?.description || itemObj?.item_name || line.description || "";
     const remainingQty = Math.max(0, originalOrderedQty - alreadyReceived);
 
     return {
+      isSelected: true,
       purchaseOrderLineId: poLineId ?? "",
       itemId,
-      item: line.item || selectedItem,
+      description: desc,
+      item: itemObj,
       uom_id: uomId,
       locationId: lineLocId,
       onHand: onHandMap[String(itemId)] ?? 0,
@@ -364,12 +374,18 @@ const GRNComp: React.FC = () => {
     onSubmit: async (values) => {
       try {
         // Enforce Received Qty <= Open PO Qty and Accepted/Rejected rules
-        for (let i = 0; i < values.lineItems.length; i++) {
-          const line = values.lineItems[i];
+        const selectedLines = values.lineItems.filter((l: any) => l.isSelected !== false && Number(l.receivedQty || 0) > 0);
+        if (selectedLines.length === 0) {
+          toast.error("Please select at least one line item with a received quantity > 0.");
+          return;
+        }
+
+        for (let i = 0; i < selectedLines.length; i++) {
+          const line = selectedLines[i];
           const uomObj = uoms.find((u: any) => String(u.id) === String(line.uom_id));
           if (uomObj && !isDecimalAllowedForUOM(uomObj)) {
             if (Number(line.receivedQty) % 1 !== 0 || Number(line.acceptedQty) % 1 !== 0 || Number(line.rejectedQty) % 1 !== 0) {
-              toast.error(`Quantities for line ${i + 1} (${uomObj.uom_name}) must be whole numbers (decimals not permitted).`);
+              toast.error(`Line ${i + 1}: Quantities for UOM '${uomObj.uom_name}' cannot contain decimals.`);
               return;
             }
           }
@@ -402,7 +418,7 @@ const GRNComp: React.FC = () => {
 
         const payload = {
           header: values.header,
-          lineItems: values.lineItems,
+          lineItems: selectedLines,
         };
 
         let savedGrnId = editId;
@@ -487,38 +503,97 @@ const GRNComp: React.FC = () => {
       handleEdit(urlId);
     } else if (urlId && urlAction === "view") {
       handleView(urlId);
-    } else if (urlPoId && !selectedPoId && !isEdit) {
+    } else if (urlPoId && !isEdit) {
       formik.setFieldValue("header.purchaseOrderId", urlPoId);
       setViewMode("form");
       setIsEdit(false);
+      // Trigger API call for PO details
+      triggerGetPOById(urlPoId)
+        .unwrap()
+        .then((res: any) => {
+          const po = res?.result || res?.data || res;
+          if (po) {
+            const vId = po.vendor_id || po.vendorId || po.vendor?.id;
+            if (vId) formik.setFieldValue("header.vendor_id", String(vId));
+            const subId = po.subsidiary_id || po.subsidiaryId;
+            if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
+            const classId = po.class_id || po.classId;
+            if (classId) formik.setFieldValue("header.class_id", String(classId));
+            const deptId = po.department_id || po.departmentId;
+            if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+            const cityId = po.city_id || po.cityId;
+            if (cityId) formik.setFieldValue("header.location_id", String(cityId));
+            if (po.transportation_mode_id) formik.setFieldValue("header.transportationModeId", String(po.transportation_mode_id));
+            if (po.driverName) formik.setFieldValue("header.driverName", po.driverName);
+            if (po.driverPhone) formik.setFieldValue("header.driverPhoneNo", po.driverPhone);
+            if (po.vehicleNumber) formik.setFieldValue("header.vehicleNo", po.vehicleNumber);
+
+            const poLines = getPoLineItems(po);
+            if (poLines.length > 0) {
+              const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line, po.id));
+              formik.setFieldValue("lineItems", mappedLines);
+            }
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch PO by ID:", err);
+        });
     } else if (urlAction === "create") {
       setViewMode("form");
       setIsEdit(false);
     }
-  }, [searchParams, grns]);
+  }, [searchParams]);
 
   useEffect(() => {
     if (isEdit || !selectedPoId) return;
-    const selectedPo = purchaseOrders.find((po: any) => String(po.id) === String(selectedPoId));
-    if (!selectedPo) return;
 
-    const poLines = getPoLineItems(selectedPo);
-    if (poLines.length > 0) {
-      const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line, selectedPoId));
-      formik.setFieldValue("lineItems", mappedLines);
-    }
+    // Trigger API call to fetch full PO details
+    triggerGetPOById(selectedPoId)
+      .unwrap()
+      .then((res: any) => {
+        const selectedPo = res?.result || res?.data || res;
+        if (!selectedPo) return;
 
-    const vId = selectedPo.vendor_id || selectedPo.vendorId || selectedPo.vendor?.id;
-    if (vId) formik.setFieldValue("header.vendor_id", String(vId));
-    const subId = selectedPo.subsidiary_id || selectedPo.subsidiaryId;
-    if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
-    const classId = selectedPo.class_id || selectedPo.classId;
-    if (classId) formik.setFieldValue("header.class_id", String(classId));
-    const deptId = selectedPo.department_id || selectedPo.departmentId;
-    if (deptId) formik.setFieldValue("header.department_id", String(deptId));
-    const cityId = selectedPo.city_id || selectedPo.cityId;
-    if (cityId) formik.setFieldValue("header.location_id", String(cityId));
-  }, [selectedPoId, purchaseOrders, grns, isEdit]);
+        const poLines = getPoLineItems(selectedPo);
+        if (poLines.length > 0) {
+          const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line, selectedPoId));
+          formik.setFieldValue("lineItems", mappedLines);
+        }
+
+        const vId = selectedPo.vendor_id || selectedPo.vendorId || selectedPo.vendor?.id;
+        if (vId) formik.setFieldValue("header.vendor_id", String(vId));
+        const subId = selectedPo.subsidiary_id || selectedPo.subsidiaryId;
+        if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
+        const classId = selectedPo.class_id || selectedPo.classId;
+        if (classId) formik.setFieldValue("header.class_id", String(classId));
+        const deptId = selectedPo.department_id || selectedPo.departmentId;
+        if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+        const cityId = selectedPo.city_id || selectedPo.cityId;
+        if (cityId) formik.setFieldValue("header.location_id", String(cityId));
+      })
+      .catch(() => {
+        // Fallback to eager list
+        const selectedPo = purchaseOrders.find((po: any) => String(po.id) === String(selectedPoId));
+        if (!selectedPo) return;
+
+        const poLines = getPoLineItems(selectedPo);
+        if (poLines.length > 0) {
+          const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line, selectedPoId));
+          formik.setFieldValue("lineItems", mappedLines);
+        }
+
+        const vId = selectedPo.vendor_id || selectedPo.vendorId || selectedPo.vendor?.id;
+        if (vId) formik.setFieldValue("header.vendor_id", String(vId));
+        const subId = selectedPo.subsidiary_id || selectedPo.subsidiaryId;
+        if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
+        const classId = selectedPo.class_id || selectedPo.classId;
+        if (classId) formik.setFieldValue("header.class_id", String(classId));
+        const deptId = selectedPo.department_id || selectedPo.departmentId;
+        if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+        const cityId = selectedPo.city_id || selectedPo.cityId;
+        if (cityId) formik.setFieldValue("header.location_id", String(cityId));
+      });
+  }, [selectedPoId, isEdit]);
 
   const updateGrnLineField = (index: number, field: string, value: any) => {
     const lineItems = [...formik.values.lineItems];
@@ -885,8 +960,24 @@ const GRNComp: React.FC = () => {
                     <table className="w-full text-left text-xs border-collapse">
                       <thead className="bg-[#244b5a] text-white font-bold uppercase text-[10px]">
                         <tr>
-                          <th className="p-2 border-r border-slate-400 w-10 text-center">#</th>
+                          {!isView && (
+                            <th className="p-2 border-r border-slate-400 w-10 text-center">
+                              <input
+                                type="checkbox"
+                                checked={activeLines.length > 0 && activeLines.every((l: any) => l.isSelected !== false)}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  const updated = formik.values.lineItems.map((l: any) => ({ ...l, isSelected: checked }));
+                                  formik.setFieldValue("lineItems", updated);
+                                }}
+                                title="Select All"
+                                className="cursor-pointer"
+                              />
+                            </th>
+                          )}
+                          <th className="p-2 border-r border-slate-400 w-8 text-center">#</th>
                           <th className="p-2 border-r border-slate-400 min-w-[180px]">ITEM *</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[160px]">DESCRIPTION</th>
                           <th className="p-2 border-r border-slate-400 min-w-[140px]">LOCATION</th>
                           <th className="p-2 border-r border-slate-400 w-20 text-right">ON-HAND</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">PO ORDERED</th>
@@ -895,7 +986,7 @@ const GRNComp: React.FC = () => {
                           <th className="p-2 border-r border-slate-400 w-28 text-right">REC QTY *</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">ACCEPTED QTY</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">REJECTED QTY</th>
-                          <th className="p-2 border-r border-slate-400 min-w-[140px]">REMARKS</th>
+                          <th className="p-2 min-w-[140px]">REMARKS</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-200 bg-white">
@@ -908,12 +999,15 @@ const GRNComp: React.FC = () => {
                           const ordered = Number(line.orderedQty ?? 0);
                           const alreadyRec = Number(line.alreadyReceivedQty ?? 0);
                           const remaining = Number(line.remainingQty ?? Math.max(0, ordered - alreadyRec));
+                          const lineDesc = line.description || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || "—";
+                          const isLineChecked = line.isSelected !== false;
 
                           if (isView) {
                             return (
                               <tr key={idx} className="hover:bg-slate-50">
                                 <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
                                 <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">{line.item?.item_name || itemObj?.item_name || "—"}</td>
+                                <td className="p-2 border-r border-slate-200 text-slate-700">{lineDesc}</td>
                                 <td className="p-2 border-r border-slate-200 font-medium text-slate-800">{lineLocName}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold text-slate-700">{lineOnHand}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">{ordered}</td>
@@ -922,23 +1016,42 @@ const GRNComp: React.FC = () => {
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-sky-800">{line.receivedQty ?? line.received_quantity ?? 0}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono text-emerald-700">{line.acceptedQty ?? line.accepted_quantity ?? 0}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono text-red-600">{line.rejectedQty ?? line.rejected_quantity ?? 0}</td>
-                                <td className="p-2 border-r border-slate-200 text-slate-700">{line.remarks || "—"}</td>
+                                <td className="p-2 text-slate-700">{line.remarks || "—"}</td>
                               </tr>
                             );
                           }
 
                           return (
-                            <tr key={idx} className="hover:bg-slate-50">
+                            <tr key={idx} className={`hover:bg-slate-50 transition-colors ${!isLineChecked ? "opacity-45 bg-slate-50" : ""}`}>
+                              <td className="p-2 text-center border-r border-slate-200">
+                                <input
+                                  type="checkbox"
+                                  checked={isLineChecked}
+                                  onChange={(e) => updateGrnLineField(idx, "isSelected", e.target.checked)}
+                                  className="cursor-pointer"
+                                  title="Receive this line item"
+                                />
+                              </td>
                               <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
                               <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">
                                 <div>{line.item?.item_name || itemObj?.item_name || (line.itemId ? `Item #${line.itemId}` : "—")}</div>
                                 {itemObj?.item_code && <div className="text-[10px] text-slate-500 font-mono">{itemObj.item_code}</div>}
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="text"
+                                  value={lineDesc}
+                                  disabled={true}
+                                  placeholder="Item Description"
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 text-slate-700 font-medium cursor-not-allowed"
+                                />
+                              </td>
+                              <td className="p-1.5 border-r border-slate-200">
                                 <select
                                   value={line.locationId || ""}
+                                  disabled={!isLineChecked}
                                   onChange={(e) => updateGrnLineField(idx, "locationId", e.target.value)}
-                                  className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs focus:outline-none focus:border-sky-500"
+                                  className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs focus:outline-none focus:border-sky-500 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
                                 >
                                   <option value="">Select Location...</option>
                                   {filteredLocations.map((c: any) => (
@@ -961,7 +1074,7 @@ const GRNComp: React.FC = () => {
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
                                   type="number"
-                                  disabled={isView}
+                                  disabled={!isLineChecked}
                                   step={allowsDecimals ? "any" : "1"}
                                   min={allowsDecimals ? "0.01" : "1"}
                                   max={remaining}
@@ -972,13 +1085,13 @@ const GRNComp: React.FC = () => {
                                     }
                                   }}
                                   onChange={(e) => updateGrnLineField(idx, "receivedQty", e.target.value)}
-                                  className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 font-bold text-sky-900"
+                                  className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 font-bold text-sky-900 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
                                 />
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
                                   type="number"
-                                  disabled={isView}
+                                  disabled={!isLineChecked}
                                   step={allowsDecimals ? "any" : "1"}
                                   min="0"
                                   max={line.receivedQty}
@@ -989,13 +1102,13 @@ const GRNComp: React.FC = () => {
                                     }
                                   }}
                                   onChange={(e) => updateGrnLineField(idx, "acceptedQty", e.target.value)}
-                                  className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 font-semibold text-emerald-700"
+                                  className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 font-semibold text-emerald-700 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
                                 />
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
                                   type="number"
-                                  disabled={isView}
+                                  disabled={!isLineChecked}
                                   step={allowsDecimals ? "any" : "1"}
                                   min="0"
                                   max={line.receivedQty}
@@ -1006,16 +1119,17 @@ const GRNComp: React.FC = () => {
                                     }
                                   }}
                                   onChange={(e) => updateGrnLineField(idx, "rejectedQty", e.target.value)}
-                                  className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 text-red-600"
+                                  className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 text-red-600 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
                                 />
                               </td>
-                              <td className="p-1.5 border-r border-slate-200">
+                              <td className="p-1.5">
                                 <input
                                   type="text"
                                   placeholder="Remarks..."
+                                  disabled={!isLineChecked}
                                   value={line.remarks}
                                   onChange={(e) => updateGrnLineField(idx, "remarks", e.target.value)}
-                                  className="w-full h-7 bg-white border border-slate-300 rounded-xs px-2 text-xs focus:outline-none focus:border-sky-500"
+                                  className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs focus:outline-none focus:border-sky-500 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
                                 />
                               </td>
                             </tr>

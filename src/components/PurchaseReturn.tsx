@@ -7,6 +7,7 @@ import * as Yup from "yup";
 
 import { useGetVendorsQuery } from "../RTK/services/vendorApi";
 import { useGetChartOfAccountsQuery } from "../RTK/services/chartOfAccountApi";
+import { useGetDebitNotesQuery } from "../RTK/services/debitNoteApi";
 import { useGetItemsQuery } from "../RTK/services/itemApi";
 import { useGetSubsidiariesQuery } from "../RTK/services/subsdiaryApi";
 import { useGetClassesQuery } from "../RTK/services/classApi";
@@ -17,16 +18,23 @@ import { useGetUOMsQuery } from "../RTK/services/uomApi";
 import { useAppSelector } from "../Hooks/Reduxhook/hooks";
 import { usePermissions } from "../Hooks/usePermissions";
 
+import { useGetInventoryQuery } from "../RTK/services/inventoryApi";
 import {
   useCreatePurchaseReturnMutation,
   useDeletePurchaseReturnMutation,
   useGetPurchaseReturnsQuery,
   useGetPurchaseReturnByIdQuery,
+  useLazyGetPurchaseReturnByIdQuery,
   useUpdatePurchaseReturnMutation,
   useUpdatePurchaseReturnStatusMutation,
   useGetPurchaseInvoicesQuery,
+  useLazyGetPurchaseInvoiceByIdQuery,
   useGetPurchasePaymentsQuery,
+  useLazyGetPurchasePaymentByIdQuery,
   useGetPurchaseOrdersQuery,
+  useLazyGetPurchaseOrderByIdQuery,
+  useGetGRNsQuery,
+  useLazyGetGRNByIdQuery,
 } from "../RTK/services/purchaseApi";
 
 import RecordPageLayout, { RecordSection } from "./Layout/RecordPageLayout";
@@ -35,8 +43,10 @@ import ConfirmationDialog from "./Dialog/ConfirmationDialog";
 
 interface PurchaseReturnLineForm {
   itemId: string;
+  description?: string;
   location_id?: string;
   orderedQty?: number;
+  onHand?: number;
   uom_id?: string;
   returnQty: number;
   unitPrice: number;
@@ -50,8 +60,10 @@ interface PurchaseReturnLineForm {
 
 const emptyLineItem = (): PurchaseReturnLineForm => ({
   itemId: "",
+  description: "",
   location_id: "",
   orderedQty: 0,
+  onHand: 0,
   uom_id: "",
   returnQty: 1,
   unitPrice: 0,
@@ -94,6 +106,7 @@ export default function PurchaseReturnComp() {
 
   // Eager Queries
   const { data: purchaseReturnsData, refetch: refetchReturns } = useGetPurchaseReturnsQuery({ page: 1, limit: 50 });
+  const { data: debitNotesData } = useGetDebitNotesQuery({ page: 1, limit: 500 });
   const { data: singleReturnData, isLoading: isLoadingSingleReturn } = useGetPurchaseReturnByIdQuery(effectiveReturnId!, { skip: !effectiveReturnId });
   const { data: vendorsData } = useGetVendorsQuery({ page: 1, option: true });
   const { data: itemsData } = useGetItemsQuery({ page: 1, limit: 1000 });
@@ -107,11 +120,59 @@ export default function PurchaseReturnComp() {
   const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery(undefined);
   const { data: purchasePaymentsData } = useGetPurchasePaymentsQuery(undefined);
   const { data: purchaseOrdersData } = useGetPurchaseOrdersQuery(undefined);
+  const { data: grnsData } = useGetGRNsQuery({ page: 1, limit: 100 });
+  const { data: inventoryData } = useGetInventoryQuery({ page: 1, limit: 1000 });
+
+  const grnsList = useMemo(() => {
+    return Array.isArray(grnsData?.result) ? grnsData.result : Array.isArray(grnsData?.data) ? grnsData.data : Array.isArray(grnsData) ? grnsData : [];
+  }, [grnsData]);
+
+  const inventoryItems = useMemo(() => {
+    return Array.isArray(inventoryData?.result?.inventory)
+      ? inventoryData.result.inventory
+      : Array.isArray(inventoryData?.result?.items)
+        ? inventoryData.result.items
+        : Array.isArray(inventoryData?.result)
+          ? inventoryData.result
+          : Array.isArray(inventoryData?.data)
+            ? inventoryData.data
+            : Array.isArray(inventoryData)
+              ? inventoryData
+              : [];
+  }, [inventoryData]);
+
+  const onHandMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    inventoryItems.forEach((inv: any) => {
+      const itemId = String(inv.item_id || inv.itemId || inv.item?.id || "");
+      if (itemId) {
+        map[itemId] = (map[itemId] || 0) + Number(inv.qty ?? inv.quantity ?? 0);
+      }
+    });
+    return map;
+  }, [inventoryItems]);
+
+  const itemLocationMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    inventoryItems.forEach((inv: any) => {
+      const itemId = String(inv.item_id || inv.itemId || inv.item?.id || "");
+      const locId = String(inv.location_id || inv.locationId || inv.location?.id || inv.warehouse_id || inv.city_id || "");
+      if (itemId && locId && !map[itemId]) {
+        map[itemId] = locId;
+      }
+    });
+    return map;
+  }, [inventoryItems]);
 
   const [createPurchaseReturn, { isLoading: isCreating }] = useCreatePurchaseReturnMutation();
   const [updatePurchaseReturn, { isLoading: isUpdating }] = useUpdatePurchaseReturnMutation();
   const [deletePurchaseReturn] = useDeletePurchaseReturnMutation();
   const [updatePurchaseReturnStatus] = useUpdatePurchaseReturnStatusMutation();
+  const [triggerGetPurchaseReturnById] = useLazyGetPurchaseReturnByIdQuery();
+  const [triggerGetPaymentById] = useLazyGetPurchasePaymentByIdQuery();
+  const [triggerGetInvoiceById] = useLazyGetPurchaseInvoiceByIdQuery();
+  const [triggerGetGRNById] = useLazyGetGRNByIdQuery();
+  const [triggerGetPOById] = useLazyGetPurchaseOrderByIdQuery();
 
   const handleAuthorizeReturn = async (id: number | string) => {
     try {
@@ -251,183 +312,300 @@ export default function PurchaseReturnComp() {
   useEffect(() => {
     const urlAction = searchParams.get("action");
     const urlId = searchParams.get("id");
+    const grnIdParam = searchParams.get("grnId") || searchParams.get("grn_id");
     const billIdParam = searchParams.get("billId");
     const paymentIdParam = searchParams.get("paymentId");
     const poIdParam = searchParams.get("poId");
 
-    if (billIdParam) {
-      const inv = purchaseInvoices.find((x: any) => String(x.id) === String(billIdParam));
-      if (inv) {
-        const header = inv.header ?? inv;
-        const invLines = inv.purchaseInvoiceLines || inv.lines || inv.details || [];
-        const vId = String(header.vendorId || header.vendor_id || "");
-        const subId = String(header.subsidiary_id || header.vendor?.primary_subsidiary_id || "");
-        const classId = String(header.class_id || "");
-        const deptId = String(header.department_id || "");
-        const locId = String(header.location_id || header.city_id || "");
-        const currId = String(header.currency_id || "");
+    if (grnIdParam) {
+      triggerGetGRNById(grnIdParam)
+        .unwrap()
+        .then((res: any) => {
+          const grn = res?.result || res?.data || res;
+          if (grn) {
+            const header = grn.header ?? grn;
+            const grnLines = grn.grnLines || grn.lineItems || grn.lines || grn.details || [];
+            const vId = String(header.vendorId || header.vendor_id || "");
+            const subId = String(header.subsidiary_id || header.subsidiaryId || "");
+            const classId = String(header.class_id || header.classId || "");
+            const deptId = String(header.department_id || header.departmentId || "");
+            const locId = String(header.location_id || header.locationId || citiesList[0]?.id || "");
+            const currId = String(header.currency_id || header.currencyId || "");
 
-        const mappedLines = invLines.map((l: any) => {
-          const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
-          const qty = Number(l.quantity || l.qty || 1);
-          const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
-          const dPct = Number(l.discountPercent || l.discount_percent || 0);
-          const dAmt = Number(l.discountAmount || l.discount_amount || 0);
-          const tPct = Number(l.taxPercent || l.tax_percent || 0);
-          const tAmt = Number(l.taxAmount || l.tax_amount || 0);
-          const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
-          return {
-            itemId: String(l.itemId || l.item_id || ""),
-            location_id: String(l.location_id || l.city_id || locId || citiesList[0]?.id || ""),
-            orderedQty: qty,
-            uom_id: String(l.uom_id || itemObj?.uom_id || ""),
-            returnQty: qty,
-            unitPrice: price,
-            discountPercent: dPct,
-            discountAmount: dAmt,
-            taxPercent: tPct,
-            taxAmount: tAmt,
-            lineTotal: Number(lTot.toFixed(2)),
-            remarks: l.remarks || `Return from Bill #${header.invoiceNumber || header.vendorInvoiceNumber || inv.id}`,
-          };
-        });
+            const mappedLines = grnLines.map((l: any) => {
+              const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
+              const qty = Number(l.acceptedQty ?? l.accepted_quantity ?? l.receivedQty ?? l.received_quantity ?? l.quantity ?? 1);
+              const price = Number(l.unitPrice || l.unit_price || l.rate || itemObj?.purchase_price || itemObj?.cost_price || 0);
+              const itemLoc = itemLocationMap[String(l.itemId || l.item_id)] || l.locationId || l.location_id || locId;
+              const lTot = qty * price;
+              return {
+                itemId: String(l.itemId || l.item_id || ""),
+                description: String(l.description || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || ""),
+                location_id: String(itemLoc),
+                orderedQty: qty,
+                onHand: onHandMap[String(l.itemId || l.item_id)] ?? 0,
+                uom_id: String(l.uom_id || itemObj?.uom_id || ""),
+                returnQty: qty,
+                unitPrice: price,
+                discountPercent: 0,
+                discountAmount: 0,
+                taxPercent: 0,
+                taxAmount: 0,
+                lineTotal: Number(lTot.toFixed(2)),
+                remarks: l.remarks || `Return from GRN #${header.grnNumber || header.grnNo || grn.id}`,
+              };
+            });
 
-        formik.setValues({
-          header: {
-            returnNumber: `RET-BILL-${inv.id}`,
-            vendorId: vId,
-            returnDate: new Date().toISOString().slice(0, 10),
-            subsidiary_id: subId,
-            class_id: classId,
-            department_id: deptId,
-            location_id: locId,
-            currency_id: currId,
-            reason: `Return against Purchase Bill #${header.invoiceNumber || inv.id}`,
-            remarks: `Auto-populated from Purchase Bill #${header.invoiceNumber || inv.id}`,
-            status: "DRAFT",
-            user_id: userId,
-          },
-          lineItems: mappedLines.length > 0 ? mappedLines : [emptyLineItem()],
+            formik.setValues({
+              header: {
+                returnNumber: `RET-GRN-${grn.id}`,
+                vendorId: vId,
+                returnDate: new Date().toISOString().slice(0, 10),
+                subsidiary_id: subId,
+                class_id: classId,
+                department_id: deptId,
+                location_id: locId,
+                currency_id: currId,
+                reason: `Return against GRN #${header.grnNumber || header.grnNo || grn.id}`,
+                remarks: `Auto-populated from GRN #${header.grnNumber || header.grnNo || grn.id}`,
+                status: "DRAFT",
+                user_id: userId,
+              },
+              lineItems: mappedLines.length > 0 ? mappedLines : [emptyLineItem()],
+            });
+            setViewMode("form");
+            setIsEdit(false);
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch GRN by ID for return:", err);
         });
-        setViewMode("form");
-        setIsEdit(false);
-      }
+    } else if (billIdParam) {
+      triggerGetInvoiceById(billIdParam)
+        .unwrap()
+        .then((res: any) => {
+          const inv = res?.result || res?.data || res;
+          if (inv) {
+            const header = inv.header ?? inv;
+            const invLines = inv.purchaseInvoiceLines || inv.lines || inv.details || [];
+            const vId = String(header.vendorId || header.vendor_id || "");
+            const subId = String(header.subsidiary_id || header.vendor?.primary_subsidiary_id || "");
+            const classId = String(header.class_id || "");
+            const deptId = String(header.department_id || "");
+            const locId = String(header.location_id || header.city_id || "");
+            const currId = String(header.currency_id || "");
+
+            const mappedLines = invLines.map((l: any) => {
+              const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
+              const qty = Number(l.quantity || l.qty || 1);
+              const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
+              const dPct = Number(l.discountPercent || l.discount_percent || 0);
+              const dAmt = Number(l.discountAmount || l.discount_amount || 0);
+              const tPct = Number(l.taxPercent || l.tax_percent || 0);
+              const tAmt = Number(l.taxAmount || l.tax_amount || 0);
+              const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
+              const itemLoc = itemLocationMap[String(l.itemId || l.item_id)] || l.location_id || l.city_id || locId || citiesList[0]?.id || "";
+
+              return {
+                itemId: String(l.itemId || l.item_id || ""),
+                description: String(l.description || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || ""),
+                location_id: String(itemLoc),
+                orderedQty: qty,
+                onHand: onHandMap[String(l.itemId || l.item_id)] ?? 0,
+                uom_id: String(l.uom_id || itemObj?.uom_id || ""),
+                returnQty: qty,
+                unitPrice: price,
+                discountPercent: dPct,
+                discountAmount: dAmt,
+                taxPercent: tPct,
+                taxAmount: tAmt,
+                lineTotal: Number(lTot.toFixed(2)),
+                remarks: l.remarks || `Return from Bill #${header.invoiceNumber || header.vendorInvoiceNumber || inv.id}`,
+              };
+            });
+
+            formik.setValues({
+              header: {
+                returnNumber: `RET-BILL-${inv.id}`,
+                vendorId: vId,
+                returnDate: new Date().toISOString().slice(0, 10),
+                subsidiary_id: subId,
+                class_id: classId,
+                department_id: deptId,
+                location_id: locId,
+                currency_id: currId,
+                reason: `Return against Purchase Bill #${header.invoiceNumber || inv.id}`,
+                remarks: `Auto-populated from Purchase Bill #${header.invoiceNumber || inv.id}`,
+                status: "DRAFT",
+                user_id: userId,
+              },
+              lineItems: mappedLines.length > 0 ? mappedLines : [emptyLineItem()],
+            });
+            setViewMode("form");
+            setIsEdit(false);
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch Invoice by ID for return:", err);
+        });
     } else if (paymentIdParam) {
-      const pay = purchasePayments.find((x: any) => String(x.id) === String(paymentIdParam));
-      if (pay) {
-        const header = pay.header ?? pay;
-        const vId = String(header.vendorId || header.vendor_id || header.vendor?.id || "");
-        const matchedInv = purchaseInvoices.find((i: any) => String(i.id) === String(header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id));
-        const invLines = matchedInv ? (matchedInv.purchaseInvoiceLines || matchedInv.lines || matchedInv.details || []) : [];
+      triggerGetPaymentById(paymentIdParam)
+        .unwrap()
+        .then(async (payRes: any) => {
+          const pay = payRes?.result || payRes?.data || payRes;
+          if (pay) {
+            const header = pay.header ?? pay;
+            const vId = String(header.vendorId || header.vendor_id || header.vendor?.id || "");
+            const invId = header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id;
+            let invLines: any[] = [];
+            if (invId) {
+              try {
+                const invRes = await triggerGetInvoiceById(invId).unwrap();
+                const invObj = invRes?.result || invRes?.data || invRes;
+                invLines = invObj?.purchaseInvoiceLines || invObj?.lines || invObj?.details || [];
+              } catch (e) {
+                // fallback
+              }
+            }
 
-        const mappedLines = invLines.map((l: any) => {
-          const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
-          const qty = Number(l.quantity || l.qty || 1);
-          const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
-          const dPct = Number(l.discountPercent || l.discount_percent || 0);
-          const dAmt = Number(l.discountAmount || l.discount_amount || 0);
-          const tPct = Number(l.taxPercent || l.tax_percent || 0);
-          const tAmt = Number(l.taxAmount || l.tax_amount || 0);
-          const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
-          return {
-            itemId: String(l.itemId || l.item_id || ""),
-            location_id: String(l.location_id || l.city_id || header.location_id || citiesList[0]?.id || ""),
-            orderedQty: qty,
-            uom_id: String(l.uom_id || itemObj?.uom_id || ""),
-            returnQty: qty,
-            unitPrice: price,
-            discountPercent: dPct,
-            discountAmount: dAmt,
-            taxPercent: tPct,
-            taxAmount: tAmt,
-            lineTotal: Number(lTot.toFixed(2)),
-            remarks: l.remarks || `Return from Payment #${header.paymentNumber || pay.id}`,
-          };
-        });
+            const mappedLines = invLines.map((l: any) => {
+              const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
+              const qty = Number(l.quantity || l.qty || 1);
+              const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
+              const dPct = Number(l.discountPercent || l.discount_percent || 0);
+              const dAmt = Number(l.discountAmount || l.discount_amount || 0);
+              const tPct = Number(l.taxPercent || l.tax_percent || 0);
+              const tAmt = Number(l.taxAmount || l.tax_amount || 0);
+              const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
+              const itemLoc = itemLocationMap[String(l.itemId || l.item_id)] || l.location_id || l.city_id || header.location_id || citiesList[0]?.id || "";
 
-        formik.setValues({
-          header: {
-            returnNumber: `RET-PAY-${pay.id}`,
-            vendorId: vId,
-            returnDate: new Date().toISOString().slice(0, 10),
-            subsidiary_id: String(header.subsidiary_id || ""),
-            class_id: String(header.class_id || ""),
-            department_id: String(header.department_id || ""),
-            location_id: String(header.location_id || ""),
-            currency_id: String(header.currency_id || ""),
-            reason: `Return against Purchase Payment #${header.paymentNumber || pay.id}`,
-            remarks: `Auto-populated from Purchase Payment #${header.paymentNumber || pay.id}`,
-            status: "DRAFT",
-            user_id: userId,
-          },
-          lineItems: mappedLines.length > 0 ? mappedLines : [emptyLineItem()],
+              return {
+                itemId: String(l.itemId || l.item_id || ""),
+                description: String(l.description || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || ""),
+                location_id: String(itemLoc),
+                orderedQty: qty,
+                onHand: onHandMap[String(l.itemId || l.item_id)] ?? 0,
+                uom_id: String(l.uom_id || itemObj?.uom_id || ""),
+                returnQty: qty,
+                unitPrice: price,
+                discountPercent: dPct,
+                discountAmount: dAmt,
+                taxPercent: tPct,
+                taxAmount: tAmt,
+                lineTotal: Number(lTot.toFixed(2)),
+                remarks: l.remarks || `Return from Payment #${header.paymentNumber || pay.id}`,
+              };
+            });
+
+            formik.setValues({
+              header: {
+                returnNumber: `RET-PAY-${pay.id}`,
+                vendorId: vId,
+                returnDate: new Date().toISOString().slice(0, 10),
+                subsidiary_id: String(header.subsidiary_id || ""),
+                class_id: String(header.class_id || ""),
+                department_id: String(header.department_id || ""),
+                location_id: String(header.location_id || ""),
+                currency_id: String(header.currency_id || ""),
+                reason: `Return against Purchase Payment #${header.paymentNumber || pay.id}`,
+                remarks: `Auto-populated from Purchase Payment #${header.paymentNumber || pay.id}`,
+                status: "DRAFT",
+                user_id: userId,
+              },
+              lineItems: mappedLines.length > 0 ? mappedLines : [emptyLineItem()],
+            });
+            setViewMode("form");
+            setIsEdit(false);
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch Payment by ID for return:", err);
         });
-        setViewMode("form");
-        setIsEdit(false);
-      }
     } else if (poIdParam) {
-      const po = purchaseOrders.find((x: any) => String(x.id) === String(poIdParam));
-      if (po) {
-        const header = po.header ?? po;
-        const poLines = po.purchaseOrderLines || po.lines || po.details || [];
-        const vId = String(header.vendorId || header.vendor_id || "");
+      triggerGetPOById(poIdParam)
+        .unwrap()
+        .then((poRes: any) => {
+          const po = poRes?.result || poRes?.data || poRes;
+          if (po) {
+            const header = po.header ?? po;
+            const poLines = po.purchaseOrderLines || po.lines || po.details || [];
+            const vId = String(header.vendorId || header.vendor_id || "");
 
-        const mappedLines = poLines.map((l: any) => {
-          const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
-          const qty = Number(l.quantity || l.qty || 1);
-          const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
-          const dPct = Number(l.discountPercent || l.discount_percent || 0);
-          const dAmt = Number(l.discountAmount || l.discount_amount || 0);
-          const tPct = Number(l.taxPercent || l.tax_percent || 0);
-          const tAmt = Number(l.taxAmount || l.tax_amount || 0);
-          const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
-          return {
-            itemId: String(l.itemId || l.item_id || ""),
-            location_id: String(l.location_id || l.city_id || header.location_id || header.city_id || citiesList[0]?.id || ""),
-            orderedQty: qty,
-            uom_id: String(l.uom_id || itemObj?.uom_id || ""),
-            returnQty: qty,
-            unitPrice: price,
-            discountPercent: dPct,
-            discountAmount: dAmt,
-            taxPercent: tPct,
-            taxAmount: tAmt,
-            lineTotal: Number(lTot.toFixed(2)),
-            remarks: l.remarks || `Return from PO #${header.poNumber || po.id}`,
-          };
-        });
+            const mappedLines = poLines.map((l: any) => {
+              const itemObj = items.find((i: any) => String(i.id) === String(l.itemId || l.item_id));
+              const qty = Number(l.quantity || l.qty || 1);
+              const price = Number(l.unitPrice || l.unit_price || l.rate || 0);
+              const dPct = Number(l.discountPercent || l.discount_percent || 0);
+              const dAmt = Number(l.discountAmount || l.discount_amount || 0);
+              const tPct = Number(l.taxPercent || l.tax_percent || 0);
+              const tAmt = Number(l.taxAmount || l.tax_amount || 0);
+              const lTot = Number(l.lineTotal || l.line_total || ((qty * price) - dAmt + tAmt));
+              const itemLoc = itemLocationMap[String(l.itemId || l.item_id)] || l.location_id || l.city_id || header.location_id || header.city_id || citiesList[0]?.id || "";
 
-        formik.setValues({
-          header: {
-            returnNumber: `RET-PO-${po.id}`,
-            vendorId: vId,
-            returnDate: new Date().toISOString().slice(0, 10),
-            subsidiary_id: String(header.subsidiary_id || ""),
-            class_id: String(header.class_id || ""),
-            department_id: String(header.department_id || ""),
-            location_id: String(header.location_id || header.city_id || ""),
-            currency_id: String(header.currency_id || ""),
-            reason: `Return against Purchase Order #${header.poNumber || po.id}`,
-            remarks: `Auto-populated from Purchase Order #${header.poNumber || po.id}`,
-            status: "DRAFT",
-            user_id: userId,
-          },
-          lineItems: mappedLines.length > 0 ? mappedLines : [emptyLineItem()],
+              return {
+                itemId: String(l.itemId || l.item_id || ""),
+                description: String(l.description || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || ""),
+                location_id: String(itemLoc),
+                orderedQty: qty,
+                onHand: onHandMap[String(l.itemId || l.item_id)] ?? 0,
+                uom_id: String(l.uom_id || itemObj?.uom_id || ""),
+                returnQty: qty,
+                unitPrice: price,
+                discountPercent: dPct,
+                discountAmount: dAmt,
+                taxPercent: tPct,
+                taxAmount: tAmt,
+                lineTotal: Number(lTot.toFixed(2)),
+                remarks: l.remarks || `Return from PO #${header.poNumber || po.id}`,
+              };
+            });
+
+            formik.setValues({
+              header: {
+                returnNumber: `RET-PO-${po.id}`,
+                vendorId: vId,
+                returnDate: new Date().toISOString().slice(0, 10),
+                subsidiary_id: String(header.subsidiary_id || ""),
+                class_id: String(header.class_id || ""),
+                department_id: String(header.department_id || ""),
+                location_id: String(header.location_id || header.city_id || ""),
+                currency_id: String(header.currency_id || ""),
+                reason: `Return against Purchase Order #${header.poNumber || po.id}`,
+                remarks: `Auto-populated from Purchase Order #${header.poNumber || po.id}`,
+                status: "DRAFT",
+                user_id: userId,
+              },
+              lineItems: mappedLines.length > 0 ? mappedLines : [emptyLineItem()],
+            });
+            setViewMode("form");
+            setIsEdit(false);
+          }
+        })
+        .catch((err: any) => {
+          console.error("Failed to fetch PO by ID for return:", err);
         });
-        setViewMode("form");
-        setIsEdit(false);
-      }
     } else if (urlAction === "create") {
       setViewMode("form");
       setIsEdit(false);
     } else if (urlId && urlAction === "view") {
-      const ret = purchaseReturns.find((r: any) => String(r.id) === String(urlId));
-      if (ret) {
-        setSelectedReturn(ret);
-        setViewMode("view");
-      }
+      triggerGetPurchaseReturnById(urlId)
+        .unwrap()
+        .then((res: any) => {
+          const ret = res?.result || res?.data || res;
+          if (ret) {
+            setSelectedReturn(ret);
+            setViewMode("view");
+          }
+        })
+        .catch(() => {
+          const ret = purchaseReturns.find((r: any) => String(r.id) === String(urlId));
+          if (ret) {
+            setSelectedReturn(ret);
+            setViewMode("view");
+          }
+        });
     }
-  }, [searchParams, purchaseReturns, purchaseInvoices, purchasePayments, purchaseOrders, items]);
+  }, [searchParams, items, inventoryItems]);
 
   const handleVendorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const vendorId = e.target.value;
@@ -917,55 +1095,69 @@ export default function PurchaseReturnComp() {
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
           customActions={
-            <div className="flex items-center space-x-1.5">
-              {(selectedReturnId || editId || selectedReturn) && String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "DRAFT").toUpperCase() === "DRAFT" && (
-                <button
-                  type="button"
-                  onClick={() => handleAuthorizeReturn(selectedReturnId || editId || selectedReturn?.id)}
-                  className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                >
-                  Authorize Return
-                </button>
-              )}
+            isView && selectedReturn ? (
+              <div className="flex items-center space-x-1.5">
+                {String(activeHeader.status || selectedReturn.status || "DRAFT").toUpperCase() === "DRAFT" && (
+                  <button
+                    type="button"
+                    onClick={() => handleAuthorizeReturn(selectedReturn.id)}
+                    className="bg-sky-700 hover:bg-sky-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                  >
+                    Authorize Return
+                  </button>
+                )}
 
-              {/* Step 2: Return (Item Fulfillment) - Only after Authorization, before full fulfillment */}
-              {["AUTHORIZED", "APPROVED", "PARTIALLY_FULFILLED"].includes(String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase()) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const retId = selectedReturnId || editId || selectedReturn?.id;
-                    if (retId) {
-                      navigate(`/return-fulfillment?returnId=${retId}`);
-                    }
-                  }}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
-                >
-                  Return (Item Fulfillment)
-                </button>
-              )}
+                {/* Step 2: Return (Item Fulfillment) - Only after Authorization, before full fulfillment */}
+                {["AUTHORIZED", "APPROVED", "PARTIALLY_FULFILLED"].includes(String(activeHeader.status || selectedReturn.status || "").toUpperCase()) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigate(`/return-fulfillment?returnId=${selectedReturn.id}`);
+                    }}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer"
+                  >
+                    Return (Item Fulfillment)
+                  </button>
+                )}
 
-              {/* Step 3: Credit (Vendor Credit) - STRICTLY AFTER FULFILLMENT, and REMOVED once completed */}
-              {String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase() === "FULFILLED" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const retId = selectedReturnId || editId || selectedReturn?.id;
-                    if (retId) {
-                      navigate(`/debit-note?returnId=${retId}`);
-                    }
-                  }}
-                  className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
-                >
-                  <ReceiptLong className="!w-3.5 !h-3.5" />
-                  <span>Credit (Vendor Credit)</span>
-                </button>
-              )}
-              {String(activeHeader.status || formik.values.header.status || selectedReturn?.status || "").toUpperCase() === "RETURNED" && (
-                <div className="flex items-center space-x-1 bg-teal-50 border border-teal-300 text-teal-800 text-xs px-2.5 py-1 rounded-xs font-semibold">
-                  <span>✓ Vendor Credit Completed</span>
-                </div>
-              )}
-            </div>
+                {/* Step 3: Credit (Vendor Credit) - STRICTLY AFTER FULFILLMENT, and REMOVED once completed */}
+                {(() => {
+                  const matchingDebitNote = debitNotes.find((dn: any) => {
+                    const dnReturnId = String(dn.purchase_return_id || dn.purchaseReturnId || dn.returnId || dn.header?.purchaseReturnHeaderId || dn.reason || "");
+                    return selectedReturn && (dnReturnId === String(selectedReturn.id) || dnReturnId.includes(String(selectedReturn.id)));
+                  });
+                  const isVendorCreditDone = Boolean(
+                    matchingDebitNote ||
+                    String(activeHeader.status || selectedReturn.status || "").toUpperCase() === "RETURNED"
+                  );
+
+                  if (String(activeHeader.status || selectedReturn.status || "").toUpperCase() === "FULFILLED" && !isVendorCreditDone) {
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigate(`/debit-note?returnId=${selectedReturn.id}`);
+                        }}
+                        className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1"
+                      >
+                        <ReceiptLong className="!w-3.5 !h-3.5" />
+                        <span>Credit (Vendor Credit)</span>
+                      </button>
+                    );
+                  }
+
+                  if (isVendorCreditDone || String(activeHeader.status || selectedReturn.status || "").toUpperCase() === "RETURNED") {
+                    return (
+                      <div className="flex items-center space-x-1 bg-teal-50 border border-teal-300 text-teal-800 text-xs px-2.5 py-1 rounded-xs font-semibold">
+                        <span>✓ Vendor Credit Completed</span>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })()}
+              </div>
+            ) : undefined
           }
           isSaving={isCreating || isUpdating}
           subTabs={[
@@ -980,6 +1172,9 @@ export default function PurchaseReturnComp() {
                         <tr>
                           <th className="p-2 border-r border-slate-400 w-10 text-center">#</th>
                           <th className="p-2 border-r border-slate-400 min-w-[180px]">ITEM *</th>
+                          <th className="p-2 border-r border-slate-400 min-w-[160px]">DESCRIPTION</th>
+                          {/* <th className="p-2 border-r border-slate-400 min-w-[140px]">LOCATION</th> */}
+                          <th className="p-2 border-r border-slate-400 w-20 text-right">ON-HAND</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">ORDERED QTY</th>
                           <th className="p-2 border-r border-slate-400 w-24 text-right">RETURN QTY *</th>
                           <th className="p-2 border-r border-slate-400 w-28 text-right">UNIT PRICE (₹)</th>
@@ -1002,12 +1197,19 @@ export default function PurchaseReturnComp() {
                           const tAmt = Number(line.taxAmount ?? line.tax_amount ?? 0);
                           const lTotal = Number(line.lineTotal ?? line.line_total ?? ((rQty * uPrice) - dAmt + tAmt));
                           const allowsDecimals = isDecimalAllowedForUOM(uoms.find((u: any) => String(u.id) === String(line.uom_id || itemObj?.uom_id)));
+                          const lineDesc = line.description || itemObj?.item_desc || itemObj?.description || itemObj?.item_name || "—";
+                          const lineOnHand = onHandMap[String(line.itemId || line.item_id)] ?? line.onHand ?? 0;
+                          const lineLocId = line.location_id || itemLocationMap[String(line.itemId || line.item_id)] || "";
+                          const lineLocName = citiesList.find((c: any) => String(c.id) === String(lineLocId))?.city_name || line.location?.city_name || "—";
 
                           if (isView) {
                             return (
                               <tr key={idx} className="hover:bg-slate-50">
                                 <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
                                 <td className="p-2 border-r border-slate-200 font-semibold text-slate-900">{line.item?.item_name || itemObj?.item_name || `Item #${line.itemId}`}</td>
+                                <td className="p-2 border-r border-slate-200 text-slate-700">{lineDesc}</td>
+                                {/* <td className="p-2 border-r border-slate-200 font-medium text-slate-800">{lineLocName}</td> */}
+                                <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold text-slate-700 bg-slate-50">{lineOnHand}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-700">{ordQty}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-red-600">{rQty}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono">₹{uPrice.toFixed(2)}</td>
@@ -1041,6 +1243,32 @@ export default function PurchaseReturnComp() {
                                   ))}
                                 </select>
                               </td>
+                              <td className="p-1.5 border-r border-slate-200">
+                                <input
+                                  type="text"
+                                  value={lineDesc}
+                                  disabled={true}
+                                  placeholder="Item Description"
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 text-slate-700 font-medium cursor-not-allowed"
+                                />
+                              </td>
+                              {/* <td className="p-1.5 border-r border-slate-200">
+                                <select
+                                  disabled={true}
+                                  value={lineLocId}
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs bg-slate-100 font-medium text-slate-700 cursor-not-allowed"
+                                >
+                                  <option value="">Select Location...</option>
+                                  {citiesList.map((c: any) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.city_name || c.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td> */}
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold text-slate-700 bg-slate-50">
+                                {lineOnHand}
+                              </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold text-slate-600 bg-slate-50">
                                 {line.orderedQty ?? line.returnQty ?? 0}
                               </td>
@@ -1073,24 +1301,20 @@ export default function PurchaseReturnComp() {
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
-                                  type="number"
-                                  step="any"
-                                  min="0"
+                                  type="text"
+                                  disabled={true}
                                   placeholder="0.00"
-                                  value={line.discountAmount || ""}
-                                  onChange={(e) => updateLineItemField(idx, "discountAmount", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
+                                  value={line.discountAmount !== undefined && line.discountAmount !== null && line.discountAmount !== "" ? Number(line.discountAmount).toFixed(2) : "0.00"}
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono bg-slate-100 font-medium text-slate-700 cursor-not-allowed"
                                 />
                               </td>
                               <td className="p-1.5 border-r border-slate-200">
                                 <input
-                                  type="number"
-                                  step="any"
-                                  min="0"
+                                  type="text"
+                                  disabled={true}
                                   placeholder="0.00"
-                                  value={line.taxAmount || ""}
-                                  onChange={(e) => updateLineItemField(idx, "taxAmount", e.target.value)}
-                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono focus:outline-none focus:border-sky-500"
+                                  value={line.taxAmount !== undefined && line.taxAmount !== null && line.taxAmount !== "" ? Number(line.taxAmount).toFixed(2) : "0.00"}
+                                  className="w-full h-7 px-2 text-xs border border-slate-300 rounded-xs text-right font-mono bg-slate-100 font-medium text-slate-700 cursor-not-allowed"
                                 />
                               </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-slate-900 bg-slate-50">

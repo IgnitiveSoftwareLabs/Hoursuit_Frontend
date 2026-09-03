@@ -48,6 +48,8 @@ export const debitNoteApi = createApi({
 export const {
   useGetDebitNotesQuery,
   useGetDebitNoteByIdQuery,
+  useLazyGetDebitNotesQuery,
+  useLazyGetDebitNoteByIdQuery,
   useCreateDebitNoteMutation,
   useUpdateDebitNoteMutation,
   useDeleteDebitNoteMutation,
