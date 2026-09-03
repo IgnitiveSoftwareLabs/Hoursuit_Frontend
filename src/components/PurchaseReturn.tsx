@@ -205,13 +205,13 @@ export default function PurchaseReturnComp() {
   const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : []), [purchaseOrdersData]);
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : []), [vendorsData]);
   const items = useMemo(() => (Array.isArray(itemsData?.result) ? itemsData.result : Array.isArray(itemsData?.data) ? itemsData.data : []), [itemsData]);
-  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : Array.isArray(subsidiariesData?.data) ? subsidiariesData.data : [];
-  const classesList = Array.isArray(classesData?.result) ? classesData.result : Array.isArray(classesData?.data) ? classesData.data : [];
-  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : Array.isArray(departmentsData?.data) ? departmentsData.data : [];
-  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : Array.isArray(citiesData?.data) ? citiesData.data : [];
-  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : Array.isArray(currenciesData?.data) ? currenciesData.data : [];
-  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : Array.isArray(uomsData?.data) ? uomsData.data : [];
-  const accounts = useMemo(() => (Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : Array.isArray(chartOfAccountsData?.data) ? chartOfAccountsData.data : []), [chartOfAccountsData]);
+  const subsidiaries = Array.isArray(subsidiariesData?.result) ? subsidiariesData.result : [];
+  const classesList = Array.isArray(classesData?.result) ? classesData.result : [];
+  const departmentsList = Array.isArray(departmentsData?.result) ? departmentsData.result : [];
+  const citiesList = Array.isArray(citiesData?.result) ? citiesData.result : [];
+  const currencies = Array.isArray(currenciesData?.result) ? currenciesData.result : [];
+  const uoms = Array.isArray(uomsData?.result) ? uomsData.result : [];
+  const accounts = useMemo(() => (Array.isArray(chartOfAccountsData?.result) ? chartOfAccountsData.result : []), [chartOfAccountsData]);
   const debitNotes = useMemo(() => (Array.isArray(debitNotesData?.result?.rows) ? debitNotesData.result.rows : Array.isArray(debitNotesData?.result) ? debitNotesData.result : Array.isArray(debitNotesData?.data) ? debitNotesData.data : []), [debitNotesData]);
 
   const formik = useFormik({
