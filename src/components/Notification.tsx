@@ -35,13 +35,22 @@ export default function NotificationDropdown() {
 
   return (
     <React.Fragment>
-      <Badge color="primary" variant="dot" overlap="circular">
+      <Badge color="error" variant="dot" overlap="circular">
         <IconButton
+          size="small"
           aria-label="notifications"
           onClick={handleClick}
-          sx={{ borderRadius: '50%', padding: 0.5, backgroundColor: '#E9E8FF' }}
+          sx={{
+            p: 0.75,
+            color: '#cbd5e1',
+            borderRadius: '4px',
+            '&:hover': {
+              color: '#ffffff',
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            },
+          }}
         >
-          <NotificationsNoneOutlinedIcon />
+          <NotificationsNoneOutlinedIcon sx={{ fontSize: 18 }} />
         </IconButton>
       </Badge>
 

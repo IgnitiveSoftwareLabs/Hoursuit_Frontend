@@ -16,8 +16,69 @@ interface GLImpactSubtabProps {
 }
 
 export const GLImpactSubtab: React.FC<GLImpactSubtabProps> = ({ entries, documentNumber }) => {
-  const totalDebits = entries.reduce((acc, curr) => acc + (Number(curr.debit) || 0), 0);
-  const totalCredits = entries.reduce((acc, curr) => acc + (Number(curr.credit) || 0), 0);
+  // Automatically combine multiple entries for the same account into a single unified row
+  const combinedEntries = React.useMemo(() => {
+    if (!Array.isArray(entries) || entries.length === 0) return [];
+    const map = new Map<string, GLEntry>();
+
+    for (const entry of entries) {
+      const isDebit = Number(entry.debit || 0) > 0;
+      const isCredit = Number(entry.credit || 0) > 0;
+      const side = isDebit ? "DEBIT" : isCredit ? "CREDIT" : "ZERO";
+
+      let code = String(entry.accountCode || "").trim();
+      let name = String(entry.accountName || "").trim();
+      const memoLower = String(entry.memo || "").toLowerCase();
+
+      // Ensure GST/Tax lines never display as Equity or Bank
+      if ((memoLower.includes("gst") || memoLower.includes("tax")) && (name.toLowerCase().includes("equity") || name.toLowerCase().includes("bank") || !name || name === "—")) {
+        code = "1400";
+        name = "Input GST";
+      }
+
+      // Ensure Item Fulfillment Debit displays as Vendor Return / Inventory Adjustment
+      if (isDebit && (memoLower.includes("fulfillment") || memoLower.includes("return clearing") || memoLower.includes("vendor return")) && (name.toLowerCase().includes("bank") || name.toLowerCase().includes("cash") || !name || name === "—" || name.toLowerCase().includes("equity"))) {
+        code = "5010";
+        name = "Vendor Return / Inventory Adjustment";
+      }
+
+      // Ensure Item Fulfillment Credit displays as Inventory Asset
+      if (isCredit && (memoLower.includes("fulfillment outward") || memoLower.includes("stock outward")) && (name.toLowerCase().includes("inventory") || !name || name === "—")) {
+        code = "1200";
+        name = "Inventory Asset";
+      }
+      
+      // Clean normalized grouping key by account name or code + debit/credit side
+      const identifier = name || code;
+      const cleanKey = `${identifier.toLowerCase().replace(/[^a-z0-9]/g, "")}_${side}`;
+
+      if (map.has(cleanKey)) {
+        const existing = map.get(cleanKey)!;
+        existing.debit = Number((Number(existing.debit || 0) + Number(entry.debit || 0)).toFixed(2));
+        existing.credit = Number((Number(existing.credit || 0) + Number(entry.credit || 0)).toFixed(2));
+        if (code && (!existing.accountCode || existing.accountCode === "—")) {
+          existing.accountCode = code;
+        }
+        if (name && (!existing.accountName || existing.accountName === "—")) {
+          existing.accountName = name;
+        }
+      } else {
+        map.set(cleanKey, {
+          accountCode: code || "—",
+          accountName: name || "—",
+          debit: Number(Number(entry.debit || 0).toFixed(2)),
+          credit: Number(Number(entry.credit || 0).toFixed(2)),
+          postingPeriod: entry.postingPeriod,
+          memo: entry.memo || "GL Impact Entry",
+        });
+      }
+    }
+
+    return Array.from(map.values());
+  }, [entries]);
+
+  const totalDebits = combinedEntries.reduce((acc, curr) => acc + (Number(curr.debit) || 0), 0);
+  const totalCredits = combinedEntries.reduce((acc, curr) => acc + (Number(curr.credit) || 0), 0);
 
   const isBalanced = Math.abs(totalDebits - totalCredits) < 0.01;
   const currentYearMonth = new Date().toISOString().slice(0, 7);
@@ -63,14 +124,14 @@ export const GLImpactSubtab: React.FC<GLImpactSubtabProps> = ({ entries, documen
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 bg-white">
-            {entries.length === 0 ? (
+            {combinedEntries.length === 0 ? (
               <tr>
                 <td colSpan={7} className="p-6 text-center text-slate-400 italic">
                   No General Ledger posting entries recorded for this document.
                 </td>
               </tr>
             ) : (
-              entries.map((entry, idx) => (
+              combinedEntries.map((entry, idx) => (
                 <tr key={idx} className="hover:bg-slate-50 transition-colors">
                   <td className="p-2 text-center border-r border-slate-200 font-mono text-slate-500">{idx + 1}</td>
                   <td className="p-2 border-r border-slate-200 font-mono font-bold text-sky-800">{entry.accountCode || "—"}</td>

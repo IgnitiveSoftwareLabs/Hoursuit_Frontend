@@ -1,3 +1,4 @@
+import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Add, Delete, Edit, Payments, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
@@ -150,6 +151,13 @@ const PurchaseInvoiceComp: React.FC = () => {
   const { data: debitNotesData } = useGetDebitNotesQuery({});
 
   const [createPurchaseInvoice, { isLoading: isCreating }] = useCreatePurchaseInvoiceMutation();
+  const activeInvId = (viewMode === "view" || isEdit) ? (selectedInvoice?.id || editId) : null;
+  const numInvId = Number(activeInvId);
+  const isValidInvId = Boolean(activeInvId && !isNaN(numInvId) && numInvId > 0);
+  const { data: journalEntryData } = useGetJournalEntryByIdQuery(
+    { id: numInvId || 0, source: "purchaseinvoice" },
+    { skip: !isValidInvId }
+  );
   const [updatePurchaseInvoice, { isLoading: isUpdating }] = useUpdatePurchaseInvoiceMutation();
   const [deletePurchaseInvoice] = useDeletePurchaseInvoiceMutation();
   const [triggerGetGRNById] = useLazyGetGRNByIdQuery();
@@ -279,7 +287,59 @@ const PurchaseInvoiceComp: React.FC = () => {
     },
   });
 
-  // Auto-select Subsidiary, Currency, Account, and Terms directly from Vendor when Vendor is selected
+  const autofillClassAndDepartment = (subId: string) => {
+    if (!subId) {
+      formik.setFieldValue("header.class_id", "");
+      formik.setFieldValue("header.department_id", "");
+      return;
+    }
+
+    const matchingClasses = classesList.filter(
+      (c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === String(subId)
+    );
+    if (matchingClasses.length > 0) {
+      formik.setFieldValue("header.class_id", String(matchingClasses[0].id));
+    } else {
+      const fallbackClass = classesList.find((c: any) => !c.subsidiary_id && !c.subsidiaryId && !c.subsidiary?.id);
+      formik.setFieldValue("header.class_id", fallbackClass ? String(fallbackClass.id) : (classesList[0]?.id ? String(classesList[0].id) : ""));
+    }
+
+    const matchingDepts = departmentsList.filter(
+      (d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === String(subId)
+    );
+    if (matchingDepts.length > 0) {
+      formik.setFieldValue("header.department_id", String(matchingDepts[0].id));
+    } else {
+      const fallbackDept = departmentsList.find((d: any) => !d.subsidiary_id && !d.subsidiaryId && !d.subsidiary?.id);
+      formik.setFieldValue("header.department_id", fallbackDept ? String(fallbackDept.id) : (departmentsList[0]?.id ? String(departmentsList[0].id) : ""));
+    }
+  };
+
+  const handleSubsidiaryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const subId = e.target.value;
+    formik.setFieldValue("header.subsidiary_id", subId);
+    autofillClassAndDepartment(subId);
+  };
+
+  const availableClasses = useMemo(() => {
+    const subId = formik.values.header.subsidiary_id;
+    if (!subId) return classesList;
+    const matching = classesList.filter(
+      (c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === String(subId)
+    );
+    return matching.length > 0 ? matching : classesList;
+  }, [classesList, formik.values.header.subsidiary_id]);
+
+  const availableDepartments = useMemo(() => {
+    const subId = formik.values.header.subsidiary_id;
+    if (!subId) return departmentsList;
+    const matching = departmentsList.filter(
+      (d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === String(subId)
+    );
+    return matching.length > 0 ? matching : departmentsList;
+  }, [departmentsList, formik.values.header.subsidiary_id]);
+
+  // Auto-select Subsidiary, Currency, Account, Terms, and Class/Department directly from Vendor when Vendor is selected
   useEffect(() => {
     const selectedVendorId = formik.values.header.vendorId;
     if (!selectedVendorId) return;
@@ -290,7 +350,11 @@ const PurchaseInvoiceComp: React.FC = () => {
     // 1. Auto-select Subsidiary directly from Vendor
     const subId = vObj.subsidiary_id || vObj.subsidiaryId || vObj.primary_subsidiary_id || vObj.subsidiary?.id;
     if (subId) {
-      formik.setFieldValue("header.subsidiary_id", String(subId));
+      const strSubId = String(subId);
+      formik.setFieldValue("header.subsidiary_id", strSubId);
+      if (!formik.values.header.class_id || !formik.values.header.department_id) {
+        autofillClassAndDepartment(strSubId);
+      }
     }
 
     // 2. Auto-select Currency directly from Vendor
@@ -336,7 +400,13 @@ const PurchaseInvoiceComp: React.FC = () => {
     if (pmId) {
       formik.setFieldValue("header.payment_method_id", String(pmId));
     }
-  }, [formik.values.header.vendorId, vendors, currencies, chartOfAccounts]);
+
+    // 6. Auto-select Location / City directly from Vendor if empty
+    const cityId = vObj.city_id || vObj.city?.id;
+    if (cityId && !formik.values.header.location_id) {
+      formik.setFieldValue("header.location_id", String(cityId));
+    }
+  }, [formik.values.header.vendorId, vendors, currencies, chartOfAccounts, paymentTerms]);
 
   const getNextBillNumber = useCallback(() => {
     const maxNum = purchaseInvoices.reduce((max: number, inv: any) => {
@@ -368,7 +438,7 @@ const PurchaseInvoiceComp: React.FC = () => {
     }
   }, [viewMode, isEdit, getNextBillNumber, purchaseInvoices]);
 
-  // Auto-populate all details (PO, Vendor, Items, Location, Memo, Subsidiary) when GRN is selected
+  // Auto-populate all details (PO, Vendor, Items, Location, Memo, Subsidiary, Class, Department) when GRN is selected or redirected
   const lastProcessedGrnIdRef = React.useRef<string | null>(null);
 
   useEffect(() => {
@@ -391,7 +461,7 @@ const PurchaseInvoiceComp: React.FC = () => {
         }
 
         let poObj = grnObj.purchaseOrder;
-        if (poId && (!poObj || !poObj.purchaseOrderLines)) {
+        if (poId && (!poObj || !poObj.purchaseOrderLines || !poObj.vendor_id)) {
           try {
             const poRes = await triggerGetPOById(poId).unwrap();
             poObj = poRes?.result || poRes?.data || poRes;
@@ -400,32 +470,103 @@ const PurchaseInvoiceComp: React.FC = () => {
           }
         }
 
-        const vendorId = grnObj.vendor_id || grnObj.vendorId || poObj?.vendor_id || poObj?.vendorId;
+        const vendorId = grnObj.vendor_id || grnObj.vendorId || poObj?.vendor_id || poObj?.vendorId || poObj?.vendor?.id;
+        const vendorObj = vendors.find((v: any) => String(v.id) === String(vendorId)) || poObj?.vendor;
         if (vendorId) {
           formik.setFieldValue("header.vendorId", String(vendorId));
         }
 
-        const grnMemo = grnObj.memo || grnObj.remarks || grnObj.comment;
+        const grnMemo = grnObj.memo || grnObj.remarks || grnObj.comment || poObj?.memo || poObj?.remarks;
         if (grnMemo) {
           formik.setFieldValue("header.remarks", grnMemo);
         }
 
-        const grnLoc = poObj?.city_id || poObj?.cityId || poObj?.location_id || poObj?.locationId || grnObj.location_id || grnObj.locationId || grnObj.city_id || grnObj.godownId || grnObj.warehouseId;
-        if (grnLoc) {
-          formik.setFieldValue("header.location_id", String(grnLoc));
-        }
-
-        if (poObj) {
-          const subId = poObj.subsidiary_id || poObj.subsidiaryId;
-          if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
-          const classId = poObj.class_id || poObj.classId;
-          if (classId) formik.setFieldValue("header.class_id", String(classId));
-          const deptId = poObj.department_id || poObj.departmentId;
-          if (deptId) formik.setFieldValue("header.department_id", String(deptId));
-        }
-
         const grnLines = grnObj.lineItems || grnObj.grnDetails || grnObj.details || grnObj.line_items || [];
         const poLines = poObj?.lineItems || poObj?.purchaseOrderLines || poObj?.line_items || poObj?.details || [];
+
+        // Location resolution: strictly resolve Location/City from PO (header or lines) first, then GRN
+        const poLocation =
+          poObj?.city_id ||
+          poObj?.cityId ||
+          poObj?.location_id ||
+          poObj?.locationId ||
+          poObj?.city?.id ||
+          poObj?.location?.id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.city_id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.location_id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.city?.id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.location?.id ||
+          grnObj.location_id ||
+          grnObj.locationId ||
+          grnObj.city_id ||
+          grnObj.location?.id ||
+          grnObj.godownId ||
+          grnObj.warehouseId ||
+          grnLines.find((l: any) => l.location_id || l.city_id || l.location?.id)?.location_id ||
+          grnLines.find((l: any) => l.location_id || l.city_id || l.location?.id)?.city_id ||
+          grnLines.find((l: any) => l.location_id || l.city_id || l.location?.id)?.location?.id ||
+          vendorObj?.city_id;
+
+        if (poLocation) {
+          formik.setFieldValue("header.location_id", String(poLocation));
+        }
+
+        // Subsidiary resolution: PO -> Vendor Primary Subsidiary -> GRN
+        const subId = poObj?.subsidiary_id || poObj?.subsidiaryId || poObj?.subsidiary?.id || vendorObj?.primary_subsidiary_id || vendorObj?.subsidiary_id || vendorObj?.subsidiary?.id || grnObj.subsidiary_id;
+        if (subId) {
+          const strSubId = String(subId);
+          formik.setFieldValue("header.subsidiary_id", strSubId);
+
+          // Class resolution: PO Class -> Match Class by Subsidiary
+          const classIdFromPO = poObj?.class_id || poObj?.classId || poObj?.class?.id || grnObj.class_id;
+          if (classIdFromPO) {
+            formik.setFieldValue("header.class_id", String(classIdFromPO));
+          } else {
+            const matchingClass = classesList.find((c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === strSubId);
+            if (matchingClass) {
+              formik.setFieldValue("header.class_id", String(matchingClass.id));
+            } else {
+              const fallbackClass = classesList.find((c: any) => !c.subsidiary_id && !c.subsidiaryId);
+              if (fallbackClass) formik.setFieldValue("header.class_id", String(fallbackClass.id));
+            }
+          }
+
+          // Department resolution: PO Department -> Match Department by Subsidiary
+          const deptIdFromPO = poObj?.department_id || poObj?.departmentId || poObj?.department?.id || grnObj.department_id;
+          if (deptIdFromPO) {
+            formik.setFieldValue("header.department_id", String(deptIdFromPO));
+          } else {
+            const matchingDept = departmentsList.find((d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === strSubId);
+            if (matchingDept) {
+              formik.setFieldValue("header.department_id", String(matchingDept.id));
+            } else {
+              const fallbackDept = departmentsList.find((d: any) => !d.subsidiary_id && !d.subsidiaryId);
+              if (fallbackDept) formik.setFieldValue("header.department_id", String(fallbackDept.id));
+            }
+          }
+        }
+
+        // Currency resolution
+        const currId = poObj?.currency_id || poObj?.currencyId || poObj?.currency?.id || vendorObj?.currency_id || vendorObj?.currencyId || vendorObj?.currency?.id;
+        if (currId) {
+          formik.setFieldValue("header.currency_id", String(currId));
+          const currObj = currencies.find((c: any) => String(c.id) === String(currId));
+          if (currObj) {
+            formik.setFieldValue("header.currency", currObj.currency_code || currObj.currency_symbol || currObj.currency_name || "INR");
+          }
+        }
+
+        // Terms & Payment Method & AP Account resolution
+        const termsId = poObj?.terms_id || poObj?.termsId || vendorObj?.terms_id || vendorObj?.termsId || vendorObj?.terms?.id;
+        if (termsId) formik.setFieldValue("header.terms_id", String(termsId));
+
+        const pmId = poObj?.payment_method_id || poObj?.paymentMethodId || vendorObj?.default_payment_method_id || vendorObj?.payment_method_id;
+        if (pmId) formik.setFieldValue("header.payment_method_id", String(pmId));
+
+        const accId = vendorObj?.default_payables_account_id || vendorObj?.account_id || vendorObj?.opening_balance_account_id;
+        if (accId) {
+          formik.setFieldValue("header.account_id", String(accId));
+        }
 
         if (Array.isArray(grnLines) && grnLines.length > 0) {
           const mappedLines = grnLines.map((gLine: any) => {
@@ -512,9 +653,9 @@ const PurchaseInvoiceComp: React.FC = () => {
       .catch((err: any) => {
         console.error("Failed to fetch GRN by ID:", err);
       });
-  }, [formik.values.header.grnHeaderId, isEdit, items, userId]);
+  }, [formik.values.header.grnHeaderId, isEdit, items, vendors, classesList, departmentsList, currencies, chartOfAccounts, userId]);
 
-  // Auto-populate all details (Vendor, Items, Location, Memo, Subsidiary) when Purchase Order is selected directly (and no GRN is selected)
+  // Auto-populate all details (Vendor, Items, Location, Memo, Subsidiary, Class, Department) when Purchase Order is selected directly (and no GRN is selected)
   const lastProcessedPoIdRef = React.useRef<string | null>(null);
 
   useEffect(() => {
@@ -533,6 +674,7 @@ const PurchaseInvoiceComp: React.FC = () => {
         if (!poObj) return;
 
         const vendorId = poObj.vendor_id || poObj.vendorId || poObj.vendor?.id;
+        const vendorObj = vendors.find((v: any) => String(v.id) === String(vendorId)) || poObj?.vendor;
         if (vendorId) {
           formik.setFieldValue("header.vendorId", String(vendorId));
         }
@@ -542,24 +684,64 @@ const PurchaseInvoiceComp: React.FC = () => {
           formik.setFieldValue("header.remarks", poMemo);
         }
 
-        const poLoc = poObj.city_id || poObj.cityId || poObj.location_id || poObj.locationId || poObj.location?.id || poObj.city?.id;
+        const poLines = poObj.purchaseOrderLines || poObj.lineItems || poObj.line_items || poObj.details || [];
+        const poLoc =
+          poObj?.city_id ||
+          poObj?.cityId ||
+          poObj?.location_id ||
+          poObj?.locationId ||
+          poObj?.city?.id ||
+          poObj?.location?.id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.city_id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.location_id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.city?.id ||
+          poLines.find((l: any) => l.city_id || l.location_id || l.city?.id || l.location?.id)?.location?.id ||
+          vendorObj?.city_id;
+
         if (poLoc) {
           formik.setFieldValue("header.location_id", String(poLoc));
         }
 
-        const subId = poObj.subsidiary_id || poObj.subsidiaryId;
-        if (subId) formik.setFieldValue("header.subsidiary_id", String(subId));
-        const classId = poObj.class_id || poObj.classId;
-        if (classId) formik.setFieldValue("header.class_id", String(classId));
-        const deptId = poObj.department_id || poObj.departmentId;
-        if (deptId) formik.setFieldValue("header.department_id", String(deptId));
+        const subId = poObj.subsidiary_id || poObj.subsidiaryId || vendorObj?.primary_subsidiary_id || vendorObj?.subsidiary_id;
+        if (subId) {
+          const strSubId = String(subId);
+          formik.setFieldValue("header.subsidiary_id", strSubId);
 
-        const currId = poObj.currency_id || poObj.currencyId;
-        if (currId) {
-          formik.setFieldValue("header.currency_id", String(currId));
+          const classId = poObj.class_id || poObj.classId;
+          if (classId) {
+            formik.setFieldValue("header.class_id", String(classId));
+          } else {
+            const matchingClass = classesList.find((c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === strSubId);
+            if (matchingClass) formik.setFieldValue("header.class_id", String(matchingClass.id));
+          }
+
+          const deptId = poObj.department_id || poObj.departmentId;
+          if (deptId) {
+            formik.setFieldValue("header.department_id", String(deptId));
+          } else {
+            const matchingDept = departmentsList.find((d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === strSubId);
+            if (matchingDept) formik.setFieldValue("header.department_id", String(matchingDept.id));
+          }
         }
 
-        const poLines = poObj.purchaseOrderLines || poObj.lineItems || poObj.line_items || poObj.details || [];
+        const currId = poObj.currency_id || poObj.currencyId || vendorObj?.currency_id;
+        if (currId) {
+          formik.setFieldValue("header.currency_id", String(currId));
+          const currObj = currencies.find((c: any) => String(c.id) === String(currId));
+          if (currObj) {
+            formik.setFieldValue("header.currency", currObj.currency_code || currObj.currency_symbol || currObj.currency_name || "INR");
+          }
+        }
+
+        const termsId = poObj.terms_id || poObj.termsId || vendorObj?.terms_id;
+        if (termsId) formik.setFieldValue("header.terms_id", String(termsId));
+
+        const pmId = poObj.payment_method_id || poObj.paymentMethodId || vendorObj?.default_payment_method_id;
+        if (pmId) formik.setFieldValue("header.payment_method_id", String(pmId));
+
+        const accId = vendorObj?.default_payables_account_id || vendorObj?.account_id;
+        if (accId) formik.setFieldValue("header.account_id", String(accId));
+
         if (Array.isArray(poLines) && poLines.length > 0) {
           const mappedLines = poLines.map((poLine: any) => {
             const itemId = String(poLine.itemId ?? poLine.item_id ?? poLine.item?.id ?? "");
@@ -610,7 +792,7 @@ const PurchaseInvoiceComp: React.FC = () => {
       .catch((err: any) => {
         console.error("Failed to fetch PO by ID:", err);
       });
-  }, [formik.values.header.poHeaderId, formik.values.header.grnHeaderId, items, isEdit, userId]);
+  }, [formik.values.header.poHeaderId, formik.values.header.grnHeaderId, items, vendors, classesList, departmentsList, currencies, isEdit, userId]);
 
   // Sync state with URL search params (Single Bill View / PO / GRN link support)
   useEffect(() => {
@@ -1208,17 +1390,6 @@ const PurchaseInvoiceComp: React.FC = () => {
                       </tbody>
                     </table>
                   </div>
-
-                  {/* {!isView && (
-                    <button
-                      type="button"
-                      onClick={addLine}
-                      className="bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-1.5 rounded-xs transition-colors flex items-center space-x-1 cursor-pointer"
-                    >
-                      <Add className="!w-4 !h-4" />
-                      <span>Add Bill Line</span>
-                    </button>
-                  )} */}
                 </div>
               ),
             },
@@ -1635,7 +1806,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                   <select
                     name="header.subsidiary_id"
                     value={formik.values.header.subsidiary_id || ""}
-                    onChange={formik.handleChange}
+                    onChange={handleSubsidiaryChange}
                     className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
                   >
                     <option value="">Select Subsidiary...</option>
@@ -1675,7 +1846,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                     className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
                   >
                     <option value="">Select Class...</option>
-                    {classesList.map((c: any) => (
+                    {availableClasses.map((c: any) => (
                       <option key={c.id} value={c.id}>
                         {c.class_name || c.name}
                       </option>
@@ -1692,7 +1863,7 @@ const PurchaseInvoiceComp: React.FC = () => {
                     className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
                   >
                     <option value="">Select Department...</option>
-                    {departmentsList.map((d: any) => (
+                    {availableDepartments.map((d: any) => (
                       <option key={d.id} value={d.id}>
                         {d.department_name || d.name}
                       </option>

@@ -1,6 +1,7 @@
+import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Add, Delete, Edit, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp, ReceiptLong, LocalShipping, AssignmentReturn } from "@mui/icons-material";
+import { Add, Delete, Edit, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp, ReceiptLong, LocalShipping, AssignmentReturn, AccountBalance, Payment, CheckCircle, Close, ArrowForward } from "@mui/icons-material";
 import { useFormik } from "formik";
 import toast from "react-hot-toast";
 import * as Yup from "yup";
@@ -23,6 +24,9 @@ import {
   useGetDebitNoteByIdQuery,
   useLazyGetDebitNoteByIdQuery,
   useUpdateDebitNoteMutation,
+  useApplyVendorCreditToBillsMutation,
+  useGetOpenBillsForVendorQuery,
+  useGetVendorCreditApplicationsQuery,
 } from "../RTK/services/debitNoteApi";
 import {
   useGetPurchaseInvoicesQuery,
@@ -51,6 +55,11 @@ export default function DebitNoteComp() {
   const [noteToDelete, setNoteToDelete] = useState<any>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
+  const [applyBillAmounts, setApplyBillAmounts] = useState<{ [billId: number]: number }>({});
+  const [applyRemarks, setApplyRemarks] = useState("");
+  const [applyError, setApplyError] = useState("");
+  const [sourceLines, setSourceLines] = useState<any[]>([]);
 
   // Eager Queries
   const { data: debitNotesData, refetch: refetchDebitNotes } = useGetDebitNotesQuery({ page: 1, limit: 50 });
@@ -66,8 +75,29 @@ export default function DebitNoteComp() {
   const { data: currenciesData } = useGetCurrenciesQuery(undefined);
 
   const [createDebitNote, { isLoading: isCreating }] = useCreateDebitNoteMutation();
+  const activeDebitNoteId = (viewMode === "view" || isEdit) ? (selectedDebitNote?.id || editId) : null;
+  const numDebitNoteId = Number(activeDebitNoteId);
+  const isValidDebitNoteId = Boolean(activeDebitNoteId && !isNaN(numDebitNoteId) && numDebitNoteId > 0);
+  const { data: journalEntryData } = useGetJournalEntryByIdQuery(
+    { id: numDebitNoteId || 0, source: "vendorcredit" },
+    { skip: !isValidDebitNoteId }
+  );
   const [updateDebitNote, { isLoading: isUpdating }] = useUpdateDebitNoteMutation();
   const [deleteDebitNote] = useDeleteDebitNoteMutation();
+  const [applyVendorCredit, { isLoading: isApplyingCredit }] = useApplyVendorCreditToBillsMutation();
+
+  const selectedVendorId = selectedDebitNote?.vendorId || selectedDebitNote?.vendor_id || selectedDebitNote?.vendor?.id;
+  const { data: openBillsData, refetch: refetchOpenBills } = useGetOpenBillsForVendorQuery(selectedVendorId || 0, {
+    skip: !selectedVendorId || !isApplyModalOpen,
+  });
+  const { data: applicationsData, refetch: refetchApplications } = useGetVendorCreditApplicationsQuery(selectedDebitNote?.id || 0, {
+    skip: !selectedDebitNote?.id || viewMode !== "view",
+  });
+
+  const openBills = Array.isArray(openBillsData?.result) ? openBillsData.result : [];
+  const appliedBills = Array.isArray(applicationsData?.result?.billApplies) ? applicationsData.result.billApplies : [];
+  const creditRefunds = Array.isArray(applicationsData?.result?.refunds) ? applicationsData.result.refunds : [];
+
   const [triggerGetPurchaseReturnById] = useLazyGetPurchaseReturnByIdQuery();
   const [triggerGetInvoiceById] = useLazyGetPurchaseInvoiceByIdQuery();
   const [triggerGetDebitNoteById] = useLazyGetDebitNoteByIdQuery();
@@ -114,22 +144,59 @@ export default function DebitNoteComp() {
     }),
     onSubmit: async (values) => {
       try {
+        const lineItems = sourceLines.length > 0
+          ? sourceLines.map((l: any) => ({
+              purchaseReturnLineId: l.id || l.purchaseReturnLineId || null,
+              itemId: Number(l.itemId || l.item_id || l.ItemMasterId || 1),
+              creditQty: Number(l.returnQty || l.return_quantity || l.fulfilledQty || l.quantity || 1),
+              unitPrice: Number(l.unitPrice || l.unit_price || l.rate || 0),
+              discountPercent: Number(l.discountPercent || l.discount_percent || 0),
+              discountAmount: Number(l.discountAmount || l.discount_amount || 0),
+              taxPercent: Number(l.taxPercent || l.tax_percent || 0),
+              taxAmount: Number(l.taxAmount || l.tax_amount || 0),
+              totalAmount: Number(l.totalAmount || l.total_amount || 0),
+              remarks: l.remarks || null,
+            }))
+          : [
+              {
+                itemId: 1,
+                creditQty: 1,
+                unitPrice: Number(values.subtotal || values.amount || 0),
+                discountPercent: Number(values.discountPercent || 0),
+                discountAmount: Number(values.discountAmount || 0),
+                taxPercent: Number(values.taxPercent || 0),
+                taxAmount: Number(values.taxAmount || 0),
+                totalAmount: Number(values.amount || 0),
+                remarks: values.reason || values.remarks || null,
+              },
+            ];
+
         const payload = {
           header: {
             ...values,
+            vendorId: Number(values.vendorId),
+            creditNoteNumber: values.debitNoteNumber || undefined,
+            creditDate: values.debitNoteDate,
             subtotal: Number(values.subtotal || 0),
+            discountAmount: Number(values.discountAmount || 0),
             discount_amount: Number(values.discountAmount || 0),
+            taxAmount: Number(values.taxAmount || 0),
             tax_amount: Number(values.taxAmount || 0),
+            totalAmount: Number(values.amount || 0),
             total_amount: Number(values.amount || 0),
+            purchaseReturnHeaderId: searchParams.get("returnId") ? Number(searchParams.get("returnId")) : undefined,
+            fulfillmentHeaderId: searchParams.get("fulfillmentId") ? Number(searchParams.get("fulfillmentId")) : undefined,
+            purchaseInvoiceHeaderId: values.purchaseInvoiceHeaderId ? Number(values.purchaseInvoiceHeaderId) : undefined,
             user_id: userId,
           },
+          lineItems,
+          lines: lineItems,
+          details: lineItems,
           subtotal: Number(values.subtotal || 0),
           discount_amount: Number(values.discountAmount || 0),
           tax_amount: Number(values.taxAmount || 0),
           total_amount: Number(values.amount || 0),
           amount: Number(values.amount || 0),
-          details: [],
-          lines: [],
         };
 
         let savedId = editId;
@@ -140,7 +207,7 @@ export default function DebitNoteComp() {
         } else {
           const res = await createDebitNote(payload).unwrap();
           toast.success("Vendor Credit recorded successfully.");
-          savedId = res?.result?.id || res?.data?.id || res?.result?.header?.id || res?.data?.header?.id || res?.id;
+          savedId = res?.result?.header?.id || res?.result?.id || res?.data?.id || res?.data?.header?.id || res?.id;
         }
         if (refetchDebitNotes) refetchDebitNotes();
         if (savedId) {
@@ -197,17 +264,71 @@ export default function DebitNoteComp() {
     }
   };
 
+  const autofillClassAndDepartment = (subId: string) => {
+    if (!subId) {
+      formik.setFieldValue("class_id", "");
+      formik.setFieldValue("department_id", "");
+      return;
+    }
+
+    const matchingClasses = classesList.filter(
+      (c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === String(subId)
+    );
+    if (matchingClasses.length > 0) {
+      formik.setFieldValue("class_id", String(matchingClasses[0].id));
+    } else {
+      const fallbackClass = classesList.find((c: any) => !c.subsidiary_id && !c.subsidiaryId && !c.subsidiary?.id);
+      formik.setFieldValue("class_id", fallbackClass ? String(fallbackClass.id) : (classesList[0]?.id ? String(classesList[0].id) : ""));
+    }
+
+    const matchingDepts = departmentsList.filter(
+      (d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === String(subId)
+    );
+    if (matchingDepts.length > 0) {
+      formik.setFieldValue("department_id", String(matchingDepts[0].id));
+    } else {
+      const fallbackDept = departmentsList.find((d: any) => !d.subsidiary_id && !d.subsidiaryId && !d.subsidiary?.id);
+      formik.setFieldValue("department_id", fallbackDept ? String(fallbackDept.id) : (departmentsList[0]?.id ? String(departmentsList[0].id) : ""));
+    }
+  };
+
+  const handleSubsidiaryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const subId = e.target.value;
+    formik.setFieldValue("subsidiary_id", subId);
+    autofillClassAndDepartment(subId);
+  };
+
+  const availableClasses = useMemo(() => {
+    const subId = formik.values.subsidiary_id;
+    if (!subId) return classesList;
+    const matching = classesList.filter(
+      (c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === String(subId)
+    );
+    return matching.length > 0 ? matching : classesList;
+  }, [classesList, formik.values.subsidiary_id]);
+
+  const availableDepartments = useMemo(() => {
+    const subId = formik.values.subsidiary_id;
+    if (!subId) return departmentsList;
+    const matching = departmentsList.filter(
+      (d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === String(subId)
+    );
+    return matching.length > 0 ? matching : departmentsList;
+  }, [departmentsList, formik.values.subsidiary_id]);
+
   useEffect(() => {
     const urlAction = searchParams.get("action");
     const urlId = searchParams.get("id");
     const returnId = searchParams.get("returnId");
+    const fulfillmentId = searchParams.get("fulfillmentId");
     const invoiceId = searchParams.get("invoiceId");
 
-    if (returnId) {
+    if (returnId || fulfillmentId) {
+      const activeRefId = returnId || fulfillmentId;
       setViewMode("form");
       setIsEdit(false);
 
-      triggerGetPurchaseReturnById(returnId)
+      triggerGetPurchaseReturnById(activeRefId)
         .unwrap()
         .then((res: any) => {
           const retObj = res?.result || res?.data || res;
@@ -215,21 +336,21 @@ export default function DebitNoteComp() {
 
           const header = retObj.header || retObj;
           const statusVal = String(header.status || retObj.status || "").toUpperCase();
-          if (statusVal !== "FULFILLED" && statusVal !== "RETURNED") {
-            toast.error(`Purchase Return #${header.returnNumber || header.return_number || returnId} must be FULFILLED before creating a Vendor Credit.`);
-            setViewMode("list");
-            setSearchParams({});
-            return;
+          if (statusVal !== "FULFILLED" && statusVal !== "RETURNED" && statusVal !== "AUTHORIZED") {
+            toast.error(`Purchase Return #${header.returnNumber || header.return_number || activeRefId} must be authorized/fulfilled before creating a Vendor Credit.`);
           }
 
-          if (header.vendorId || header.vendor_id) {
-            formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
+          const vendorIdVal = header.vendorId || header.vendor_id;
+          const selectedVendor = vendors.find((v: any) => String(v.id) === String(vendorIdVal));
+          if (vendorIdVal) {
+            formik.setFieldValue("vendorId", String(vendorIdVal));
           }
           if (header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id) {
             formik.setFieldValue("purchaseInvoiceHeaderId", String(header.purchaseInvoiceHeaderId || header.purchase_invoice_header_id));
           }
 
           const retLines = retObj.details || retObj.lineItems || retObj.purchaseReturnLines || retObj.purchase_return_lines || [];
+          setSourceLines(retLines);
           let subtotal = Number(header.subtotal || 0);
           let discountAmount = Number(header.discountAmount || header.discount_amount || 0);
           let taxAmount = Number(header.taxAmount || header.tax_amount || 0);
@@ -238,7 +359,7 @@ export default function DebitNoteComp() {
           if (retLines.length > 0) {
             if (subtotal === 0) {
               subtotal = retLines.reduce((acc: number, l: any) => {
-                const q = Number(l.returnQty || l.return_quantity || l.quantity || 0);
+                const q = Number(l.returnQty || l.return_quantity || l.fulfilledQty || l.quantity || 0);
                 const p = Number(l.unitPrice || l.unit_price || l.rate || 0);
                 return acc + (q * p);
               }, 0);
@@ -260,19 +381,39 @@ export default function DebitNoteComp() {
           const finalNet = totalAmt > 0 ? totalAmt : Math.max(0, Number((subtotal - discountAmount + taxAmount).toFixed(2)));
           formik.setFieldValue("amount", finalNet);
 
-          if (header.subsidiary_id || header.subsidiaryId) {
-            formik.setFieldValue("subsidiary_id", String(header.subsidiary_id || header.subsidiaryId));
+          const subId = header.subsidiary_id || header.subsidiaryId || selectedVendor?.primary_subsidiary_id || selectedVendor?.subsidiary_id;
+          if (subId) {
+            const strSubId = String(subId);
+            formik.setFieldValue("subsidiary_id", strSubId);
+
+            const classIdFromRet = header.class_id || header.classId;
+            if (classIdFromRet) {
+              formik.setFieldValue("class_id", String(classIdFromRet));
+            } else {
+              const matchClass = classesList.find((c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? "") === strSubId);
+              if (matchClass) formik.setFieldValue("class_id", String(matchClass.id));
+              else autofillClassAndDepartment(strSubId);
+            }
+
+            const deptIdFromRet = header.department_id || header.departmentId;
+            if (deptIdFromRet) {
+              formik.setFieldValue("department_id", String(deptIdFromRet));
+            } else {
+              const matchDept = departmentsList.find((d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? "") === strSubId);
+              if (matchDept) formik.setFieldValue("department_id", String(matchDept.id));
+            }
           }
-          if (header.class_id || header.classId) {
-            formik.setFieldValue("class_id", String(header.class_id || header.classId));
-          }
-          if (header.department_id || header.departmentId) {
-            formik.setFieldValue("department_id", String(header.department_id || header.departmentId));
-          }
-          if (header.currency_id || header.currencyId) {
-            formik.setFieldValue("currency_id", String(header.currency_id || header.currencyId));
-          }
-          formik.setFieldValue("reason", `Vendor Credit against Return Authorization #${header.returnNumber || header.return_number || returnId}`);
+
+          const locId = header.location_id || header.city_id || selectedVendor?.city_id;
+          if (locId) formik.setFieldValue("location_id", String(locId));
+
+          const currId = header.currency_id || header.currencyId || selectedVendor?.currency_id;
+          if (currId) formik.setFieldValue("currency_id", String(currId));
+
+          const apAcc = selectedVendor?.default_payables_account_id || selectedVendor?.account_id;
+          if (apAcc) formik.setFieldValue("accountId", String(apAcc));
+
+          formik.setFieldValue("reason", `Vendor Credit against Return Authorization #${header.returnNumber || header.return_number || activeRefId}`);
         })
         .catch((err: any) => {
           console.error("Failed to fetch Return by ID for vendor credit:", err);
@@ -288,9 +429,13 @@ export default function DebitNoteComp() {
           if (!invObj) return;
 
           const header = invObj.header || invObj;
-          if (header.vendorId || header.vendor_id) {
-            formik.setFieldValue("vendorId", String(header.vendorId || header.vendor_id));
+          const vendorIdVal = header.vendorId || header.vendor_id;
+          const selectedVendor = vendors.find((v: any) => String(v.id) === String(vendorIdVal));
+          if (vendorIdVal) {
+            formik.setFieldValue("vendorId", String(vendorIdVal));
           }
+          const invLines = invObj.details || invObj.lineItems || invObj.purchaseInvoiceLines || invObj.purchase_invoice_lines || [];
+          setSourceLines(invLines);
           formik.setFieldValue("purchaseInvoiceHeaderId", String(invoiceId));
 
           const sub = Number(header.subtotal || 0);
@@ -302,6 +447,18 @@ export default function DebitNoteComp() {
           formik.setFieldValue("discountAmount", Number(disc.toFixed(2)));
           formik.setFieldValue("taxAmount", Number(tax.toFixed(2)));
           formik.setFieldValue("amount", total > 0 ? total : Math.max(0, Number((sub - disc + tax).toFixed(2))));
+
+          const subId = header.subsidiary_id || header.subsidiaryId || selectedVendor?.primary_subsidiary_id || selectedVendor?.subsidiary_id;
+          if (subId) {
+            const strSubId = String(subId);
+            formik.setFieldValue("subsidiary_id", strSubId);
+            if (header.class_id) formik.setFieldValue("class_id", String(header.class_id));
+            else autofillClassAndDepartment(strSubId);
+            if (header.department_id) formik.setFieldValue("department_id", String(header.department_id));
+          }
+          if (header.location_id || header.city_id) formik.setFieldValue("location_id", String(header.location_id || header.city_id));
+          if (header.currency_id) formik.setFieldValue("currency_id", String(header.currency_id));
+          if (selectedVendor?.default_payables_account_id) formik.setFieldValue("accountId", String(selectedVendor.default_payables_account_id));
         })
         .catch((err: any) => {
           console.error("Failed to fetch Invoice by ID for vendor credit:", err);
@@ -328,7 +485,7 @@ export default function DebitNoteComp() {
           }
         });
     }
-  }, [searchParams]);
+  }, [searchParams, vendors, classesList, departmentsList]);
 
   const handleVendorChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const vendorId = e.target.value;
@@ -337,7 +494,11 @@ export default function DebitNoteComp() {
     const selectedVendor = vendors.find((v: any) => String(v.id) === String(vendorId));
     if (selectedVendor) {
       const subId = selectedVendor.primary_subsidiary_id ?? selectedVendor.primarySubsidiary?.id ?? selectedVendor.subsidiary_id ?? selectedVendor.subsidiary?.id;
-      if (subId) formik.setFieldValue("subsidiary_id", String(subId));
+      if (subId) {
+        const strSubId = String(subId);
+        formik.setFieldValue("subsidiary_id", strSubId);
+        autofillClassAndDepartment(strSubId);
+      }
 
       const currId = selectedVendor.currency_id ?? selectedVendor.currency?.id;
       if (currId) formik.setFieldValue("currency_id", String(currId));
@@ -345,6 +506,9 @@ export default function DebitNoteComp() {
       const primaryAddr = selectedVendor.addressBook?.find((a: any) => a.default_billing) || selectedVendor.addressBook?.[0];
       const cityId = primaryAddr?.city_id ?? primaryAddr?.city?.id ?? selectedVendor.city_id ?? selectedVendor.city?.id;
       if (cityId) formik.setFieldValue("location_id", String(cityId));
+
+      const apAcc = selectedVendor.default_payables_account_id || selectedVendor.account_id;
+      if (apAcc) formik.setFieldValue("accountId", String(apAcc));
     }
   };
 
@@ -356,6 +520,11 @@ export default function DebitNoteComp() {
     const item = debitNotes.find((x: any) => String(x.id) === String(id));
     if (item) {
       const header = item.header ?? item;
+      const status = String(header.status || "").toUpperCase();
+      if (status !== "DRAFT") {
+        toast.error(`Cannot edit Vendor Credit with status "${header.status || status}". Only DRAFT records can be edited.`);
+        return;
+      }
       const formatDate = (val: any) => (val && String(val).length >= 10 ? String(val).slice(0, 10) : "");
 
       const sub = Number(header.subtotal || 0);
@@ -382,7 +551,7 @@ export default function DebitNoteComp() {
         currency_id: String(header.currency_id ?? ""),
         reason: header.reason ?? "",
         remarks: header.remarks ?? "",
-        status: header.status ?? "APPROVED",
+        status: header.status ?? "DRAFT",
         user_id: userId,
       });
       setEditId(id);
@@ -403,6 +572,13 @@ export default function DebitNoteComp() {
 
   const confirmDelete = async () => {
     if (!noteToDelete) return;
+    const status = String(noteToDelete.status || noteToDelete.header?.status || "").toUpperCase();
+    if (status !== "DRAFT") {
+      toast.error(`Cannot delete Vendor Credit with status "${status}". Only DRAFT records can be deleted.`);
+      setDeleteDialogOpen(false);
+      setNoteToDelete(null);
+      return;
+    }
     try {
       await deleteDebitNote(noteToDelete.id).unwrap();
       toast.success("Debit Note deleted successfully");
@@ -499,6 +675,11 @@ export default function DebitNoteComp() {
     const totalAmount = Number(activeHeader.amount || activeHeader.totalAmount || activeHeader.total_amount || (activeSubtotal - activeDiscount + activeTax) || 0);
     const resolvedSubtotal = activeSubtotal > 0 ? activeSubtotal : (totalAmount + activeDiscount - activeTax > 0 ? totalAmount + activeDiscount - activeTax : totalAmount);
 
+    const creditTotalAmt = totalAmount;
+    const creditAppliedAmt = appliedBills.reduce((sum: number, b: any) => sum + Number(b.appliedAmount || 0), 0);
+    const creditRefundedAmt = creditRefunds.reduce((sum: number, r: any) => sum + Number(r.refundAmount || 0), 0);
+    const creditAvailableAmt = Math.max(0, Number((creditTotalAmt - creditAppliedAmt - creditRefundedAmt).toFixed(2)));
+
     const dnNoStr = activeHeader.debitNoteNumber || activeHeader.debit_note_number || `DN-${selectedDebitNote?.id || "NEW"}`;
 
     const findAccount = (keywords: string[], typeKeywords: string[], defaultName: string, defaultCode: string) => {
@@ -517,40 +698,68 @@ export default function DebitNoteComp() {
 
     const apAcc = accountObj
       ? { name: accountObj.account_name || accountObj.name, code: accountObj.account_number || accountObj.account_code || "2000" }
-      : findAccount(["Accounts Payable", "Trade Creditors", "Creditors", "Payable"], ["Accounts Payable", "Current Liability", "Liability"], "Accounts Payable (AP)", "2000");
+      : findAccount(["Accounts Payable", "Trade Creditors", "Creditors", "Payable"], ["Accounts Payable", "Current Liability", "Liability"], "Accounts Payable", "2000");
 
-    const clearingAcc = findAccount(
-      ["Purchase Return Clearing", "Return Clearing", "GRNI", "Accrued Purchases", "Clearing"],
-      ["Asset", "Current Asset", "Liability", "Current Liability"],
-      "Accrued Purchases / Vendor Return Clearing",
-      "2200"
+    const inventoryAcc = findAccount(
+      ["Inventory", "Inventory Asset", "Stock Asset", "Vendor Return"],
+      ["Asset", "Current Asset", "Inventory"],
+      "Inventory",
+      "1200"
     );
 
     const taxAcc = findAccount(
-      ["Input Tax", "Input GST", "Tax Receivable", "Tax Credit", "GST Input", "Duties & Taxes"],
+      ["Input GST", "Input Tax", "Tax Receivable", "Tax Credit", "GST Input", "Duties & Taxes"],
       ["Tax", "Current Asset", "Asset"],
-      "Input Tax (GST) Receivable",
+      "Input GST",
       "1400"
     );
 
-    const discAcc = findAccount(
-      ["Purchase Discount", "Discount Received", "Discount Income", "Discount"],
-      ["Income", "Expense", "Direct Income"],
-      "Purchase Discount / Discount Received",
-      "4200"
-    );
+    const inventoryAmount = Number((totalAmount - (activeTax > 0 ? activeTax : 0)).toFixed(2));
+    const backendGlEntries = (Array.isArray(journalEntryData?.result?.lines) && journalEntryData.result.lines.length > 0)
+      ? journalEntryData.result.lines.map((l: any) => {
+          const isTaxLine = (l.narration || "").toLowerCase().includes("gst") || (l.narration || "").toLowerCase().includes("tax");
+          const rawName = l.account?.account_name || l.account_name || "—";
+          const rawCode = l.account?.account_number || l.account?.account_code || l.account_code || "—";
+          const name = isTaxLine && (rawName.toLowerCase().includes("equity") || rawName.toLowerCase().includes("bank") || rawName === "—")
+            ? "Input GST"
+            : rawName;
+          const code = isTaxLine && (rawName.toLowerCase().includes("equity") || rawName.toLowerCase().includes("bank") || rawName === "—")
+            ? "1400"
+            : rawCode;
 
-    const clearingAmount = Number((totalAmount - (activeTax > 0 ? activeTax : 0)).toFixed(2));
-    const glImpactEntries = [
-      // 1. DEBIT: Accounts Payable (Reduces liability by total net credit amount)
+          return {
+            accountCode: code,
+            accountName: name,
+            debit: Number(l.debit_amount || l.debit || 0),
+            credit: Number(l.credit_amount || l.credit || 0),
+            postingPeriod: (journalEntryData.result.entry_date || "").slice(0, 7) || undefined,
+            memo: l.narration || l.memo || journalEntryData.result.narration || "GL Impact Entry",
+          };
+        })
+      : [];
+
+    const previewGlEntries = [
+      // 1. DEBIT: Accounts Payable (Reduces vendor liability by total amount)
       {
         accountCode: apAcc.code,
         accountName: apAcc.name,
         debit: totalAmount,
         credit: 0,
-        memo: `Debit AP - Vendor Credit #${dnNoStr} (${vendorName})`,
+        memo: `Debit Accounts Payable - Vendor Credit #${dnNoStr} (${vendorName})`,
       },
-      // 2. CREDIT: Input Tax (GST) Reversal (if GST exists)
+      // 2. CREDIT: Inventory (Inventory Value Reduction)
+      ...(inventoryAmount > 0
+        ? [
+            {
+              accountCode: inventoryAcc.code,
+              accountName: inventoryAcc.name,
+              debit: 0,
+              credit: inventoryAmount,
+              memo: `Inventory Reversal - #${dnNoStr}`,
+            },
+          ]
+        : []),
+      // 3. CREDIT: Input GST (GST Reversal)
       ...(activeTax > 0
         ? [
             {
@@ -558,76 +767,102 @@ export default function DebitNoteComp() {
               accountName: taxAcc.name,
               debit: 0,
               credit: activeTax,
-              memo: `Input Tax (GST) Reversal - #${dnNoStr}`,
-            },
-          ]
-        : []),
-      // 3. CREDIT: Purchase Return Clearing (Offsets fulfillment accrual)
-      ...(clearingAmount > 0
-        ? [
-            {
-              accountCode: clearingAcc.code,
-              accountName: clearingAcc.name,
-              debit: 0,
-              credit: clearingAmount,
-              memo: `Vendor Return Clearing Offset - #${dnNoStr}`,
+              memo: `Input GST Reversal - #${dnNoStr}`,
             },
           ]
         : []),
     ];
 
+    const isRecordDraft = String(activeHeader.status || activeHeader.document_status || "").toUpperCase() === "DRAFT";
+
     return (
-      <form onSubmit={formik.handleSubmit}>
+      <>
+        <form onSubmit={formik.handleSubmit}>
         <RecordPageLayout
           recordType="Debit Note / Vendor Credit"
           subtitle={isView ? `Debit Note #${dnNoStr} ${vendorName}` : isEdit ? `Edit Debit Note #${formik.values.debitNoteNumber}` : "New Debit Note"}
           mode={isView ? "view" : "edit"}
           onSave={() => formik.handleSubmit()}
-          onEdit={() => { if (selectedDebitNote) handleEdit(selectedDebitNote.id); }}
+          onEdit={isRecordDraft && canUpdate("debit_note") ? () => { if (selectedDebitNote) handleEdit(selectedDebitNote.id); } : undefined}
           onBack={() => { setViewMode("list"); setSearchParams({}); }}
           onCancel={() => { setViewMode("list"); setSearchParams({}); }}
           onListClick={() => { setViewMode("list"); setSearchParams({}); }}
           onSearchClick={() => { setViewMode("list"); setSearchParams({}); }}
           customActions={
-            isView && selectedDebitNote && String(activeHeader.status || activeHeader.document_status || "").toUpperCase() === "DRAFT" ? (
+            isView && selectedDebitNote ? (
               <div className="flex items-center space-x-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      const updatedPayload = {
-                        ...selectedDebitNote,
-                        header: {
-                          ...(selectedDebitNote.header || selectedDebitNote),
+                {String(activeHeader.status || activeHeader.document_status || "").toUpperCase() === "DRAFT" ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        const updatedPayload = {
+                          ...selectedDebitNote,
+                          header: {
+                            ...(selectedDebitNote.header || selectedDebitNote),
+                            status: "APPROVED",
+                          },
                           status: "APPROVED",
-                        },
-                        status: "APPROVED",
-                      };
-                      await updateDebitNote({
-                        id: selectedDebitNote.id,
-                        body: updatedPayload,
-                      }).unwrap();
-                      toast.success("Vendor Credit approved & posted successfully.");
-                      if (refetchDebitNotes) refetchDebitNotes();
-                      setSelectedDebitNote({
-                        ...selectedDebitNote,
-                        header: {
-                          ...(selectedDebitNote.header || selectedDebitNote),
+                        };
+                        await updateDebitNote({
+                          id: selectedDebitNote.id,
+                          body: updatedPayload,
+                        }).unwrap();
+                        toast.success("Vendor Credit approved & posted successfully.");
+                        if (refetchDebitNotes) refetchDebitNotes();
+                        setSelectedDebitNote({
+                          ...selectedDebitNote,
+                          header: {
+                            ...(selectedDebitNote.header || selectedDebitNote),
+                            status: "APPROVED",
+                          },
                           status: "APPROVED",
-                        },
-                        status: "APPROVED",
-                      });
-                      setViewMode("view");
-                      setSearchParams({ action: "view", id: String(selectedDebitNote.id) });
-                    } catch (err: any) {
-                      toast.error(err?.data?.message || "Failed to approve Vendor Credit.");
-                    }
-                  }}
-                  className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
-                >
-                  <ReceiptLong className="!w-4 !h-4" />
-                  <span>Approve & Post to GL</span>
-                </button>
+                        });
+                        setViewMode("view");
+                        setSearchParams({ action: "view", id: String(selectedDebitNote.id) });
+                      } catch (err: any) {
+                        toast.error(err?.data?.message || "Failed to approve Vendor Credit.");
+                      }
+                    }}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
+                  >
+                    <ReceiptLong className="!w-4 !h-4" />
+                    <span>Approve & Post to GL</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setApplyBillAmounts({});
+                        setApplyRemarks("");
+                        setApplyError("");
+                        setIsApplyModalOpen(true);
+                      }}
+                      disabled={creditAvailableAmt <= 0.01}
+                      className={`text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5 ${
+                        creditAvailableAmt > 0.01
+                          ? "bg-sky-700 hover:bg-sky-800 text-white"
+                          : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                      }`}
+                    >
+                      <Payment className="!w-4 !h-4" />
+                      <span>Apply to Bills</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const vId = selectedVendorId || formik.values.vendorId || activeHeader.vendorId || activeHeader.vendor_id || (selectedDebitNote?.vendor?.id);
+                        navigate(`/vendor-refund?debitNoteId=${selectedDebitNote.id || activeHeader.id}&vendorId=${vId || ""}`);
+                      }}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
+                    >
+                      <AccountBalance className="!w-4 !h-4" />
+                      <span>Vendor Refund</span>
+                    </button>
+                  </>
+                )}
               </div>
             ) : undefined
           }
@@ -665,15 +900,94 @@ export default function DebitNoteComp() {
                 </div>
               ),
             },
-            ...((isView && String(activeHeader.status || "").toUpperCase() !== "DRAFT")
+            ...((isView)
               ? [
+                  {
+                    id: "applications",
+                    label: `Bill Applications & Refunds (${appliedBills.length + creditRefunds.length})`,
+                    content: (
+                      <div className="space-y-4 text-xs">
+                        {/* Applied Bills */}
+                        <div className="bg-white border border-slate-200 rounded-xs p-3 space-y-2">
+                          <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Applied Purchase Bills</span>
+                          {appliedBills.length === 0 ? (
+                            <div className="text-slate-400 italic text-center py-3">No Purchase Bills applied against this credit note yet.</div>
+                          ) : (
+                            <table className="w-full text-left text-xs border border-slate-200">
+                              <thead className="bg-[#1d3e4c] text-white text-[10px] uppercase font-bold">
+                                <tr>
+                                  <th className="p-2 border-r border-slate-400">Bill / Invoice #</th>
+                                  <th className="p-2 border-r border-slate-400">Invoice Date</th>
+                                  <th className="p-2 border-r border-slate-400 text-right">Invoice Total (₹)</th>
+                                  <th className="p-2 border-r border-slate-400 text-right">Amount Applied (₹)</th>
+                                  <th className="p-2 border-r border-slate-400 text-right">Remaining Due (₹)</th>
+                                  <th className="p-2 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200 font-mono">
+                                {appliedBills.map((app: any, i: number) => (
+                                  <tr key={i} className="hover:bg-slate-50">
+                                    <td className="p-2 border-r border-slate-200 font-bold text-sky-800">{app.purchaseInvoice?.invoiceNumber || `INV-#${app.purchaseInvoiceId}`}</td>
+                                    <td className="p-2 border-r border-slate-200">{app.purchaseInvoice?.invoiceDate ? new Date(app.purchaseInvoice.invoiceDate).toLocaleDateString() : "—"}</td>
+                                    <td className="p-2 border-r border-slate-200 text-right font-sans">₹{Number(app.purchaseInvoice?.totalAmount || 0).toFixed(2)}</td>
+                                    <td className="p-2 border-r border-slate-200 text-right font-bold text-emerald-700">₹{Number(app.appliedAmount || 0).toFixed(2)}</td>
+                                    <td className="p-2 border-r border-slate-200 text-right font-sans">₹{Number(app.purchaseInvoice?.balanceAmount || 0).toFixed(2)}</td>
+                                    <td className="p-2 text-center font-sans">
+                                      <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                                        {app.purchaseInvoice?.status || "APPLIED"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+
+                        {/* Refunds */}
+                        <div className="bg-white border border-slate-200 rounded-xs p-3 space-y-2">
+                          <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px]">Vendor Refunds Processed</span>
+                          {creditRefunds.length === 0 ? (
+                            <div className="text-slate-400 italic text-center py-3">No Vendor Refunds processed for this credit note.</div>
+                          ) : (
+                            <table className="w-full text-left text-xs border border-slate-200">
+                              <thead className="bg-[#1d3e4c] text-white text-[10px] uppercase font-bold">
+                                <tr>
+                                  <th className="p-2 border-r border-slate-400">Refund #</th>
+                                  <th className="p-2 border-r border-slate-400">Refund Date</th>
+                                  <th className="p-2 border-r border-slate-400 text-right">Refund Amount (₹)</th>
+                                  <th className="p-2 border-r border-slate-400">Bank Account</th>
+                                  <th className="p-2 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-200 font-mono">
+                                {creditRefunds.map((ref: any, i: number) => (
+                                  <tr key={i} className="hover:bg-slate-50">
+                                    <td className="p-2 border-r border-slate-200 font-bold text-sky-800">{ref.refundNumber}</td>
+                                    <td className="p-2 border-r border-slate-200">{ref.refundDate ? new Date(ref.refundDate).toLocaleDateString() : "—"}</td>
+                                    <td className="p-2 border-r border-slate-200 text-right font-bold text-emerald-700">₹{Number(ref.refundAmount || 0).toFixed(2)}</td>
+                                    <td className="p-2 border-r border-slate-200 font-sans">{ref.bankAccount?.account_name || "Bank Account"}</td>
+                                    <td className="p-2 text-center font-sans">
+                                      <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                                        {ref.status || "POSTED"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      </div>
+                    ),
+                  },
                   {
                     id: "gl_impact",
                     label: "GL Impact",
                     content: (
                       <GLImpactSubtab
                         documentNumber={dnNoStr}
-                        entries={glImpactEntries}
+                        entries={backendGlEntries.length > 0 ? backendGlEntries : previewGlEntries}
                       />
                     ),
                   },
@@ -831,7 +1145,8 @@ export default function DebitNoteComp() {
                         name="discountAmount"
                         value={formik.values.discountAmount}
                         onChange={handleDiscountChange}
-                        className="h-7 text-xs border border-slate-300 rounded-xs px-2 text-right font-mono bg-white focus:outline-none focus:border-sky-500"
+                        disabled={true}
+                        className="h-7 text-xs border border-slate-300 rounded-xs px-2 text-right font-mono bg-slate-100 text-slate-600 cursor-not-allowed focus:outline-none"
                       />
                     </div>
 
@@ -846,7 +1161,8 @@ export default function DebitNoteComp() {
                         name="taxAmount"
                         value={formik.values.taxAmount}
                         onChange={handleTaxChange}
-                        className="h-7 text-xs border border-slate-300 rounded-xs px-2 text-right font-mono bg-white focus:outline-none focus:border-sky-500"
+                        disabled={true}
+                        className="h-7 text-xs border border-slate-300 rounded-xs px-2 text-right font-mono bg-slate-100 text-slate-600 cursor-not-allowed focus:outline-none"
                       />
                     </div>
 
@@ -973,8 +1289,9 @@ export default function DebitNoteComp() {
                   <select
                     name="subsidiary_id"
                     value={formik.values.subsidiary_id || ""}
-                    onChange={formik.handleChange}
-                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    onChange={handleSubsidiaryChange}
+                    disabled={true}
+                    className="h-7 text-xs bg-slate-100 text-slate-600 border border-slate-300 rounded-xs px-2 cursor-not-allowed focus:outline-none"
                   >
                     <option value="">Select Subsidiary...</option>
                     {subsidiaries.map((s: any) => (
@@ -1008,10 +1325,11 @@ export default function DebitNoteComp() {
                     name="class_id"
                     value={formik.values.class_id || ""}
                     onChange={formik.handleChange}
-                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    disabled={true}
+                    className="h-7 text-xs bg-slate-100 text-slate-600 border border-slate-300 rounded-xs px-2 cursor-not-allowed focus:outline-none"
                   >
                     <option value="">Select Class...</option>
-                    {classesList.map((c: any) => (
+                    {availableClasses.map((c: any) => (
                       <option key={c.id} value={c.id}>
                         {c.class_name || c.name}
                       </option>
@@ -1025,10 +1343,11 @@ export default function DebitNoteComp() {
                     name="department_id"
                     value={formik.values.department_id || ""}
                     onChange={formik.handleChange}
-                    className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500"
+                    disabled={true}
+                    className="h-7 text-xs bg-slate-100 text-slate-600 border border-slate-300 rounded-xs px-2 cursor-not-allowed focus:outline-none"
                   >
                     <option value="">Select Department...</option>
-                    {departmentsList.map((d: any) => (
+                    {availableDepartments.map((d: any) => (
                       <option key={d.id} value={d.id}>
                         {d.department_name || d.name}
                       </option>
@@ -1067,8 +1386,202 @@ export default function DebitNoteComp() {
           </RecordSection>
         </RecordPageLayout>
       </form>
-    );
-  }
+
+      {/* APPLY TO BILLS MODAL */}
+      {isApplyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xs border border-slate-300 shadow-xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden text-xs">
+            {/* Modal Header */}
+            <div className="bg-[#1d3e4c] text-white p-3 flex items-center justify-between font-bold">
+              <span>Apply Vendor Credit #{dnNoStr} to Open Purchase Bills</span>
+              <button onClick={() => setIsApplyModalOpen(false)} className="text-slate-300 hover:text-white cursor-pointer">
+                <Close className="!w-5 !h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 overflow-y-auto space-y-4 flex-1">
+              {/* Credit Status Summary */}
+              <div className="bg-slate-50 p-3 rounded-xs border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+                <div>
+                  <div className="text-[10px] text-slate-500 font-sans uppercase font-bold">Total Credit</div>
+                  <div className="font-bold text-slate-800">₹{creditTotalAmt.toFixed(2)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-sans uppercase font-bold">Already Applied</div>
+                  <div className="font-bold text-sky-800">₹{creditAppliedAmt.toFixed(2)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500 font-sans uppercase font-bold">Already Refunded</div>
+                  <div className="font-bold text-amber-800">₹{creditRefundedAmt.toFixed(2)}</div>
+                </div>
+                <div className="bg-emerald-100/60 p-1.5 rounded-xs border border-emerald-300">
+                  <div className="text-[10px] text-emerald-800 font-sans uppercase font-bold">Available to Apply</div>
+                  <div className="font-extrabold text-emerald-800 text-sm">₹{creditAvailableAmt.toFixed(2)}</div>
+                </div>
+              </div>
+
+              {applyError && (
+                <div className="bg-rose-50 border border-rose-300 text-rose-800 p-2.5 rounded-xs">
+                  {applyError}
+                </div>
+              )}
+
+              {/* Open Bills Table */}
+              <div>
+                <div className="font-bold text-slate-700 uppercase text-[11px] mb-2">Select Purchase Bills to Apply Credit</div>
+                {openBills.length === 0 ? (
+                  <div className="text-center py-6 text-slate-400 italic bg-slate-50 border border-slate-200 rounded-xs">
+                    No open/unpaid purchase bills found for {vendorName}.
+                  </div>
+                ) : (
+                  <table className="w-full text-left text-xs border border-slate-300 rounded-xs border-collapse">
+                    <thead className="bg-[#e5eff5] text-[#1d3e4c] font-bold text-[10px] uppercase">
+                      <tr>
+                        <th className="p-2.5 border-r border-slate-300 w-10 text-center">APPLY</th>
+                        <th className="p-2.5 border-r border-slate-300">BILL / INVOICE #</th>
+                        <th className="p-2.5 border-r border-slate-300">DATE</th>
+                        <th className="p-2.5 border-r border-slate-300 text-right">TOTAL AMOUNT (₹)</th>
+                        <th className="p-2.5 border-r border-slate-300 text-right">PAID (₹)</th>
+                        <th className="p-2.5 border-r border-slate-300 text-right">DUE BALANCE (₹)</th>
+                        <th className="p-2.5 text-right w-40">AMOUNT TO APPLY (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 font-mono">
+                      {openBills.map((bill: any) => {
+                        const due = Number(bill.dueAmount || bill.balanceAmount || 0);
+                        const currentAppliedVal = applyBillAmounts[bill.id] || 0;
+                        const isChecked = currentAppliedVal > 0;
+
+                        return (
+                          <tr key={bill.id} className="hover:bg-sky-50/40">
+                            <td className="p-2.5 border-r border-slate-200 text-center">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    const totalOtherApplied = Object.entries(applyBillAmounts)
+                                      .filter(([id]) => Number(id) !== bill.id)
+                                      .reduce((sum, [, val]) => sum + Number(val || 0), 0);
+                                    const maxCanApply = Math.min(due, Math.max(0, creditAvailableAmt - totalOtherApplied));
+                                    setApplyBillAmounts((prev) => ({ ...prev, [bill.id]: Number(maxCanApply.toFixed(2)) }));
+                                  } else {
+                                    setApplyBillAmounts((prev) => {
+                                      const next = { ...prev };
+                                      delete next[bill.id];
+                                      return next;
+                                    });
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td className="p-2.5 border-r border-slate-200 font-bold text-sky-800">{bill.invoiceNumber}</td>
+                            <td className="p-2.5 border-r border-slate-200 font-sans">{bill.invoiceDate ? new Date(bill.invoiceDate).toLocaleDateString() : "—"}</td>
+                            <td className="p-2.5 border-r border-slate-200 text-right">₹{Number(bill.totalAmount || 0).toFixed(2)}</td>
+                            <td className="p-2.5 border-r border-slate-200 text-right">₹{Number(bill.paidAmount || 0).toFixed(2)}</td>
+                            <td className="p-2.5 border-r border-slate-200 text-right font-bold text-amber-800">₹{due.toFixed(2)}</td>
+                            <td className="p-2.5 text-right">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max={due}
+                                value={applyBillAmounts[bill.id] !== undefined ? applyBillAmounts[bill.id] : ""}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setApplyBillAmounts((prev) => ({ ...prev, [bill.id]: val }));
+                                }}
+                                className="w-full p-1 border border-slate-300 rounded-xs text-right font-bold focus:border-sky-600 outline-none"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Remarks */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">Remarks / Memo</label>
+                <input
+                  type="text"
+                  value={applyRemarks}
+                  onChange={(e) => setApplyRemarks(e.target.value)}
+                  placeholder="e.g. Applied against outstanding bills"
+                  className="w-full p-2 border border-slate-300 rounded-xs outline-none focus:border-sky-600"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-100 p-3 border-t border-slate-300 flex items-center justify-between">
+              <div className="font-mono">
+                <span className="text-slate-600 font-sans font-bold text-xs uppercase mr-2">Total Applying Now:</span>
+                <span className="text-base font-extrabold text-emerald-800">
+                  ₹{Object.values(applyBillAmounts).reduce((sum, val) => sum + Number(val || 0), 0).toFixed(2)}
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setIsApplyModalOpen(false)}
+                  className="px-4 py-1.5 border border-slate-300 rounded-xs text-slate-700 hover:bg-slate-200 font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setApplyError("");
+                    const totalNow = Object.values(applyBillAmounts).reduce((sum, val) => sum + Number(val || 0), 0);
+                    if (totalNow <= 0) {
+                      setApplyError("Please specify an amount to apply on at least one bill.");
+                      return;
+                    }
+                    if (totalNow > creditAvailableAmt) {
+                      setApplyError(`Total applying (₹${totalNow.toFixed(2)}) exceeds available credit of ₹${creditAvailableAmt.toFixed(2)}.`);
+                      return;
+                    }
+
+                    const billApplications = Object.entries(applyBillAmounts)
+                      .filter(([, amt]) => Number(amt) > 0)
+                      .map(([invoiceId, amt]) => ({
+                        purchaseInvoiceId: Number(invoiceId),
+                        amountToApply: Number(amt),
+                      }));
+
+                    try {
+                      const creditIdToApply = Number(selectedDebitNote?.id || activeHeader?.id);
+                      await applyVendorCredit({
+                        vendorCreditId: creditIdToApply,
+                        billApplications,
+                        remarks: applyRemarks,
+                      }).unwrap();
+                      toast.success("Vendor credit applied successfully!");
+                      setIsApplyModalOpen(false);
+                      if (refetchDebitNotes) refetchDebitNotes();
+                      if (refetchApplications) refetchApplications();
+                    } catch (err: any) {
+                      setApplyError(err?.data?.message || err?.message || "Failed to apply vendor credit");
+                    }
+                  }}
+                  disabled={isApplyingCredit}
+                  className="px-5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xs font-bold transition-colors shadow-xs cursor-pointer disabled:bg-slate-300"
+                >
+                  {isApplyingCredit ? "Applying..." : "Confirm & Apply Credit"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
   // ── RENDER 2: DATAGRID LIST VIEW MODE ──
   const filteredNotes = debitNotes.filter((note: any) => {
@@ -1166,15 +1679,17 @@ export default function DebitNoteComp() {
                 const amt = Number(note.amount || note.totalAmount || note.total_amount || 0);
                 const displaySub = sub > 0 ? sub : (amt > 0 ? amt + disc - tax : amt);
 
+                const isRowDraft = String(note.status || "").toUpperCase() === "DRAFT";
+
                 return (
                   <tr key={note.id} className="hover:bg-sky-50/50 transition-colors">
                     <td className="p-2 border-r border-slate-200 text-center font-semibold space-x-1">
-                      {canUpdate("debit_note") ? (
+                      {isRowDraft && canUpdate("debit_note") ? (
                         <button onClick={() => handleEdit(note.id)} className="text-sky-700 hover:underline cursor-pointer">
                           Edit
                         </button>
                       ) : (
-                        <span className="text-slate-300">Edit</span>
+                        <span className="text-slate-300 select-none cursor-not-allowed" title="Only DRAFT records can be edited">Edit</span>
                       )}
                       <span className="text-slate-300">|</span>
                       <button onClick={() => handleView(note.id)} className="text-sky-700 hover:underline cursor-pointer">
@@ -1209,7 +1724,7 @@ export default function DebitNoteComp() {
                       </span>
                     </td>
                     <td className="p-2 text-center">
-                      {canDelete("debit_note") && (
+                      {isRowDraft && canDelete("debit_note") ? (
                         <button
                           onClick={() => {
                             setNoteToDelete(note);
@@ -1219,6 +1734,8 @@ export default function DebitNoteComp() {
                         >
                           Delete
                         </button>
+                      ) : (
+                        <span className="text-slate-300 select-none text-[11px]" title="Only DRAFT records can be deleted">—</span>
                       )}
                     </td>
                   </tr>
@@ -1232,7 +1749,7 @@ export default function DebitNoteComp() {
       <ConfirmationDialog
         open={deleteDialogOpen}
         title="Delete Debit Note"
-        message="Are you sure you want to delete this debit note? This action cannot be undone."
+        message="Are you sure you want to delete this DRAFT debit note? This action cannot be undone."
         onConfirm={confirmDelete}
         onCancel={() => setDeleteDialogOpen(false)}
       />

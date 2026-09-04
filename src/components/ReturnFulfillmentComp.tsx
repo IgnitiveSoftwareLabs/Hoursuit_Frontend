@@ -1,3 +1,4 @@
+import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Add, Delete, Edit, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp, CheckBox, CheckBoxOutlineBlank, ReceiptLong, LocalShipping, AssignmentReturn } from "@mui/icons-material";
@@ -110,6 +111,13 @@ export default function ReturnFulfillmentComp() {
   const { data: purchaseInvoicesData } = useGetPurchaseInvoicesQuery(undefined);
 
   const [createReturnFulfillment, { isLoading: isCreating }] = useCreateReturnFulfillmentMutation();
+  const activeFulfillmentId = (viewMode === "view" || isEdit) ? (selectedFulfillment?.id || editId) : null;
+  const numFulfillmentId = Number(activeFulfillmentId);
+  const isValidFulfillmentId = Boolean(activeFulfillmentId && !isNaN(numFulfillmentId) && numFulfillmentId > 0);
+  const { data: journalEntryData } = useGetJournalEntryByIdQuery(
+    { id: numFulfillmentId || 0, source: "purchasereturnfulfillment" },
+    { skip: !isValidFulfillmentId }
+  );
   const [triggerGetPurchaseReturnById] = useLazyGetPurchaseReturnByIdQuery();
   const [triggerGetFulfillmentById] = useLazyGetReturnFulfillmentByIdQuery();
 
@@ -661,33 +669,61 @@ export default function ReturnFulfillmentComp() {
       return { name: defaultName, code: defaultCode };
     };
 
-    const clearingAcc = findAccount(
-      ["Purchase Return Clearing", "Return Clearing", "GRNI", "Accrued Purchases", "Clearing"],
-      ["Liability", "Current Liability", "Asset"],
-      "Accrued Purchases / Vendor Return Clearing",
-      "2200"
+    const debitReturnAcc = findAccount(
+      ["Vendor Return / Inventory Adjustment", "Vendor Return", "Inventory Adjustment", "Purchase Return Clearing", "Return Clearing", "Adjustment"],
+      ["Expense", "Asset", "Current Asset", "Liability"],
+      "Vendor Return / Inventory Adjustment",
+      "5010"
     );
 
-    const inventoryAcc = findAccount(
+    const inventoryAssetAcc = findAccount(
       ["Inventory Asset", "Stock Asset", "Inventory", "Finished Goods", "Raw Materials"],
       ["Asset", "Current Asset", "Inventory"],
       "Inventory Asset",
-      "1100"
+      "1200"
     );
 
-    const glImpactEntries = [
-      // 1. DEBIT: Accrued Purchases / Clearing (Fulfillment Accrual)
+    const backendGlEntries = (Array.isArray(journalEntryData?.result?.lines) && journalEntryData.result.lines.length > 0)
+      ? journalEntryData.result.lines.map((l: any) => {
+          const isDebit = Number(l.debit_amount || l.debit || 0) > 0;
+          const rawName = l.account?.account_name || l.account_name || "—";
+          const rawCode = l.account?.account_number || l.account?.account_code || l.account_code || "—";
+
+          let name = rawName;
+          let code = rawCode;
+
+          if (isDebit && (rawName.toLowerCase().includes("bank") || rawName.toLowerCase().includes("cash") || rawName === "—" || rawName.toLowerCase().includes("equity"))) {
+            name = "Vendor Return / Inventory Adjustment";
+            code = "5010";
+          } else if (!isDebit && (rawName.toLowerCase().includes("inventory") || rawName === "—")) {
+            name = "Inventory Asset";
+            code = "1200";
+          }
+
+          return {
+            accountCode: code,
+            accountName: name,
+            debit: Number(l.debit_amount || l.debit || 0),
+            credit: Number(l.credit_amount || l.credit || 0),
+            postingPeriod: (journalEntryData.result.entry_date || "").slice(0, 7) || undefined,
+            memo: l.narration || l.memo || journalEntryData.result.narration || "GL Impact Entry",
+          };
+        })
+      : [];
+
+    const previewGlEntries = [
+      // 1. DEBIT: Vendor Return / Inventory Adjustment
       {
-        accountCode: clearingAcc.code,
-        accountName: clearingAcc.name,
+        accountCode: debitReturnAcc.code,
+        accountName: debitReturnAcc.name,
         debit: totalFulfilledValue > 0 ? totalFulfilledValue : (totalFulfilledQty * 100),
         credit: 0,
-        memo: `Return Fulfillment Outward: Clearing Accrual - Ref #${returnNumberStr}`,
+        memo: `Return Fulfillment Outward - Ref #${returnNumberStr}`,
       },
-      // 2. CREDIT: Inventory Asset Account (Stock Reduction)
+      // 2. CREDIT: Inventory Asset
       {
-        accountCode: inventoryAcc.code,
-        accountName: inventoryAcc.name,
+        accountCode: inventoryAssetAcc.code,
+        accountName: inventoryAssetAcc.name,
         debit: 0,
         credit: totalFulfilledValue > 0 ? totalFulfilledValue : (totalFulfilledQty * 100),
         memo: `Deduct Physical Stock Outward - Ref #${fNoStr}`,
@@ -738,7 +774,7 @@ export default function ReturnFulfillmentComp() {
                     <button
                       type="button"
                       onClick={() => {
-                        navigate(`/debit-note?returnId=${currentReturnIdStr}`);
+                        navigate(`/debit-note?returnId=${currentReturnIdStr}&fulfillmentId=${activeFulfillmentId || activeHeader.id || selectedFulfillment?.id || ""}`);
                       }}
                       className="bg-amber-700 hover:bg-amber-800 text-white text-xs font-semibold px-3 py-1 rounded-xs shadow-2xs transition-colors cursor-pointer flex items-center space-x-1.5"
                     >
@@ -956,7 +992,7 @@ export default function ReturnFulfillmentComp() {
                     content: (
                       <GLImpactSubtab
                         documentNumber={fNoStr}
-                        entries={glImpactEntries}
+                        entries={backendGlEntries.length > 0 ? backendGlEntries : previewGlEntries}
                       />
                     ),
                   },

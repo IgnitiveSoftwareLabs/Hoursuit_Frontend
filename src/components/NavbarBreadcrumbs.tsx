@@ -31,7 +31,9 @@ const breadcrumbNameMap: Record<string, string> = {
   '/purchase-invoice': 'Purchase Bill',
   '/purchase-return': 'Purchase Return',
   '/return-fulfillment': 'Item Return Fulfillment',
-  '/debit-note': 'Debit Note',
+  '/debit-note': 'Vendor Credits',
+  '/vendor-credit': 'Vendor Credits',
+  '/vendor-refund': 'Vendor Refunds',
   '/purchase-payment': 'Purchase Payment',
 };
 

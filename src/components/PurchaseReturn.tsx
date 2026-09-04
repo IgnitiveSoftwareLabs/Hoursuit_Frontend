@@ -1,3 +1,4 @@
+import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Add, Delete, Edit, Print, Search, List as ListIcon, KeyboardArrowDown, KeyboardArrowUp, AssignmentReturn, LocalShipping, ReceiptLong } from "@mui/icons-material";
@@ -165,6 +166,13 @@ export default function PurchaseReturnComp() {
   }, [inventoryItems]);
 
   const [createPurchaseReturn, { isLoading: isCreating }] = useCreatePurchaseReturnMutation();
+  const activeReturnId = (viewMode === "view" || isEdit) ? (selectedReturn?.id || editId) : null;
+  const numReturnId = Number(activeReturnId);
+  const isValidReturnId = Boolean(activeReturnId && !isNaN(numReturnId) && numReturnId > 0);
+  const { data: journalEntryData } = useGetJournalEntryByIdQuery(
+    { id: numReturnId || 0, source: "purchasereturn" },
+    { skip: !isValidReturnId }
+  );
   const [updatePurchaseReturn, { isLoading: isUpdating }] = useUpdatePurchaseReturnMutation();
   const [deletePurchaseReturn] = useDeletePurchaseReturnMutation();
   const [updatePurchaseReturnStatus] = useUpdatePurchaseReturnStatusMutation();
@@ -201,7 +209,6 @@ export default function PurchaseReturnComp() {
   const purchaseReturns = useMemo(() => (Array.isArray(purchaseReturnsData?.result) ? purchaseReturnsData.result : Array.isArray(purchaseReturnsData?.data) ? purchaseReturnsData.data : []), [purchaseReturnsData]);
   const purchaseInvoices = useMemo(() => (Array.isArray(purchaseInvoicesData?.result) ? purchaseInvoicesData.result : Array.isArray(purchaseInvoicesData?.data) ? purchaseInvoicesData.data : []), [purchaseInvoicesData]);
   const invoices = purchaseInvoices;
-  console.log(invoices, "invsdcdfdd")
   const purchasePayments = useMemo(() => (Array.isArray(purchasePaymentsData?.result) ? purchasePaymentsData.result : Array.isArray(purchasePaymentsData?.data) ? purchasePaymentsData.data : []), [purchasePaymentsData]);
   const purchaseOrders = useMemo(() => (Array.isArray(purchaseOrdersData?.result) ? purchaseOrdersData.result : Array.isArray(purchaseOrdersData?.data) ? purchaseOrdersData.data : []), [purchaseOrdersData]);
   const vendors = useMemo(() => (Array.isArray(vendorsData?.result) ? vendorsData.result : Array.isArray(vendorsData?.data) ? vendorsData.data : []), [vendorsData]);
@@ -1067,6 +1074,16 @@ export default function PurchaseReturnComp() {
     }, 0);
 
     const glEntries: GLEntry[] = (() => {
+      if (Array.isArray(journalEntryData?.result?.lines) && journalEntryData.result.lines.length > 0) {
+        return journalEntryData.result.lines.map((l: any) => ({
+          accountCode: l.account?.account_number || l.account?.account_code || l.account_code || "—",
+          accountName: l.account?.account_name || l.account_name || "—",
+          debit: Number(l.debit_amount || l.debit || 0),
+          credit: Number(l.credit_amount || l.credit || 0),
+          postingPeriod: (journalEntryData.result.entry_date || "").slice(0, 7) || undefined,
+          memo: l.narration || l.memo || journalEntryData.result.narration || "GL Impact Entry",
+        }));
+      }
       if (!isView || !selectedReturn) return [];
       const statusVal = String(activeHeader.status || selectedReturn?.status || "").toUpperCase();
 
@@ -1092,11 +1109,11 @@ export default function PurchaseReturnComp() {
         return { name: defaultName, code: defaultCode };
       };
 
-      const clearingAcc = findAccount(
-        ["Purchase Return Clearing", "Return Clearing", "GRNI", "Clearing"],
-        ["Asset", "Current Asset", "Liability", "Current Liability"],
-        "Purchase Return Clearing Account",
-        "2115"
+      const vendorReturnAcc = findAccount(
+        ["Vendor Return / Inventory Adjustment", "Vendor Return", "Inventory Adjustment", "Purchase Return Clearing", "Return Clearing"],
+        ["Expense", "Asset", "Current Asset", "Liability", "Current Liability"],
+        "Vendor Return / Inventory Adjustment",
+        "5010"
       );
 
       const apAcc = findAccount(
@@ -1106,10 +1123,17 @@ export default function PurchaseReturnComp() {
         "2000"
       );
 
+      const inventoryAcc = findAccount(
+        ["Inventory", "Inventory Asset", "Stock Asset"],
+        ["Asset", "Current Asset", "Inventory"],
+        "Inventory",
+        "1200"
+      );
+
       const taxAcc = findAccount(
-        ["Input Tax", "Input GST", "Tax Receivable", "Tax Credit", "GST Input"],
+        ["Input GST", "Input Tax", "Tax Receivable", "Tax Credit", "GST Input"],
         ["Tax", "Current Asset", "Asset"],
-        "Input Tax Receivable",
+        "Input GST",
         "1400"
       );
 
@@ -1124,40 +1148,31 @@ export default function PurchaseReturnComp() {
       if (["FULFILLED", "PARTIALLY_FULFILLED", "RETURNED"].includes(statusVal)) {
         let fulfillmentSubtotal = 0;
         activeLines.forEach((line: any) => {
-          const itemObj = items.find((i: any) => String(i.id) === String(line.itemId || line.item_id));
           const q = Number(line.returnQty || line.return_quantity || line.quantity || 0);
           const p = Number(line.unitPrice || line.unit_price || line.rate || 0);
-          const lineGross = Number((q * p).toFixed(2));
-          if (lineGross <= 0) return;
-          fulfillmentSubtotal += lineGross;
-
-          const invAcc = itemObj?.asset_account_id
-            ? accounts.find((a: any) => String(a.id) === String(itemObj.asset_account_id))
-            : null;
-          const invName = invAcc ? (invAcc.account_name || invAcc.name) : "Inventory Asset Account";
-          const invCode = invAcc ? (invAcc.account_code || invAcc.code || "1200") : "1200";
-
-          // CREDIT: Inventory Asset
-          entries.push({
-            accountCode: invCode,
-            accountName: invName,
-            debit: 0,
-            credit: lineGross,
-            postingPeriod: currentPeriod,
-            memo: `Step 2 Fulfillment: Stock Outward for ${itemObj?.item_name || line.item?.item_name || "Item"} (Qty: ${q})`
-          });
+          fulfillmentSubtotal += Number((q * p).toFixed(2));
         });
 
         fulfillmentSubtotal = Number(fulfillmentSubtotal.toFixed(2));
         if (fulfillmentSubtotal > 0) {
-          // DEBIT: Purchase Return Clearing
-          entries.unshift({
-            accountCode: clearingAcc.code,
-            accountName: clearingAcc.name,
+          // 1. DEBIT: Vendor Return / Inventory Adjustment
+          entries.push({
+            accountCode: vendorReturnAcc.code,
+            accountName: vendorReturnAcc.name,
             debit: fulfillmentSubtotal,
             credit: 0,
             postingPeriod: currentPeriod,
-            memo: `Step 2 Fulfillment: Purchase Return Clearing Accrual`
+            memo: `Step 2 Fulfillment: Vendor Return / Inventory Adjustment`
+          });
+
+          // 2. CREDIT: Inventory Asset
+          entries.push({
+            accountCode: inventoryAcc.code,
+            accountName: inventoryAcc.name,
+            debit: 0,
+            credit: fulfillmentSubtotal,
+            postingPeriod: currentPeriod,
+            memo: `Step 2 Fulfillment: Stock Outward`
           });
         }
       }
@@ -1166,7 +1181,7 @@ export default function PurchaseReturnComp() {
       if (statusVal === "RETURNED") {
         const netTotal = totalReturnAmt > 0 ? totalReturnAmt : Number(activeHeader.totalAmount || activeHeader.total_amount || 0);
         const taxAmt = totalTaxAmt > 0 ? totalTaxAmt : Number(activeHeader.taxAmount || activeHeader.tax_amount || 0);
-        const clearingCredit = Number((netTotal - (taxAmt > 0 ? taxAmt : 0)).toFixed(2));
+        const inventoryCredit = Number((netTotal - (taxAmt > 0 ? taxAmt : 0)).toFixed(2));
 
         // DEBIT: Accounts Payable (Reduces vendor liability for full credit total)
         entries.push({
@@ -1178,7 +1193,19 @@ export default function PurchaseReturnComp() {
           memo: `Step 3 Vendor Credit: Liability reduction with Vendor`
         });
 
-        // CREDIT: Input Tax (GST) Reversal (if GST exists)
+        // CREDIT: Inventory (Inventory Value Reduction)
+        if (inventoryCredit > 0) {
+          entries.push({
+            accountCode: inventoryAcc.code,
+            accountName: inventoryAcc.name,
+            debit: 0,
+            credit: inventoryCredit,
+            postingPeriod: currentPeriod,
+            memo: `Step 3 Vendor Credit: Inventory Reversal`
+          });
+        }
+
+        // CREDIT: Input GST Reversal (if GST exists)
         if (taxAmt > 0) {
           entries.push({
             accountCode: taxAcc.code,
@@ -1186,19 +1213,7 @@ export default function PurchaseReturnComp() {
             debit: 0,
             credit: taxAmt,
             postingPeriod: currentPeriod,
-            memo: `Step 3 Vendor Credit: Input Tax Reversal`
-          });
-        }
-
-        // CREDIT: Purchase Return Clearing (Offsets step 2 accrual)
-        if (clearingCredit > 0) {
-          entries.push({
-            accountCode: clearingAcc.code,
-            accountName: clearingAcc.name,
-            debit: 0,
-            credit: clearingCredit,
-            postingPeriod: currentPeriod,
-            memo: `Step 3 Vendor Credit: Purchase Return Clearing offset`
+            memo: `Step 3 Vendor Credit: Input GST Reversal`
           });
         }
       }

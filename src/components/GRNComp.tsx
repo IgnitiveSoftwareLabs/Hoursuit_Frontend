@@ -1,3 +1,4 @@
+import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Add, Delete, Edit, Search, List as ListIcon, Print, KeyboardArrowDown, KeyboardArrowUp } from "@mui/icons-material";
@@ -140,6 +141,13 @@ const GRNComp: React.FC = () => {
   }, [inventoryItems]);
 
   const [createGRN, { isLoading: isCreating }] = useCreateGRNMutation();
+  const activeGrnId = (viewMode === "view" || isEdit) ? (selectedGRN?.id || editId) : null;
+  const numGrnId = Number(activeGrnId);
+  const isValidGrnId = Boolean(activeGrnId && !isNaN(numGrnId) && numGrnId > 0);
+  const { data: journalEntryData } = useGetJournalEntryByIdQuery(
+    { id: numGrnId || 0, source: "grn" },
+    { skip: !isValidGrnId }
+  );
   const [updateGRN, { isLoading: isUpdating }] = useUpdateGRNMutation();
   const [updateGRNStatus, { isLoading: isUpdatingStatus }] = useUpdateGRNStatusMutation();
   const [deleteGRN] = useDeleteGRNMutation();

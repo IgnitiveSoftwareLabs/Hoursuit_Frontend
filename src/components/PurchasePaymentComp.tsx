@@ -1,3 +1,4 @@
+import { useGetJournalEntryByIdQuery } from "../RTK/services/journalEntryApi";
 import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Add, Search, List as ListIcon } from "@mui/icons-material";
@@ -241,6 +242,10 @@ export default function PurchasePaymentComp() {
           status: values.status || "DRAFT",
           remarks: values.memo || values.remarks || null,
           purchaseInvoiceHeaderId: targetInvId,
+          subsidiary_id: values.subsidiary_id ? Number(values.subsidiary_id) : null,
+          class_id: values.class_id ? Number(values.class_id) : null,
+          department_id: values.department_id ? Number(values.department_id) : null,
+          location_id: values.location_id ? Number(values.location_id) : null,
           user_id: userId,
           paymentLines: linesPayload,
           lines: linesPayload,
@@ -288,6 +293,58 @@ export default function PurchasePaymentComp() {
       }
     },
   });
+
+  const autofillClassAndDepartment = (subId: string) => {
+    if (!subId) {
+      formik.setFieldValue("class_id", "");
+      formik.setFieldValue("department_id", "");
+      return;
+    }
+
+    const matchingClasses = classesList.filter(
+      (c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === String(subId)
+    );
+    if (matchingClasses.length > 0) {
+      formik.setFieldValue("class_id", String(matchingClasses[0].id));
+    } else {
+      const fallbackClass = classesList.find((c: any) => !c.subsidiary_id && !c.subsidiaryId && !c.subsidiary?.id);
+      formik.setFieldValue("class_id", fallbackClass ? String(fallbackClass.id) : (classesList[0]?.id ? String(classesList[0].id) : ""));
+    }
+
+    const matchingDepts = departmentsList.filter(
+      (d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === String(subId)
+    );
+    if (matchingDepts.length > 0) {
+      formik.setFieldValue("department_id", String(matchingDepts[0].id));
+    } else {
+      const fallbackDept = departmentsList.find((d: any) => !d.subsidiary_id && !d.subsidiaryId && !d.subsidiary?.id);
+      formik.setFieldValue("department_id", fallbackDept ? String(fallbackDept.id) : (departmentsList[0]?.id ? String(departmentsList[0].id) : ""));
+    }
+  };
+
+  const handleSubsidiaryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const subId = e.target.value;
+    formik.setFieldValue("subsidiary_id", subId);
+    autofillClassAndDepartment(subId);
+  };
+
+  const availableClasses = useMemo(() => {
+    const subId = formik.values.subsidiary_id;
+    if (!subId) return classesList;
+    const matching = classesList.filter(
+      (c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? c.subsidiary?.id ?? "") === String(subId)
+    );
+    return matching.length > 0 ? matching : classesList;
+  }, [classesList, formik.values.subsidiary_id]);
+
+  const availableDepartments = useMemo(() => {
+    const subId = formik.values.subsidiary_id;
+    if (!subId) return departmentsList;
+    const matching = departmentsList.filter(
+      (d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? d.subsidiary?.id ?? "") === String(subId)
+    );
+    return matching.length > 0 ? matching : departmentsList;
+  }, [departmentsList, formik.values.subsidiary_id]);
 
   // Vendor's Bills List for Apply tab
   const vendorBills = useMemo(() => {
@@ -397,16 +454,20 @@ export default function PurchasePaymentComp() {
       formik.setFieldValue("vendorName", getVendorDisplayName(vObj));
 
       const subId = vObj.subsidiary_id || vObj.subsidiaryId || vObj.primary_subsidiary_id || vObj.primarySubsidiary?.id;
-      if (subId) formik.setFieldValue("subsidiary_id", String(subId));
+      if (subId) {
+        const strSubId = String(subId);
+        formik.setFieldValue("subsidiary_id", strSubId);
+        autofillClassAndDepartment(strSubId);
+      } else {
+        const clsId = vObj.class_id || vObj.classId;
+        if (clsId) formik.setFieldValue("class_id", String(clsId));
+
+        const deptId = vObj.department_id || vObj.departmentId;
+        if (deptId) formik.setFieldValue("department_id", String(deptId));
+      }
 
       const curr = extractCurrencyString(vObj.currency || vObj.currency_code || vObj.currency_id || "INR");
       formik.setFieldValue("currency", curr);
-
-      const clsId = vObj.class_id || vObj.classId;
-      if (clsId) formik.setFieldValue("class_id", String(clsId));
-
-      const deptId = vObj.department_id || vObj.departmentId;
-      if (deptId) formik.setFieldValue("department_id", String(deptId));
 
       const locId = vObj.location_id || vObj.city_id || vObj.primaryAddress?.city_id || vObj.addressBook?.[0]?.city_id;
       if (locId) formik.setFieldValue("location_id", String(locId));
@@ -466,11 +527,30 @@ export default function PurchasePaymentComp() {
           setBillPaymentAmounts({ [String(inv.id || invId)]: amt });
           formik.setFieldValue("totalAmount", amt);
 
-          const subId = header.subsidiary_id;
-          if (subId) formik.setFieldValue("subsidiary_id", String(subId));
-          if (header.class_id) formik.setFieldValue("class_id", String(header.class_id));
-          if (header.department_id) formik.setFieldValue("department_id", String(header.department_id));
-          if (header.location_id) formik.setFieldValue("location_id", String(header.location_id));
+          const subId = header.subsidiary_id || header.subsidiaryId || header.subsidiary?.id;
+          if (subId) {
+            const strSubId = String(subId);
+            formik.setFieldValue("subsidiary_id", strSubId);
+
+            const classIdFromInv = header.class_id || header.classId;
+            if (classIdFromInv) {
+              formik.setFieldValue("class_id", String(classIdFromInv));
+            } else {
+              const matchClass = classesList.find((c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? "") === strSubId);
+              if (matchClass) formik.setFieldValue("class_id", String(matchClass.id));
+              else autofillClassAndDepartment(strSubId);
+            }
+
+            const deptIdFromInv = header.department_id || header.departmentId;
+            if (deptIdFromInv) {
+              formik.setFieldValue("department_id", String(deptIdFromInv));
+            } else {
+              const matchDept = departmentsList.find((d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? "") === strSubId);
+              if (matchDept) formik.setFieldValue("department_id", String(matchDept.id));
+            }
+          }
+
+          if (header.location_id || header.city_id) formik.setFieldValue("location_id", String(header.location_id || header.city_id));
           if (header.currency) formik.setFieldValue("currency", extractCurrencyString(header.currency));
           formik.setFieldValue("memo", `Payment for Bill #${header.invoiceNumber || header.invoice_number || inv.id || invId}`);
         }
@@ -491,11 +571,30 @@ export default function PurchasePaymentComp() {
           setBillPaymentAmounts({ [String(inv.id)]: amt });
           formik.setFieldValue("totalAmount", amt);
 
-          const subId = header.subsidiary_id;
-          if (subId) formik.setFieldValue("subsidiary_id", String(subId));
-          if (header.class_id) formik.setFieldValue("class_id", String(header.class_id));
-          if (header.department_id) formik.setFieldValue("department_id", String(header.department_id));
-          if (header.location_id) formik.setFieldValue("location_id", String(header.location_id));
+          const subId = header.subsidiary_id || header.subsidiaryId || header.subsidiary?.id;
+          if (subId) {
+            const strSubId = String(subId);
+            formik.setFieldValue("subsidiary_id", strSubId);
+
+            const classIdFromInv = header.class_id || header.classId;
+            if (classIdFromInv) {
+              formik.setFieldValue("class_id", String(classIdFromInv));
+            } else {
+              const matchClass = classesList.find((c: any) => String(c.subsidiary_id ?? c.subsidiaryId ?? "") === strSubId);
+              if (matchClass) formik.setFieldValue("class_id", String(matchClass.id));
+              else autofillClassAndDepartment(strSubId);
+            }
+
+            const deptIdFromInv = header.department_id || header.departmentId;
+            if (deptIdFromInv) {
+              formik.setFieldValue("department_id", String(deptIdFromInv));
+            } else {
+              const matchDept = departmentsList.find((d: any) => String(d.subsidiary_id ?? d.subsidiaryId ?? "") === strSubId);
+              if (matchDept) formik.setFieldValue("department_id", String(matchDept.id));
+            }
+          }
+
+          if (header.location_id || header.city_id) formik.setFieldValue("location_id", String(header.location_id || header.city_id));
           if (header.currency) formik.setFieldValue("currency", extractCurrencyString(header.currency));
           formik.setFieldValue("memo", `Payment for Bill #${header.invoiceNumber || header.invoice_number || inv.id}`);
         }
@@ -1297,7 +1396,7 @@ export default function PurchasePaymentComp() {
                   <select
                     name="subsidiary_id"
                     value={formik.values.subsidiary_id || ""}
-                    onChange={formik.handleChange}
+                    onChange={handleSubsidiaryChange}
                     className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-medium"
                   >
                     <option value="">Select Subsidiary...</option>
@@ -1318,9 +1417,9 @@ export default function PurchasePaymentComp() {
                     className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-medium"
                   >
                     <option value="">Select Class...</option>
-                    {classesList.map((c: any) => (
+                    {availableClasses.map((c: any) => (
                       <option key={c.id} value={c.id}>
-                        {c.class_name}
+                        {c.class_name || c.name}
                       </option>
                     ))}
                   </select>
@@ -1352,9 +1451,9 @@ export default function PurchasePaymentComp() {
                     className="h-7 text-xs bg-white border border-slate-300 rounded-xs px-2 focus:outline-none focus:border-sky-500 font-medium"
                   >
                     <option value="">Select Department...</option>
-                    {departmentsList.map((d: any) => (
+                    {availableDepartments.map((d: any) => (
                       <option key={d.id} value={d.id}>
-                        {d.department_name}
+                        {d.department_name || d.name}
                       </option>
                     ))}
                   </select>

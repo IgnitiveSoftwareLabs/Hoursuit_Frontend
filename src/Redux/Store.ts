@@ -52,10 +52,12 @@ import { itemTypeApi } from "../RTK/services/itemTypeApi";
 import { chartOfAccountApi } from "../RTK/services/chartOfAccountApi";
 import { journalEntryApi } from "../RTK/services/journalEntryApi";
 import { debitNoteApi } from "../RTK/services/debitNoteApi";
+import { vendorRefundApi } from "../RTK/services/vendorRefundApi";
 
 import { systemLogApi } from "../RTK/services/systemLogApi";
 import { classApi } from "../RTK/services/classApi";
 import { departmentApi } from "../RTK/services/departmentApi";
+import { transactionOverviewApi } from "../RTK/services/transactionOverviewApi";
 
 // Combine reducers
 const rootReducer = combineReducers({
@@ -108,9 +110,11 @@ const rootReducer = combineReducers({
   [chartOfAccountApi.reducerPath]: chartOfAccountApi.reducer,
   [journalEntryApi.reducerPath]: journalEntryApi.reducer,
   [debitNoteApi.reducerPath]: debitNoteApi.reducer,
+  [vendorRefundApi.reducerPath]: vendorRefundApi.reducer,
   [systemLogApi.reducerPath]: systemLogApi.reducer,
   [classApi.reducerPath]: classApi.reducer,
   [departmentApi.reducerPath]: departmentApi.reducer,
+  [transactionOverviewApi.reducerPath]: transactionOverviewApi.reducer,
   currentUser: currentUserSlice,
   ledger: ledgerSlice,
   voucher: voucherSlice,
@@ -166,10 +170,12 @@ export const store = configureStore({
       chartOfAccountApi.middleware,
       journalEntryApi.middleware,
       debitNoteApi.middleware,
+      vendorRefundApi.middleware,
       registrationTypeApi.middleware,
       systemLogApi.middleware,
       classApi.middleware,
-      departmentApi.middleware
+      departmentApi.middleware,
+      transactionOverviewApi.middleware
     ),
 });
 

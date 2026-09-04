@@ -46,6 +46,7 @@ import PurchaseInvoicePage from "./Pages/PurchaseInvoicePage";
 import PurchasePaymentPage from "./Pages/PurchasePaymentPage";
 import PurchaseReturnPage from "./Pages/PurchaseReturnPage";
 import DebitNotePage from "./Pages/DebitNotePage";
+import VendorRefundPage from "./Pages/VendorRefundPage";
 import ReturnFulfillmentPage from "./Pages/ReturnFulfillmentPage";
 import PanAvailibilityPage from "./Pages/PanAvailibityPage";
 import ChartOfAccountPage from "./Pages/ChartOfAccountPage";
@@ -76,6 +77,7 @@ import DepartmentMasterPage from "./Pages/DepartmentPage";
 import UOMPage from "./Pages/UOMPages";
 import GRNPage from "./Pages/GRNPages";
 import NetSuiteVendorDemo from "./components/Demo/NetSuiteVendorDemo";
+import TransactionOverviewPage from "./Pages/TransactionOverviewPage";
 
 function App() {
   return (
@@ -94,6 +96,32 @@ function App() {
           element={
             <PrivateRoute>
               <Dashboard />
+            </PrivateRoute>
+          }
+        />
+
+        {/* Transactions Overview - Available to all authenticated users */}
+        <Route
+          path="/transactions"
+          element={
+            <PrivateRoute>
+              <TransactionOverviewPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/transactions-overview"
+          element={
+            <PrivateRoute>
+              <TransactionOverviewPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/transaction-overview"
+          element={
+            <PrivateRoute>
+              <TransactionOverviewPage />
             </PrivateRoute>
           }
         />
@@ -710,6 +738,26 @@ function App() {
             <PrivateRoute>
               <ProtectedRoute module="debit_note" action="read">
                 <DebitNotePage />
+              </ProtectedRoute>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/vendor-credit"
+          element={
+            <PrivateRoute>
+              <ProtectedRoute module="debit_note" action="read">
+                <DebitNotePage />
+              </ProtectedRoute>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/vendor-refund"
+          element={
+            <PrivateRoute>
+              <ProtectedRoute module="debit_note" action="read">
+                <VendorRefundPage />
               </ProtectedRoute>
             </PrivateRoute>
           }
