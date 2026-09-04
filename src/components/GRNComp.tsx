@@ -154,11 +154,27 @@ const GRNComp: React.FC = () => {
   const [triggerGetGRNById] = useLazyGetGRNByIdQuery();
   const [triggerGetPOById] = useLazyGetPurchaseOrderByIdQuery();
 
-  const handleSubmitWithStatus = (status: string) => {
-    formik.setFieldValue("header.status", status);
-    setTimeout(() => {
-      formik.handleSubmit();
-    }, 0);
+  const handleSubmitWithStatus = async (status: string) => {
+    await formik.setFieldValue("header.status", status);
+    const errors = await formik.validateForm();
+    if (errors && Object.keys(errors).length > 0) {
+      if (errors.header) {
+        const firstErrKey = Object.keys(errors.header)[0];
+        const firstErrMsg = (errors.header as any)[firstErrKey];
+        toast.error(`Header: ${firstErrMsg}`);
+        return;
+      }
+      if (errors.lineItems) {
+        toast.error("Please ensure line items are filled correctly.");
+        return;
+      }
+    }
+    const selectedLines = formik.values.lineItems.filter((l: any) => l.isSelected !== false && Number(l.receivedQty || 0) > 0);
+    if (selectedLines.length === 0) {
+      toast.error("Please select at least one line item with a received quantity > 0.");
+      return;
+    }
+    formik.handleSubmit();
   };
 
   const createDefaultLineItem = () => ({
@@ -370,18 +386,18 @@ const GRNComp: React.FC = () => {
         vendor_id: Yup.string().required("Vendor is required"),
         purchaseOrderId: Yup.string().required("Purchase Order Reference is required"),
         grnDate: Yup.date().required("GRN Date is required"),
-        location_id: Yup.string().required("Location is required"),
+        location_id: Yup.string().nullable(),
       }),
       lineItems: Yup.array().of(
-        Yup.object({
-          itemId: Yup.string().required("Item is required"),
-          receivedQty: Yup.number().min(0.0001, "Received Qty must be > 0").required("Received Qty is required"),
+        Yup.object().shape({
+          itemId: Yup.string().nullable(),
+          receivedQty: Yup.number().nullable(),
         })
-      ).min(1, "At least one item line is required"),
+      ),
     }),
     onSubmit: async (values) => {
       try {
-        // Enforce Received Qty <= Open PO Qty and Accepted/Rejected rules
+        // Enforce Received Qty <= Open PO Qty
         const selectedLines = values.lineItems.filter((l: any) => l.isSelected !== false && Number(l.receivedQty || 0) > 0);
         if (selectedLines.length === 0) {
           toast.error("Please select at least one line item with a received quantity > 0.");
@@ -392,15 +408,13 @@ const GRNComp: React.FC = () => {
           const line = selectedLines[i];
           const uomObj = uoms.find((u: any) => String(u.id) === String(line.uom_id));
           if (uomObj && !isDecimalAllowedForUOM(uomObj)) {
-            if (Number(line.receivedQty) % 1 !== 0 || Number(line.acceptedQty) % 1 !== 0 || Number(line.rejectedQty) % 1 !== 0) {
+            if (Number(line.receivedQty) % 1 !== 0) {
               toast.error(`Line ${i + 1}: Quantities for UOM '${uomObj.uom_name}' cannot contain decimals.`);
               return;
             }
           }
           const maxRec = Number(line.remainingQty != null && Number(line.remainingQty) >= 0 ? line.remainingQty : line.orderedQty || 0);
           const recQty = Number(line.receivedQty || 0);
-          const accQty = Number(line.acceptedQty || 0);
-          const rejQty = Number(line.rejectedQty || 0);
 
           if (recQty <= 0) {
             toast.error(`Line ${i + 1}: Received Quantity must be greater than 0.`);
@@ -410,23 +424,33 @@ const GRNComp: React.FC = () => {
             toast.error(`Line ${i + 1}: Received Quantity (${recQty}) exceeds Remaining Open Quantity (${maxRec}).`);
             return;
           }
-          if (accQty > recQty) {
-            toast.error(`Line ${i + 1}: Accepted Quantity (${accQty}) cannot exceed Received Quantity (${recQty}).`);
-            return;
-          }
-          if (rejQty > recQty) {
-            toast.error(`Line ${i + 1}: Rejected Quantity (${rejQty}) cannot exceed Received Quantity (${recQty}).`);
-            return;
-          }
-          if (accQty + rejQty > recQty) {
-            toast.error(`Line ${i + 1}: The sum of Accepted Quantity (${accQty}) and Rejected Quantity (${rejQty}) cannot exceed Received Quantity (${recQty}).`);
-            return;
-          }
         }
 
+        const resolvedLocationId = values.header.location_id || (filteredLocations.length > 0 ? filteredLocations[0].id : undefined);
+
         const payload = {
-          header: values.header,
-          lineItems: selectedLines,
+          header: {
+            ...values.header,
+            location_id: resolvedLocationId,
+          },
+          lineItems: selectedLines.map((l: any) => {
+            const rec = Number(l.receivedQty || 0);
+            return {
+              purchaseOrderLineId: l.purchaseOrderLineId ? Number(l.purchaseOrderLineId) : undefined,
+              itemId: Number(l.itemId || l.item_id),
+              locationId: l.locationId ? Number(l.locationId) : (resolvedLocationId ? Number(resolvedLocationId) : undefined),
+              onHand: Number(l.onHand || 0),
+              orderedQty: Number(l.orderedQty || 0),
+              receivedQty: rec,
+              acceptedQty: rec,
+              rejectedQty: 0,
+              manufacturingDate: l.manufacturingDate || null,
+              expiryDate: l.expiryDate || null,
+              qcRequired: Boolean(l.qcRequired),
+              status: l.status || "PENDING",
+              remarks: l.remarks || "",
+            };
+          }),
         };
 
         let savedGrnId = editId;
@@ -538,8 +562,10 @@ const GRNComp: React.FC = () => {
 
             const poLines = getPoLineItems(po);
             if (poLines.length > 0) {
-              const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line, po.id));
-              formik.setFieldValue("lineItems", mappedLines);
+              const mappedLines = poLines
+                .map((line: any) => mapPoLineToGrnLine(line, po.id))
+                .filter((l: any) => Number(l.remainingQty) > 0);
+              formik.setFieldValue("lineItems", mappedLines.length > 0 ? mappedLines : [createDefaultLineItem()]);
             }
           }
         })
@@ -564,8 +590,10 @@ const GRNComp: React.FC = () => {
 
         const poLines = getPoLineItems(selectedPo);
         if (poLines.length > 0) {
-          const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line, selectedPoId));
-          formik.setFieldValue("lineItems", mappedLines);
+          const mappedLines = poLines
+            .map((line: any) => mapPoLineToGrnLine(line, selectedPoId))
+            .filter((l: any) => Number(l.remainingQty) > 0);
+          formik.setFieldValue("lineItems", mappedLines.length > 0 ? mappedLines : [createDefaultLineItem()]);
         }
 
         const vId = selectedPo.vendor_id || selectedPo.vendorId || selectedPo.vendor?.id;
@@ -586,8 +614,10 @@ const GRNComp: React.FC = () => {
 
         const poLines = getPoLineItems(selectedPo);
         if (poLines.length > 0) {
-          const mappedLines = poLines.map((line: any) => mapPoLineToGrnLine(line, selectedPoId));
-          formik.setFieldValue("lineItems", mappedLines);
+          const mappedLines = poLines
+            .map((line: any) => mapPoLineToGrnLine(line, selectedPoId))
+            .filter((l: any) => Number(l.remainingQty) > 0);
+          formik.setFieldValue("lineItems", mappedLines.length > 0 ? mappedLines : [createDefaultLineItem()]);
         }
 
         const vId = selectedPo.vendor_id || selectedPo.vendorId || selectedPo.vendor?.id;
@@ -634,60 +664,13 @@ const GRNComp: React.FC = () => {
         toast.error(`Received Quantity (${numVal}) cannot exceed Remaining Open Quantity (${maxRec}).`);
       }
 
-      const currentRejected = Math.max(0, Number(currentLine.rejectedQty || 0));
-      let newAccepted = numVal;
-      let newRejected = 0;
-      if (currentRejected > 0 && currentRejected <= numVal) {
-        newRejected = currentRejected;
-        newAccepted = Number((numVal - currentRejected).toFixed(2));
-      } else {
-        newAccepted = numVal;
-        newRejected = 0;
-      }
-
       const updatedLine = {
         ...currentLine,
         receivedQty: newValue,
-        acceptedQty: newAccepted,
-        rejectedQty: newRejected,
+        acceptedQty: numVal,
+        rejectedQty: 0,
       };
       lineItems[index] = updatedLine;
-      formik.setFieldValue("lineItems", lineItems);
-      return;
-    }
-
-    if (field === "acceptedQty") {
-      const recQty = Math.max(0, Number(currentLine.receivedQty || 0));
-      if (newValue === "") {
-        lineItems[index] = { ...currentLine, acceptedQty: "", rejectedQty: recQty };
-        formik.setFieldValue("lineItems", lineItems);
-        return;
-      }
-      let numVal = Math.max(0, Number(newValue));
-      if (numVal > recQty) {
-        numVal = recQty;
-        toast.error(`Accepted Quantity (${numVal}) cannot exceed Received Quantity (${recQty}).`);
-      }
-      const newRejected = Math.max(0, Number((recQty - numVal).toFixed(2)));
-      lineItems[index] = { ...currentLine, acceptedQty: numVal, rejectedQty: newRejected };
-      formik.setFieldValue("lineItems", lineItems);
-      return;
-    }
-
-    if (field === "rejectedQty") {
-      const recQty = Math.max(0, Number(currentLine.receivedQty || 0));
-      if (newValue === "") {
-        lineItems[index] = { ...currentLine, rejectedQty: "", acceptedQty: recQty };
-        formik.setFieldValue("lineItems", lineItems);
-        return;
-      }
-      let numVal = Math.max(0, Number(newValue));
-      if (numVal > recQty) {
-        numVal = recQty;
-        toast.error(`Rejected Quantity (${numVal}) cannot exceed Received Quantity (${recQty}).`);
-      }
-      const newAccepted = Math.max(0, Number((recQty - numVal).toFixed(2)));
-      lineItems[index] = { ...currentLine, rejectedQty: numVal, acceptedQty: newAccepted };
       formik.setFieldValue("lineItems", lineItems);
       return;
     }
@@ -993,8 +976,6 @@ const GRNComp: React.FC = () => {
                           <th className="p-2 border-r border-slate-400 w-24 text-right">PREV REC</th>
                           <th className="p-2 border-r border-slate-400 w-28 text-right bg-[#176B87]/90 text-amber-200">OPEN REMAINING</th>
                           <th className="p-2 border-r border-slate-400 w-28 text-right">REC QTY *</th>
-                          <th className="p-2 border-r border-slate-400 w-24 text-right">ACCEPTED QTY</th>
-                          <th className="p-2 border-r border-slate-400 w-24 text-right">REJECTED QTY</th>
                           <th className="p-2 min-w-[140px]">REMARKS</th>
                         </tr>
                       </thead>
@@ -1023,8 +1004,6 @@ const GRNComp: React.FC = () => {
                                 <td className="p-2 border-r border-slate-200 text-right font-mono text-slate-600">{alreadyRec}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-sky-800 bg-sky-50">{remaining}</td>
                                 <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-sky-800">{line.receivedQty ?? line.received_quantity ?? 0}</td>
-                                <td className="p-2 border-r border-slate-200 text-right font-mono text-emerald-700">{line.acceptedQty ?? line.accepted_quantity ?? 0}</td>
-                                <td className="p-2 border-r border-slate-200 text-right font-mono text-red-600">{line.rejectedQty ?? line.rejected_quantity ?? 0}</td>
                                 <td className="p-2 text-slate-700">{line.remarks || "—"}</td>
                               </tr>
                             );
@@ -1095,40 +1074,6 @@ const GRNComp: React.FC = () => {
                                   }}
                                   onChange={(e) => updateGrnLineField(idx, "receivedQty", e.target.value)}
                                   className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 font-bold text-sky-900 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
-                                />
-                              </td>
-                              <td className="p-1.5 border-r border-slate-200">
-                                <input
-                                  type="number"
-                                  disabled={!isLineChecked}
-                                  step={allowsDecimals ? "any" : "1"}
-                                  min="0"
-                                  max={line.receivedQty}
-                                  value={line.acceptedQty}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+" || (!allowsDecimals && (e.key === "." || e.key === ","))) {
-                                      e.preventDefault();
-                                    }
-                                  }}
-                                  onChange={(e) => updateGrnLineField(idx, "acceptedQty", e.target.value)}
-                                  className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 font-semibold text-emerald-700 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
-                                />
-                              </td>
-                              <td className="p-1.5 border-r border-slate-200">
-                                <input
-                                  type="number"
-                                  disabled={!isLineChecked}
-                                  step={allowsDecimals ? "any" : "1"}
-                                  min="0"
-                                  max={line.receivedQty}
-                                  value={line.rejectedQty}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "-" || e.key === "e" || e.key === "E" || e.key === "+" || (!allowsDecimals && (e.key === "." || e.key === ","))) {
-                                      e.preventDefault();
-                                    }
-                                  }}
-                                  onChange={(e) => updateGrnLineField(idx, "rejectedQty", e.target.value)}
-                                  className={`w-full h-7 border border-slate-300 rounded-xs px-2 text-xs text-right font-mono focus:outline-none focus:border-sky-500 text-red-600 ${!isLineChecked ? "bg-slate-100 cursor-not-allowed" : "bg-white"}`}
                                 />
                               </td>
                               <td className="p-1.5">

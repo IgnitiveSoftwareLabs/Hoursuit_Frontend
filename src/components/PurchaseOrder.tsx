@@ -88,7 +88,55 @@ const PurchaseOrderComp: React.FC = () => {
 
   const isGrnCompletedForPo = (po: any) => {
     if (!po) return false;
+    const status = String(po.status || po.header?.status || "").toUpperCase();
+    if (status === "DRAFT" || status === "CANCELLED") return false;
+    if (po.receiptSummary?.isFullyReceived !== undefined) {
+      return Boolean(po.receiptSummary.isFullyReceived);
+    }
+    const poLines = po.purchaseOrderLines || po.line_items || po.lineItems || [];
+    if (poLines.length === 0) return status === "COMPLETED";
+    let totalOrdered = 0;
+    let totalReceived = 0;
+    poLines.forEach((l: any) => {
+      const lineId = String(l.id || l.purchaseOrderLineId || "");
+      const itemId = String(l.item_id || l.itemId || l.item?.id || "");
+      const ord = Number(l.quantity || l.qty || 0);
+      totalOrdered += ord;
+
+      if (l.receivedQuantity !== undefined && l.receivedQuantity !== null) {
+        totalReceived += Number(l.receivedQuantity);
+      } else {
+        let rec = 0;
+        grnsList.forEach((g: any) => {
+          if (String(g?.status || "").toUpperCase() === "CANCELLED") return;
+          const gPoId = String(g.purchaseOrderId || g.purchase_order_id || g.poHeaderId || g.purchaseOrder?.id || g.header?.purchaseOrderId || "");
+          const gPoNo = String(g.purchaseOrderNo || g.purchase_order_no || g.purchaseOrder?.purchaseNo || "");
+          if (gPoId === String(po.id) || (po.purchaseNo && gPoNo === String(po.purchaseNo))) {
+            const gLines = g.lineItems || g.grnLines || g.grnDetails || g.lines || g.details || [];
+            gLines.forEach((gl: any) => {
+              const glPoLineId = String(gl.purchaseOrderLineId || gl.po_line_id || gl.purchase_order_line_id || "");
+              const glItemId = String(gl.itemId || gl.item_id || gl.item?.id || "");
+              if ((lineId && glPoLineId === lineId) || (!lineId && glItemId === itemId)) {
+                rec += Number(gl.receivedQty ?? gl.received_qty ?? gl.receivedQuantity ?? gl.quantity ?? gl.acceptedQty ?? gl.accepted_quantity ?? 0);
+              }
+            });
+          }
+        });
+        totalReceived += rec;
+      }
+    });
+    if (totalOrdered > 0) {
+      return totalReceived >= totalOrdered;
+    }
+    return status === "COMPLETED";
+  };
+
+  const hasAnyGrnForPo = (po: any) => {
+    if (!po) return false;
+    const status = String(po.status || po.header?.status || "").toUpperCase();
+    if (status === "PARTIAL_RECEIVED" || status === "COMPLETED") return true;
     return grnsList.some((g: any) => {
+      if (String(g?.status || "").toUpperCase() === "CANCELLED") return false;
       const gPoId = String(g.purchaseOrderId || g.purchase_order_id || g.poHeaderId || g.purchaseOrder?.id || "");
       const gPoNo = String(g.purchaseOrderNo || g.purchase_order_no || "");
       return gPoId === String(po.id) || (po.purchaseNo && gPoNo === String(po.purchaseNo));
@@ -1010,20 +1058,20 @@ const PurchaseOrderComp: React.FC = () => {
                     </table>
                   </div>
 
-                    <div className="flex justify-between items-center pt-2">
-                      <button
-                        type="button"
-                        disabled={!formik.values.header.vendor_id}
-                        onClick={handleAddLineItem}
-                        className={`text-white text-xs font-semibold px-3 py-1.5 rounded-xs transition-colors flex items-center space-x-1 ${!formik.values.header.vendor_id
-                          ? "bg-slate-400 cursor-not-allowed opacity-60"
-                          : "bg-slate-700 hover:bg-slate-800 cursor-pointer"
-                          }`}
-                        title={!formik.values.header.vendor_id ? "Select a Vendor first" : "Add Line Item"}
-                      >
-                        <Add className="!w-4 !h-4" />
-                        <span>Add Line Item</span>
-                      </button>
+                  <div className="flex justify-between items-center pt-2">
+                    <button
+                      type="button"
+                      disabled={!formik.values.header.vendor_id}
+                      onClick={handleAddLineItem}
+                      className={`text-white text-xs font-semibold px-3 py-1.5 rounded-xs transition-colors flex items-center space-x-1 ${!formik.values.header.vendor_id
+                        ? "bg-slate-400 cursor-not-allowed opacity-60"
+                        : "bg-slate-700 hover:bg-slate-800 cursor-pointer"
+                        }`}
+                      title={!formik.values.header.vendor_id ? "Select a Vendor first" : "Add Line Item"}
+                    >
+                      <Add className="!w-4 !h-4" />
+                      <span>Add Line Item</span>
+                    </button>
 
                     {typeof formik.errors.lineItems === "string" && (
                       <span className="text-xs text-red-600 font-medium bg-red-50 px-2.5 py-1 border border-red-200 rounded-xs">
@@ -1383,13 +1431,14 @@ const PurchaseOrderComp: React.FC = () => {
     // const isReceivedOrCompleted = statusStr === "PARTIAL_RECEIVED" || statusStr === "COMPLETED";
 
     const isPoGrnDone = isGrnCompletedForPo(selectedPO);
+    const hasGrnReceipt = hasAnyGrnForPo(selectedPO);
     const isPoBillDone = isBillCompletedForPo(selectedPO);
     const isPoPaymentDone = isPaymentCompletedForPo(selectedPO);
 
     const canShowReceive = !isDraft && !isPoGrnDone;
-    const canShowBill = !isDraft && isPoGrnDone && !isPoBillDone;
+    const canShowBill = !isDraft && hasGrnReceipt && !isPoBillDone;
     const canShowPayment = !isDraft && isPoBillDone && !isPoPaymentDone;
-    const canShowReturn = !isDraft && isPoGrnDone;
+    const canShowReturn = !isDraft && hasGrnReceipt;
 
     const poIdStr = String(selectedPO.id);
     const poNumStr = String(poHeader.purchaseNo || "");
@@ -1397,14 +1446,14 @@ const PurchaseOrderComp: React.FC = () => {
     const relatedGrns = grnsList.filter((g: any) => {
       const gPoId = String(g.purchaseOrderId || g.purchase_order_id || g.poHeaderId || g.purchaseOrder?.id || "");
       const gPoNo = String(g.purchaseOrderNo || g.purchase_order_no || "");
-      return gPoId === poIdStr || (poNumStr && gPoNo === poNumStr);
+      return (gPoId === poIdStr || (poNumStr && gPoNo === poNumStr)) && String(g?.status || "").toUpperCase() !== "CANCELLED";
     });
 
     const relatedBills = invoicesList.filter((inv: any) => {
       const invPoId = String(inv.poHeaderId || inv.purchase_order_id || inv.header?.poHeaderId || "");
       const invGrnId = String(inv.grnHeaderId || inv.header?.grnHeaderId || "");
       const isLinkedGrn = relatedGrns.some((g: any) => String(g.id) === invGrnId);
-      return invPoId === poIdStr || isLinkedGrn;
+      return (invPoId === poIdStr || isLinkedGrn) && String(inv?.status || "").toUpperCase() !== "CANCELLED";
     });
 
     const relatedReturns = returnsList.filter((pr: any) => {
@@ -1413,7 +1462,7 @@ const PurchaseOrderComp: React.FC = () => {
       const prBillId = String(pr.purchaseInvoiceHeaderId || pr.purchase_invoice_header_id || pr.billId || "");
       const isLinkedGrn = relatedGrns.some((g: any) => String(g.id) === prGrnId);
       const isLinkedBill = relatedBills.some((b: any) => String(b.id) === prBillId);
-      return prPoId === poIdStr || isLinkedGrn || isLinkedBill;
+      return (prPoId === poIdStr || isLinkedGrn || isLinkedBill) && String(pr?.status || "").toUpperCase() !== "CANCELLED";
     });
 
     const relatedPayments = paymentsList.filter((p: any) => {
@@ -1421,8 +1470,18 @@ const PurchaseOrderComp: React.FC = () => {
       const pPoId = String(h.poHeaderId || h.purchase_order_id || h.po_id || "");
       const pBillId = String(h.purchaseInvoiceHeaderId || h.purchase_invoice_header_id || h.billId || "");
       const isLinkedBill = relatedBills.some((b: any) => String(b.id) === pBillId);
-      return pPoId === poIdStr || isLinkedBill;
+      return (pPoId === poIdStr || isLinkedBill) && String(h?.status || "").toUpperCase() !== "CANCELLED";
     });
+
+    const totalBilledAmount = relatedBills.reduce((acc: number, inv: any) => {
+      const h = inv.header ?? inv;
+      return acc + Number(h.totalAmount || h.total_amount || 0);
+    }, 0);
+    const totalPaidAmount = relatedBills.reduce((acc: number, inv: any) => {
+      const h = inv.header ?? inv;
+      return acc + Number(h.paidAmount || h.paid_amount || 0);
+    }, 0);
+    const totalDueAmount = Math.max(0, totalBilledAmount - totalPaidAmount);
 
     return (
       <RecordPageLayout
@@ -1512,30 +1571,67 @@ const PurchaseOrderComp: React.FC = () => {
                     <thead className="bg-[#1d3e4c] text-white font-bold uppercase text-[10px]">
                       <tr>
                         <th className="p-2 border-r border-slate-400 w-10 text-center">#</th>
-                        <th className="p-2 border-r border-slate-400 min-w-[160px]">ITEM</th>
-                        <th className="p-2 border-r border-slate-400 min-w-[160px]">DESCRIPTION</th>
-                        <th className="p-2 border-r border-slate-400 min-w-[80px]">UNITS</th>
-                        <th className="p-2 border-r border-slate-400 w-20 text-right">QUANTITY</th>
+                        <th className="p-2 border-r border-slate-400 min-w-[150px]">ITEM</th>
+                        <th className="p-2 border-r border-slate-400 min-w-[150px]">DESCRIPTION</th>
+                        <th className="p-2 border-r border-slate-400 min-w-[70px]">UNITS</th>
+                        <th className="p-2 border-r border-slate-400 w-20 text-right">ORDERED</th>
+                        <th className="p-2 border-r border-slate-400 w-20 text-right">RECEIVED</th>
+                        <th className="p-2 border-r border-slate-400 w-20 text-right">BILLED</th>
+                        <th className="p-2 border-r border-slate-400 w-20 text-right">OPEN QTY</th>
                         <th className="p-2 border-r border-slate-400 w-24 text-right">RATE (₹)</th>
                         <th className="p-2 border-r border-slate-400 w-20 text-right">DISC %</th>
                         <th className="p-2 border-r border-slate-400 w-24 text-right">DISC AMT (₹)</th>
                         <th className="p-2 border-r border-slate-400 w-28 text-right">SUBTOTAL (₹)</th>
                         <th className="p-2 border-r border-slate-400 w-20 text-right">TAX RATE</th>
                         <th className="p-2 border-r border-slate-400 w-24 text-right">TAX AMT (₹)</th>
+                        <th className="p-2 border-r border-slate-400 w-28 text-right">BILLED AMT (₹)</th>
                         <th className="p-2 w-28 text-right">TOTAL (₹)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       {poLines.length === 0 ? (
                         <tr>
-                          <td colSpan={12} className="p-4 text-center text-slate-400 italic">No line items in this order.</td>
+                          <td colSpan={16} className="p-4 text-center text-slate-400 italic">No line items in this order.</td>
                         </tr>
                       ) : (
                         poLines.map((l: any, idx: number) => {
                           const itemObj = items.find((i: any) => String(i.id) === String(l.item_id || l.itemId));
                           const uomObj = uoms.find((u: any) => String(u.id) === String(l.uom_id || l.uomId));
+                          const lineId = String(l.id || l.purchaseOrderLineId || "");
+                          const itemId = String(l.item_id || l.itemId || l.item?.id || "");
                           const lineQty = Number(l.quantity || l.qty || 0);
                           const lineRate = Number(l.rate || l.unitPrice || 0);
+
+                          let lineRec = 0;
+                          if (l.receivedQuantity !== undefined && l.receivedQuantity !== null) {
+                            lineRec = Number(l.receivedQuantity);
+                          } else {
+                            relatedGrns.forEach((g: any) => {
+                              const gLines = g.lineItems || g.grnLines || g.grnDetails || g.lines || g.details || [];
+                              gLines.forEach((gl: any) => {
+                                const glPoLineId = String(gl.purchaseOrderLineId || gl.po_line_id || gl.purchase_order_line_id || "");
+                                const glItemId = String(gl.itemId || gl.item_id || gl.item?.id || "");
+                                if ((lineId && glPoLineId === lineId) || (!lineId && glItemId === itemId)) {
+                                  lineRec += Number(gl.receivedQty ?? gl.received_qty ?? gl.receivedQuantity ?? gl.quantity ?? gl.acceptedQty ?? gl.accepted_quantity ?? 0);
+                                }
+                              });
+                            });
+                          }
+
+                          let lineBilled = 0;
+                          relatedBills.forEach((inv: any) => {
+                            const invLines = inv.lineItems || inv.purchaseInvoiceLines || inv.lines || inv.details || [];
+                            invLines.forEach((il: any) => {
+                              const ilPoLineId = String(il.purchaseOrderLineId || il.po_line_id || il.poLineId || "");
+                              const ilItemId = String(il.itemId || il.item_id || il.item?.id || "");
+                              if ((lineId && ilPoLineId === lineId) || (!lineId && ilItemId === itemId)) {
+                                lineBilled += Number(il.quantity || il.qty || il.billedQty || 0);
+                              }
+                            });
+                          });
+
+                          const lineBilledAmount = lineBilled * lineRate;
+                          const lineOpen = Math.max(0, lineQty - lineRec);
                           const lineGross = lineQty * lineRate;
                           const lineDiscPercent = Number(l.discount_percent ?? l.discountPercent ?? 0);
                           const lineDiscAmt = l.discount_amount != null ? Number(l.discount_amount) : ((lineGross * lineDiscPercent) / 100);
@@ -1558,12 +1654,20 @@ const PurchaseOrderComp: React.FC = () => {
                                 {l.uom?.uom_name || uomObj?.uom_name || "—"}
                               </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold">{lineQty}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-emerald-700">{lineRec}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-indigo-700">{lineBilled}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold">
+                                <span className={`px-1.5 py-0.5 rounded text-[11px] ${lineOpen === 0 ? "bg-slate-100 text-slate-500 font-normal" : "bg-sky-100 text-sky-800 font-bold"}`}>
+                                  {lineOpen}
+                                </span>
+                              </td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lineRate.toFixed(2)}</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">{lineDiscPercent}%</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lineDiscAmt.toFixed(2)}</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono font-semibold">₹{lineSubtotal.toFixed(2)}</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">{lineTaxRate}%</td>
                               <td className="p-2 border-r border-slate-200 text-right font-mono">₹{lineTaxAmt.toFixed(2)}</td>
+                              <td className="p-2 border-r border-slate-200 text-right font-mono font-bold text-indigo-900">₹{lineBilledAmount.toFixed(2)}</td>
                               <td className="p-2 text-right font-mono font-bold text-slate-900">₹{lineTotal.toFixed(2)}</td>
                             </tr>
                           );
@@ -1603,9 +1707,9 @@ const PurchaseOrderComp: React.FC = () => {
                       <tbody className="divide-y divide-slate-200">
                         {relatedGrns.map((g: any) => {
                           const gHeader = g.header ?? g;
-                          const gLines = g.grnLines || g.lines || [];
-                          const totalRec = gLines.reduce((acc: number, l: any) => acc + Number(l.receivedQty || l.received_qty || 0), 0);
-                          const gNo = gHeader.grnNumber || gHeader.grn_number || `GRN-${g.id}`;
+                          const gLines = g.lineItems || g.grnLines || g.grnDetails || g.lines || g.details || [];
+                          const totalRec = gLines.reduce((acc: number, l: any) => acc + Number(l.receivedQty ?? l.received_qty ?? l.receivedQuantity ?? l.quantity ?? l.acceptedQty ?? l.accepted_quantity ?? 0), 0);
+                          const gNo = gHeader.grnNo || gHeader.grnNumber || gHeader.grn_number || g.grnNo || `GRN-${g.id}`;
                           return (
                             <tr key={g.id} className="hover:bg-slate-50">
                               <td className="p-2 border-r border-slate-200 font-bold text-sky-700 font-mono">{gNo}</td>
@@ -1904,9 +2008,21 @@ const PurchaseOrderComp: React.FC = () => {
                   <span className="font-semibold text-slate-600 uppercase text-[10px]">TAX TOTAL</span>
                   <span className="font-bold text-slate-900">₹{taxTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                 </div>
-                <div className="flex justify-between items-center pt-1 text-sm">
-                  <span className="font-bold text-slate-800 uppercase text-[11px]">TOTAL</span>
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1 text-sm">
+                  <span className="font-bold text-slate-800 uppercase text-[11px]">PO TOTAL</span>
                   <span className="font-bold text-slate-900">₹{grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1 text-indigo-700">
+                  <span className="font-semibold uppercase text-[10px]">TOTAL BILLED</span>
+                  <span className="font-bold">₹{totalBilledAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1 text-emerald-700">
+                  <span className="font-semibold uppercase text-[10px]">TOTAL PAID</span>
+                  <span className="font-bold">₹{totalPaidAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex justify-between items-center pt-1 text-amber-800">
+                  <span className="font-bold uppercase text-[11px]">DUE AMOUNT</span>
+                  <span className="font-bold">₹{totalDueAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
                 </div>
               </div>
             </div>
